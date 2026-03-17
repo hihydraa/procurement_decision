@@ -5,7 +5,7 @@ SHEET_ID = "1JNrYTJtmgpOGjdfhIdJKz15i8Jxp-u8r1UFAXuQRs8s"
 GIDS = {
     'NYMEX': '1915076819',
     'MOPS': '739092564',
-    'EPPO': 'เ625314144',
+    'EPPO': '625314144',
     'SETTING': '352342695',
     'Inventory': '1983607313',
     'WTI':'1880473564'
