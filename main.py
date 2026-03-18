@@ -687,7 +687,7 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
       --primary: #0d6efd;
     }}
     * {{ box-sizing: border-box; }}
-    body {{ margin:0; font-family: Arial, Helvetica, sans-serif; background:var(--bg); color:var(--text);} }
+    body {{ margin:0; font-family: Arial, Helvetica, sans-serif; background:var(--bg); color:var(--text); }}
     .container {{ max-width: 1260px; margin: 0 auto; padding: 24px; }}
     .hero {{ background: linear-gradient(135deg, #0f172a, #1d4ed8); color:#fff; border-radius: 24px; padding: 28px; margin-bottom: 24px; }}
     .hero-grid {{ display:grid; grid-template-columns: 1.5fr 1fr; gap:20px; }}
