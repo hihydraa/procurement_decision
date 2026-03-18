@@ -2,7 +2,7 @@ name: Update Oil Price Dashboard
 
 on:
   schedule:
-    - cron: '0 10 * * *'
+    - cron: '0 0,6,10,14 * * *'
   workflow_dispatch:
 
 permissions:
@@ -24,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run analysis
+      - name: Run dashboard build
         run: python main.py
 
       - name: Deploy to GitHub Pages
