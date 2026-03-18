@@ -1,363 +1,367 @@
 
-    <!DOCTYPE html>
-    <html lang="th">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Oil Procurement Decision Dashboard</title>
-        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-        <style>
-            body {
-                background: #f4f7fb;
-                font-family: Arial, sans-serif;
-                color: #1f2937;
-            }
-            .page-title {
-                font-size: 2.2rem;
-                font-weight: 800;
-                margin-bottom: 0.25rem;
-            }
-            .subtitle {
-                color: #6b7280;
-            }
-            .header-card, .stat-card, .decision-card, .fuel-section {
-                border: none;
-                border-radius: 18px;
-                box-shadow: 0 10px 25px rgba(0,0,0,0.06);
-                background: #fff;
-            }
-            .header-card {
-                padding: 28px;
-            }
-            .fuel-section {
-                padding: 24px;
-                margin-bottom: 28px;
-            }
-            .stat-card {
-                transition: transform 0.15s ease;
-            }
-            .stat-card:hover {
-                transform: translateY(-2px);
-            }
-            .stat-label {
-                font-size: 0.85rem;
-                color: #6b7280;
-                text-transform: uppercase;
-                letter-spacing: .04em;
-                margin-bottom: 8px;
-            }
-            .stat-value {
-                font-size: 1.8rem;
-                font-weight: 800;
-                line-height: 1.2;
-            }
-            .market-box {
-                background: linear-gradient(135deg, #0d6efd, #3b82f6);
-                color: white;
-                border-radius: 16px;
-                padding: 20px;
-                height: 100%;
-            }
-            .mini-label {
-                font-size: 0.8rem;
-                opacity: 0.9;
-                text-transform: uppercase;
-            }
-            .mini-value {
-                font-size: 1.6rem;
-                font-weight: 800;
-            }
-            .footer-note {
-                color: #6b7280;
-                font-size: 0.92rem;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container py-5">
-            <div class="header-card mb-4">
-                <div class="row g-4 align-items-center">
-                    <div class="col-lg-8">
-                        <div class="page-title">Oil Procurement Decision Dashboard</div>
-                        <div class="subtitle">
-                            ระบบช่วยผู้บริหารตัดสินใจในการจัดซื้อน้ำมันจากข้อมูล EPPO, MOPS และตลาดโลก
-                        </div>
-                    </div>
-                    <div class="col-lg-4">
-                        <div class="market-box">
-                            <div class="mb-2"><strong>Global Market Snapshot</strong></div>
-                            <div class="row g-3">
-                                <div class="col-6">
-                                    <div class="mini-label">NYMEX</div>
-                                    <div class="mini-value">172.31</div>
-                                    <div>Δ +3.68</div>
-                                </div>
-                                <div class="col-6">
-                                    <div class="mini-label">WTI</div>
-                                    <div class="mini-value">95.45</div>
-                                    <div>Δ +2.99</div>
-                                </div>
-                            </div>
-                            <div class="mt-3 small">
-                                อัปเดตระบบ: 17/03/2026 22:08
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Oil Procurement Decision Dashboard</title>
+  <style>
+    :root {
+      --bg: #f3f6fb;
+      --card: #ffffff;
+      --text: #14213d;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --success: #198754;
+      --warning: #ffc107;
+      --danger: #dc3545;
+      --primary: #0d6efd;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: Arial, Helvetica, sans-serif; background:var(--bg); color:var(--text); }
+    .container { max-width: 1260px; margin: 0 auto; padding: 24px; }
+    .hero { background: linear-gradient(135deg, #0f172a, #1d4ed8); color:#fff; border-radius: 24px; padding: 28px; margin-bottom: 24px; }
+    .hero-grid { display:grid; grid-template-columns: 1.5fr 1fr; gap:20px; }
+    .hero h1 { margin:0 0 8px; font-size: 2rem; }
+    .hero p { margin:0; opacity:0.92; line-height:1.6; }
+    .snapshot-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap:12px; }
+    .snapshot-card { background: rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.15); border-radius:18px; padding:16px; }
+    .snapshot-card .k { font-size: .75rem; text-transform: uppercase; opacity: .8; }
+    .snapshot-card .v { font-size: 1.5rem; font-weight: 800; margin-top:6px; }
+    .top-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:16px; margin-bottom: 20px; }
+    .top-card { background:var(--card); border-radius:20px; padding:18px; box-shadow: 0 10px 24px rgba(15,23,42,.06); }
+    .top-card .label { font-size:.8rem; color:var(--muted); text-transform:uppercase; }
+    .top-card .value { font-size:1.6rem; font-weight:800; margin-top:8px; }
+    .fuel-panel { background:var(--card); border-radius:22px; padding:24px; box-shadow: 0 10px 24px rgba(15,23,42,.06); margin-bottom:24px; }
+    .fuel-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; }
+    .fuel-head h2 { margin:4px 0 4px; }
+    .eyebrow { font-size:.78rem; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; }
+    .muted { color:var(--muted); }
+    .action-box { min-width:180px; border-radius:18px; padding:14px 16px; color:#fff; }
+    .action-success { background:var(--success); }
+    .action-warning { background:#d39e00; }
+    .action-danger { background:var(--danger); }
+    .action-primary { background:var(--primary); }
+    .action-secondary { background:#6c757d; }
+    .action-label { font-size:.78rem; opacity:.9; text-transform:uppercase; }
+    .action-value { font-size:1.4rem; font-weight:800; margin-top:4px; }
+    .summary-box { background:#f8fafc; border:1px solid var(--line); border-radius:18px; padding:16px; margin:18px 0; }
+    .summary-title { font-weight:800; margin-bottom:8px; }
+    .summary-box ul { margin:10px 0 0 18px; padding:0; line-height:1.6; }
+    .score-row { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:18px; }
+    .score-pill { background:#fff; border:1px solid var(--line); border-radius:999px; padding:10px 14px; display:flex; gap:10px; align-items:center; }
+    .metric-grid { display:grid; grid-template-columns: repeat(5, 1fr); gap:14px; }
+    .metric-card { background:#fff; border:1px solid var(--line); border-radius:18px; padding:16px; min-height:130px; }
+    .metric-card.primary { background:#eef5ff; }
+    .metric-card.success { background:#eefaf3; }
+    .metric-card.danger { background:#fff1f2; }
+    .metric-title { font-size:.8rem; color:var(--muted); text-transform:uppercase; min-height:32px; }
+    .metric-value { font-size:1.4rem; font-weight:800; margin-top:10px; }
+    .metric-unit { color:var(--muted); font-size:.85rem; margin-top:4px; }
+    .metric-badge { margin-top:12px; }
+    .badge { display:inline-block; padding:6px 10px; border-radius:999px; color:#fff; font-size:.8rem; }
+    .text-bg-success { background:var(--success); }
+    .text-bg-danger { background:var(--danger); }
+    .text-bg-secondary { background:#6c757d; }
+    .warning-box { background:#fff7ed; border:1px solid #fdba74; border-radius:18px; padding:16px; margin-bottom:20px; }
+    .footer { color:var(--muted); text-align:center; padding:16px 0 28px; }
+    @media (max-width: 1100px) {
+      .metric-grid { grid-template-columns: repeat(3, 1fr); }
+      .top-grid { grid-template-columns: repeat(2, 1fr); }
+      .hero-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 680px) {
+      .metric-grid { grid-template-columns: repeat(2, 1fr); }
+      .top-grid { grid-template-columns: 1fr; }
+      .container { padding: 16px; }
+      .hero h1 { font-size: 1.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <section class="hero">
+      <div class="hero-grid">
+        <div>
+          <h1>Oil Procurement Decision Dashboard</h1>
+          <p>ระบบช่วยตัดสินใจจัดซื้อน้ำมัน โดยผสานข้อมูลจาก NYMEX, WTI, MOPS, EPPO และฐานะกองทุนน้ำมัน เพื่อสรุปเป็น Action ที่ใช้งานได้จริงสำหรับทีมจัดซื้อ</p>
+          <p style="margin-top:10px;">อัปเดตล่าสุด: 18/03/2026 16:29</p>
+        </div>
+        <div class="snapshot-grid">
+          <div class="snapshot-card">
+            <div class="k">NYMEX</div>
+            <div class="v">172.31</div>
+            <div>Δ1D +3.68 | Δ3D +13.67</div>
+          </div>
+          <div class="snapshot-card">
+            <div class="k">WTI</div>
+            <div class="v">92.58</div>
+            <div>Δ1D -2.87 | Δ3D -4.44</div>
+          </div>
+          <div class="snapshot-card">
+            <div class="k">Oil Fund Balance</div>
+            <div class="v">-12,605</div>
+            <div>ล้านบาท | วันที่ 16/03/2026</div>
+          </div>
+          <div class="snapshot-card">
+            <div class="k">Runway</div>
+            <div class="v">18.1</div>
+            <div>วัน | Subsidy 1,499 ล้านบาท/วัน</div>
+          </div>
+        </div>
+      </div>
+    </section>
 
+    
+
+    <section class="top-grid">
+      <div class="top-card">
+        <div class="label">Cash Remaining</div>
+        <div class="value">27,200</div>
+        <div class="muted">ล้านบาท</div>
+      </div>
+      <div class="top-card">
+        <div class="label">Daily Subsidy</div>
+        <div class="value">1,499</div>
+        <div class="muted">ล้านบาท/วัน</div>
+      </div>
+      <div class="top-card">
+        <div class="label">Daily Collection</div>
+        <div class="value">0</div>
+        <div class="muted">ล้านบาท/วัน</div>
+      </div>
+      <div class="top-card">
+        <div class="label">Net Fund Impact</div>
+        <div class="value">-1,499</div>
+        <div class="muted">ล้านบาท/วัน</div>
+      </div>
+    </section>
+
+    
+    <section class="fuel-panel" style="border-top: 6px solid #198754;">
+        <div class="fuel-head">
+            <div>
+                <div class="eyebrow">RECOMMENDATION</div>
+                <h2>เบนซิน/แก๊สโซฮอล์ 95</h2>
+                <div class="muted">ข้อมูลอ้างอิงล่าสุด: 16/03/2026</div>
+            </div>
+            <div class="action-box action-success">
+                <div class="action-label">Action</div>
+                <div class="action-value">เร่งซื้อ</div>
+            </div>
+        </div>
+
+        <div class="summary-box">
+            <div class="summary-title">บทสรุปเชิงวิเคราะห์</div>
+            <div class="summary-text">แรงกดดันด้านต้นทุนมีแนวโน้มเพิ่ม ควรล็อคการจัดซื้อเร็วขึ้น</div>
+            <ul><li>ตลาดโลกและ MOPS ขึ้นต่อเนื่อง</li><li>Marketing Margin ต่ำกว่าจุดเฝ้าระวัง (-1.65 < 2.20)</li><li>ค่าการตลาดลดลงจากวันก่อน ทำให้แรงกดดันด้านต้นทุนเพิ่ม</li><li>Runway กองทุนน้ำมันอยู่ในโซนตึงตัว (18.1 วัน)</li></ul>
+        </div>
+
+        <div class="score-row">
+            <div class="score-pill"><span>Final Score</span><strong style="color:#198754">89.5</strong></div>
+            <div class="score-pill"><span>Market</span><strong style="color:#198754">85.1</strong></div>
+            <div class="score-pill"><span>Margin</span><strong style="color:#198754">100.0</strong></div>
+            <div class="score-pill"><span>Oil Fund</span><strong style="color:#198754">81.0</strong></div>
+        </div>
+
+        <div class="metric-grid">
             
-    <div class="col-12">
-        <div class="fuel-section">
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-                <div>
-                    <h2 class="mb-1">น้ำมัน 95</h2>
-                    <div class="text-muted">ข้อมูลอ้างอิงล่าสุด: <strong>2026-03-17</strong></div>
-                </div>
-                <div>
-                    <span class="badge bg-dark px-3 py-2">🟢 เร่งจัดซื้อ</span>
-                </div>
-            </div>
-
-            <div class="card decision-card mb-4" style="border-left: 8px solid #198754;">
-                <div class="card-body">
-                    <h4 class="mb-2">🟢 เร่งจัดซื้อ</h4>
-                    <p class="mb-0">ตลาดโลกมีแรงขึ้น และค่าการตลาดอยู่ต่ำกว่าระดับเฝ้าระวัง (0.85 < 3.00)</p>
-                </div>
-            </div>
-
-            <div class="row g-3 mb-3">
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">Marketing Margin</div>
-                <div class="stat-value text-primary">0.8523</div>
-                <div class="small text-muted">บาท/ลิตร</div>
-                <div class="mt-2"><span class="badge bg-danger">Δ +0.28</span></div>
-            </div>
-        </div>
+    <div class="metric-card primary">
+        <div class="metric-title">Marketing Margin</div>
+        <div class="metric-value">-1.65</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"><span class="badge text-bg-success">Δ -2.23</span></div>
     </div>
     
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">Ex-Refinery Price</div>
-                <div class="stat-value ">30.4214</div>
-                <div class="small text-muted">บาท/ลิตร</div>
-                <div class="mt-2"><span class="badge bg-danger">Δ +1.08</span></div>
-            </div>
-        </div>
+            
+    <div class="metric-card default">
+        <div class="metric-title">Threshold</div>
+        <div class="metric-value">2.20</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"></div>
     </div>
     
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">Oil Fund</div>
-                <div class="stat-value text-danger">-9.73</div>
-                <div class="small text-muted">บาท/ลิตร</div>
-                <div class="mt-2"><span class="badge bg-success">Δ -1.36</span></div>
-            </div>
-        </div>
+            
+    <div class="metric-card default">
+        <div class="metric-title">Ex-Refinery</div>
+        <div class="metric-value">30.2983</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"><span class="badge text-bg-danger">Δ +0.96</span></div>
     </div>
     
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">Retail Price</div>
-                <div class="stat-value text-success">31.05</div>
-                <div class="small text-muted">บาท/ลิตร</div>
-                <div class="mt-2"><span class="badge bg-secondary">Δ 0.00</span></div>
-            </div>
-        </div>
+            
+    <div class="metric-card default">
+        <div class="metric-title">Oil Fund</div>
+        <div class="metric-value">0.10</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"><span class="badge text-bg-danger">Δ +8.47</span></div>
     </div>
     
-            </div>
-
-            <div class="row g-3">
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">MOPS</div>
-                <div class="stat-value ">153.48</div>
-                <div class="small text-muted">USD/BBL</div>
-                <div class="mt-2"><span class="badge bg-danger">Δ +3.72</span></div>
-            </div>
-        </div>
+            
+    <div class="metric-card success">
+        <div class="metric-title">Retail</div>
+        <div class="metric-value">39.64</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"><span class="badge text-bg-danger">Δ +8.59</span></div>
     </div>
     
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">NYMEX</div>
-                <div class="stat-value ">172.31</div>
-                <div class="small text-muted">USD</div>
-                <div class="mt-2"><span class="badge bg-danger">Δ +3.68</span></div>
-            </div>
-        </div>
+            
+    <div class="metric-card default">
+        <div class="metric-title">Wholesale</div>
+        <div class="metric-value">38.70</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"><span class="badge text-bg-danger">Δ +10.25</span></div>
     </div>
     
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">WTI</div>
-                <div class="stat-value ">95.45</div>
-                <div class="small text-muted">USD</div>
-                <div class="mt-2"><span class="badge bg-danger">Δ +2.99</span></div>
-            </div>
-        </div>
+            
+    <div class="metric-card default">
+        <div class="metric-title">MOPS</div>
+        <div class="metric-value">152.16</div>
+        <div class="metric-unit">USD/BBL</div>
+        <div class="metric-badge"><span class="badge text-bg-success">Δ -1.32</span></div>
     </div>
     
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">Threshold</div>
-                <div class="stat-value ">3.00</div>
-                <div class="small text-muted">บาท/ลิตร</div>
-                
-            </div>
-        </div>
+            
+    <div class="metric-card default">
+        <div class="metric-title">MOPS 3D</div>
+        <div class="metric-value">+8.72</div>
+        <div class="metric-unit">USD/BBL</div>
+        <div class="metric-badge"></div>
     </div>
     
-            </div>
-        </div>
+            
+    <div class="metric-card default">
+        <div class="metric-title">NYMEX</div>
+        <div class="metric-value">172.31</div>
+        <div class="metric-unit">USD</div>
+        <div class="metric-badge"><span class="badge text-bg-danger">Δ +3.68</span></div>
     </div>
     
-    <div class="col-12">
-        <div class="fuel-section">
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-                <div>
-                    <h2 class="mb-1">น้ำมัน DS</h2>
-                    <div class="text-muted">ข้อมูลอ้างอิงล่าสุด: <strong>2026-03-17</strong></div>
-                </div>
-                <div>
-                    <span class="badge bg-dark px-3 py-2">🟡 ซื้อตามปกติ</span>
-                </div>
-            </div>
-
-            <div class="card decision-card mb-4" style="border-left: 8px solid #ffc107;">
-                <div class="card-body">
-                    <h4 class="mb-2">🟡 ซื้อตามปกติ</h4>
-                    <p class="mb-0">ค่าการตลาดขยับขึ้น แต่ยังไม่ใช่สัญญาณเร่งซื้อ ควรติดตามต่อเนื่อง</p>
-                </div>
-            </div>
-
-            <div class="row g-3 mb-3">
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">Marketing Margin</div>
-                <div class="stat-value text-primary">2.0046</div>
-                <div class="small text-muted">บาท/ลิตร</div>
-                <div class="mt-2"><span class="badge bg-danger">Δ +2.05</span></div>
-            </div>
-        </div>
+            
+    <div class="metric-card default">
+        <div class="metric-title">WTI</div>
+        <div class="metric-value">92.58</div>
+        <div class="metric-unit">USD</div>
+        <div class="metric-badge"><span class="badge text-bg-success">Δ -2.87</span></div>
     </div>
     
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">Ex-Refinery Price</div>
-                <div class="stat-value ">38.6747</div>
-                <div class="small text-muted">บาท/ลิตร</div>
-                <div class="mt-2"><span class="badge bg-success">Δ -0.00</span></div>
-            </div>
         </div>
-    </div>
-    
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">Oil Fund</div>
-                <div class="stat-value text-danger">-20.36</div>
-                <div class="small text-muted">บาท/ลิตร</div>
-                <div class="mt-2"><span class="badge bg-success">Δ -2.05</span></div>
-            </div>
-        </div>
-    </div>
-    
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">Retail Price</div>
-                <div class="stat-value text-success">29.94</div>
-                <div class="small text-muted">บาท/ลิตร</div>
-                <div class="mt-2"><span class="badge bg-secondary">Δ 0.00</span></div>
-            </div>
-        </div>
-    </div>
-    
-            </div>
-
-            <div class="row g-3">
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">MOPS</div>
-                <div class="stat-value ">190.93</div>
-                <div class="small text-muted">USD/BBL</div>
-                <div class="mt-2"><span class="badge bg-success">Δ -1.55</span></div>
-            </div>
-        </div>
-    </div>
-    
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">NYMEX</div>
-                <div class="stat-value ">172.31</div>
-                <div class="small text-muted">USD</div>
-                <div class="mt-2"><span class="badge bg-danger">Δ +3.68</span></div>
-            </div>
-        </div>
-    </div>
-    
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">WTI</div>
-                <div class="stat-value ">95.45</div>
-                <div class="small text-muted">USD</div>
-                <div class="mt-2"><span class="badge bg-danger">Δ +2.99</span></div>
-            </div>
-        </div>
-    </div>
-    
-                
-    <div class="col-md-3 col-sm-6">
-        <div class="card stat-card h-100">
-            <div class="card-body text-center">
-                <div class="stat-label">Threshold</div>
-                <div class="stat-value ">1.60</div>
-                <div class="small text-muted">บาท/ลิตร</div>
-                
-            </div>
-        </div>
-    </div>
-    
-            </div>
-        </div>
-    </div>
+    </section>
     
 
-            <div class="text-center mt-4 footer-note">
-                ระบบวิเคราะห์ราคาน้ำมันเชื้อเพลิงล่วงหน้าและสนับสนุนการตัดสินใจจัดซื้อ
+    <section class="fuel-panel" style="border-top: 6px solid #198754;">
+        <div class="fuel-head">
+            <div>
+                <div class="eyebrow">RECOMMENDATION</div>
+                <h2>ดีเซล</h2>
+                <div class="muted">ข้อมูลอ้างอิงล่าสุด: 16/03/2026</div>
+            </div>
+            <div class="action-box action-success">
+                <div class="action-label">Action</div>
+                <div class="action-value">เร่งซื้อ</div>
             </div>
         </div>
-    </body>
-    </html>
+
+        <div class="summary-box">
+            <div class="summary-title">บทสรุปเชิงวิเคราะห์</div>
+            <div class="summary-text">แรงกดดันด้านต้นทุนมีแนวโน้มเพิ่ม ควรล็อคการจัดซื้อเร็วขึ้น</div>
+            <ul><li>ตลาดโลกและ MOPS ขึ้นต่อเนื่อง</li><li>Marketing Margin ต่ำกว่าจุดเฝ้าระวัง (-0.05 < 1.60)</li><li>Runway กองทุนน้ำมันอยู่ในโซนตึงตัว (18.1 วัน)</li><li>ฐานะกองทุนน้ำมันติดลบ</li></ul>
+        </div>
+
+        <div class="score-row">
+            <div class="score-pill"><span>Final Score</span><strong style="color:#198754">81.8</strong></div>
+            <div class="score-pill"><span>Market</span><strong style="color:#198754">72.1</strong></div>
+            <div class="score-pill"><span>Margin</span><strong style="color:#198754">86.2</strong></div>
+            <div class="score-pill"><span>Oil Fund</span><strong style="color:#198754">96.0</strong></div>
+        </div>
+
+        <div class="metric-grid">
+            
+    <div class="metric-card primary">
+        <div class="metric-title">Marketing Margin</div>
+        <div class="metric-value">-0.05</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"></div>
+    </div>
+    
+            
+    <div class="metric-card default">
+        <div class="metric-title">Threshold</div>
+        <div class="metric-value">1.60</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"></div>
+    </div>
+    
+            
+    <div class="metric-card default">
+        <div class="metric-title">Ex-Refinery</div>
+        <div class="metric-value">38.6766</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"></div>
+    </div>
+    
+            
+    <div class="metric-card danger">
+        <div class="metric-title">Oil Fund</div>
+        <div class="metric-value">-18.31</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"></div>
+    </div>
+    
+            
+    <div class="metric-card success">
+        <div class="metric-title">Retail</div>
+        <div class="metric-value">29.94</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"></div>
+    </div>
+    
+            
+    <div class="metric-card default">
+        <div class="metric-title">Wholesale</div>
+        <div class="metric-value">28.03</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"></div>
+    </div>
+    
+            
+    <div class="metric-card default">
+        <div class="metric-title">MOPS</div>
+        <div class="metric-value">198.20</div>
+        <div class="metric-unit">USD/BBL</div>
+        <div class="metric-badge"><span class="badge text-bg-danger">Δ +7.27</span></div>
+    </div>
+    
+            
+    <div class="metric-card default">
+        <div class="metric-title">MOPS 3D</div>
+        <div class="metric-value">+3.70</div>
+        <div class="metric-unit">USD/BBL</div>
+        <div class="metric-badge"></div>
+    </div>
+    
+            
+    <div class="metric-card default">
+        <div class="metric-title">NYMEX</div>
+        <div class="metric-value">172.31</div>
+        <div class="metric-unit">USD</div>
+        <div class="metric-badge"><span class="badge text-bg-danger">Δ +3.68</span></div>
+    </div>
+    
+            
+    <div class="metric-card default">
+        <div class="metric-title">WTI</div>
+        <div class="metric-value">92.58</div>
+        <div class="metric-unit">USD</div>
+        <div class="metric-badge"><span class="badge text-bg-success">Δ -2.87</span></div>
+    </div>
+    
+        </div>
+    </section>
+    
+
+    <div class="footer">Phase ปัจจุบันยังไม่ใช้ Inventory และ Jobber ในการตัดสินใจโดยตรง แต่โค้ดเตรียมโครงไว้สำหรับต่อยอดในเฟสถัดไป</div>
+  </div>
+</body>
+</html>
     
