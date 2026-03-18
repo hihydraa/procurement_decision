@@ -1,4 +1,3 @@
-import math
 import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -19,25 +18,26 @@ GIDS = {
     "NATIONAL_CONSUMPTION_REF": "197066448",
     "ENTRY_OILFUND_SUSTAINABILITY": "799116470",
     "ENTRY_JOBBER": "24077118",       # reserved for next phase
-    "RECOMMENDATION": "528700139",    # not read by script; output goes to HTML
+    "RECOMMENDATION": "528700139",
+    "NEWS": "1714884655",
 }
 
 FUEL_CONFIG = {
     "GASOHOL95": {
-        "label_th": "เบนซิน/แก๊สโซฮอล์ 95",
-        "aliases": ["g95", "95", "gasohol95", "gasohol 95", "ulg95", "gasohol95 e10"],
+        "label_th": "แก๊สโซฮอล์ 95",
+        "aliases": ["gasohol95 e10", "gasohol 95 e10"],
         "margin_default": 2.20,
         "mops_aliases": ["mogas 95", "gasoline 95", "unleaded 95", "mogas95"],
     },
     "DIESEL": {
         "label_th": "ดีเซล",
-        "aliases": ["diesel", "hsd", "ds", "b7", "b10", "h-diesel"],
+        "aliases": ["h-diesel", "diesel", "b7", "b10", "hsd", "ds"],
         "margin_default": 1.60,
         "mops_aliases": ["gasoil", "diesel", "10 ppm gasoil", "ulsd", "gasoil 10ppm"],
     },
 }
 
-DASHBOARD_TITLE = "Oil Procurement Decision Dashboard"
+DASHBOARD_TITLE = "Fuel Procurement Decision Dashboard"
 TZ = ZoneInfo("Asia/Bangkok")
 
 
@@ -83,6 +83,10 @@ def parse_date_series(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series, errors="coerce", dayfirst=False).dt.date
 
 
+def parse_datetime_series(series: pd.Series) -> pd.Series:
+    return pd.to_datetime(series, errors="coerce")
+
+
 def find_column(df: pd.DataFrame, candidates: list[str], required: bool = True) -> str | None:
     norm_map = {norm(c): c for c in df.columns}
     for cand in candidates:
@@ -101,18 +105,6 @@ def maybe_find_column(df: pd.DataFrame, keyword_groups: list[list[str]]) -> str 
         for c, nc in ncols.items():
             if all(k in nc for k in group):
                 return c
-    return None
-
-
-def latest_non_null(df: pd.DataFrame, col: str):
-    s = df[col].dropna()
-    return None if s.empty else s.iloc[0]
-
-
-def first_non_null(row: pd.Series, cols: list[str]):
-    for col in cols:
-        if col in row.index and pd.notna(row[col]):
-            return row[col]
     return None
 
 
@@ -148,6 +140,19 @@ def sign_badge_class(v: float | None) -> str:
     if v is None or pd.isna(v) or abs(v) < 1e-9:
         return "secondary"
     return "danger" if v > 0 else "success"
+
+
+def html_escape(text) -> str:
+    text = "" if text is None else str(text)
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def nl2br(text) -> str:
+    return html_escape(text).replace("\n", "<br>")
 
 
 # ============================================================
@@ -246,6 +251,25 @@ def prep_oilfund_sheet(df: pd.DataFrame) -> pd.DataFrame:
     return out.rename(columns=rename_map)
 
 
+def prep_news_sheet(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["Timestamp", "Context"])
+
+    ts_col = find_column(df, ["Timestamp"], required=False) or maybe_find_column(df, [["timestamp"]])
+    ctx_col = find_column(df, ["Context"], required=False) or maybe_find_column(df, [["context"]])
+
+    if not ts_col or not ctx_col:
+        raise KeyError("ไม่พบคอลัมน์ Timestamp หรือ Context ในชีต NEWS")
+
+    out = df.copy()
+    out[ts_col] = parse_datetime_series(out[ts_col])
+    out[ctx_col] = out[ctx_col].astype(str).fillna("").str.strip()
+    out = out.dropna(subset=[ts_col])
+    out = out[out[ctx_col] != ""]
+    out = out.sort_values(ts_col, ascending=False).reset_index(drop=True)
+    return out.rename(columns={ts_col: "Timestamp", ctx_col: "Context"})
+
+
 # ============================================================
 # LOOKUPS / SETTINGS
 # ============================================================
@@ -319,7 +343,7 @@ def filter_by_aliases(df: pd.DataFrame, aliases: list[str]) -> pd.DataFrame:
         return df
     alias_norms = [norm(a) for a in aliases]
     oil_norm = df["Oil Type"].astype(str).map(norm)
-    mask = oil_norm.apply(lambda x: any(a in x for a in alias_norms))
+    mask = oil_norm.apply(lambda x: any(a == x or a in x for a in alias_norms))
     return df.loc[mask].copy().sort_values("Date", ascending=False).reset_index(drop=True)
 
 
@@ -439,18 +463,18 @@ def compute_margin_score(mm_value, mm_change, threshold):
     signals = []
 
     if mm_value is None:
-        signals.append("ไม่มีข้อมูล Marketing Margin ล่าสุด")
+        signals.append("ไม่มีข้อมูลค่าการตลาดล่าสุด")
         return score, signals
 
     gap = mm_value - threshold
     score -= gap * 22
 
     if mm_value < threshold - 0.20:
-        signals.append(f"Marketing Margin ต่ำกว่าจุดเฝ้าระวัง ({mm_value:.2f} < {threshold:.2f})")
+        signals.append(f"ค่าการตลาดต่ำกว่าจุดเฝ้าระวัง ({mm_value:.2f} < {threshold:.2f})")
     elif mm_value > threshold + 0.30:
-        signals.append(f"Marketing Margin สูงกว่าจุดเฝ้าระวัง ({mm_value:.2f} > {threshold:.2f})")
+        signals.append(f"ค่าการตลาดสูงกว่าจุดเฝ้าระวัง ({mm_value:.2f} > {threshold:.2f})")
     else:
-        signals.append("Marketing Margin อยู่ใกล้ค่ากลางที่กำหนด")
+        signals.append("ค่าการตลาดอยู่ใกล้ค่ากลางที่กำหนด")
 
     if mm_change is not None:
         score -= mm_change * 18
@@ -554,9 +578,6 @@ def fuel_analysis(fuel_key, config, eppo_df, mops_df, nymex_snap, wti_snap, fund
         "label_th": config["label_th"],
         "date": eppo.get("date") or mops.get("date") or nymex_snap.get("date"),
         "threshold": threshold,
-        "market_score": market_score,
-        "margin_score": margin_score,
-        "oilfund_score": oilfund_score,
         "final_score": final_score,
         "action": action,
         "color": color,
@@ -567,9 +588,6 @@ def fuel_analysis(fuel_key, config, eppo_df, mops_df, nymex_snap, wti_snap, fund
         "oilfund": oilfund,
         "retail": retail,
         "wholesale": wholesale,
-        "mops": mops,
-        "nymex": nymex_snap,
-        "wti": wti_snap,
     }
 
 
@@ -594,7 +612,6 @@ def metric_card(title, value, unit, delta=None, theme="default"):
     """
 
 
-
 def build_fuel_section(result: dict) -> str:
     color_map = {
         "success": "#198754",
@@ -605,55 +622,96 @@ def build_fuel_section(result: dict) -> str:
     }
     border = color_map.get(result["color"], "#0d6efd")
 
-    reasons_html = "".join(f"<li>{r}</li>" for r in result["reasons"])
+    reasons_html = "".join(f"<li>{html_escape(r)}</li>" for r in result["reasons"])
     date_text = result["date"].strftime("%d/%m/%Y") if result["date"] else "-"
+
+    oilfund_latest = safe_float(result["oilfund"].get("latest"))
+    oilfund_theme = "danger" if oilfund_latest is not None and oilfund_latest < 0 else "default"
 
     return f"""
     <section class="fuel-panel" style="border-top: 6px solid {border};">
         <div class="fuel-head">
             <div>
-                <div class="eyebrow">RECOMMENDATION</div>
-                <h2>{result['label_th']}</h2>
+                <div class="eyebrow">คำแนะนำการจัดซื้อ</div>
+                <h2>{html_escape(result['label_th'])}</h2>
                 <div class="muted">ข้อมูลอ้างอิงล่าสุด: {date_text}</div>
             </div>
             <div class="action-box action-{result['color']}">
                 <div class="action-label">Action</div>
-                <div class="action-value">{result['action']}</div>
+                <div class="action-value">{html_escape(result['action'])}</div>
             </div>
         </div>
 
         <div class="summary-box">
             <div class="summary-title">บทสรุปเชิงวิเคราะห์</div>
-            <div class="summary-text">{result['summary']}</div>
+            <div class="summary-text">{html_escape(result['summary'])}</div>
             <ul>{reasons_html}</ul>
         </div>
 
         <div class="metric-grid">
-            {metric_card('Marketing Margin', fmt_num(result['mm'].get('latest'), 2), 'บาท/ลิตร', result['mm'].get('chg_1d'), 'primary')}
-            {metric_card('Threshold', fmt_num(result['threshold'], 2), 'บาท/ลิตร')}
-            {metric_card('Ex-Refinery', fmt_num(result['ex'].get('latest'), 4), 'บาท/ลิตร', result['ex'].get('chg_1d'))}
-            {metric_card('Oil Fund', fmt_num(result['oilfund'].get('latest'), 2), 'บาท/ลิตร', result['oilfund'].get('chg_1d'), 'danger' if safe_float(result['oilfund'].get('latest')) not in (None,) and safe_float(result['oilfund'].get('latest')) < 0 else 'default')}
-            {metric_card('Retail', fmt_num(result['retail'].get('latest'), 2), 'บาท/ลิตร', result['retail'].get('chg_1d'), 'success')}
-            {metric_card('Wholesale', fmt_num(result['wholesale'].get('latest'), 2), 'บาท/ลิตร', result['wholesale'].get('chg_1d'))}
+            {metric_card('ค่าการตลาด', fmt_num(result['mm'].get('latest'), 2), 'บาท/ลิตร', result['mm'].get('chg_1d'), 'primary')}
+            {metric_card('จุดเฝ้าระวัง', fmt_num(result['threshold'], 2), 'บาท/ลิตร')}
+            {metric_card('ราคาหน้าโรงกลั่น', fmt_num(result['ex'].get('latest'), 4), 'บาท/ลิตร', result['ex'].get('chg_1d'))}
+            {metric_card('เงินกองทุนน้ำมัน', fmt_num(result['oilfund'].get('latest'), 2), 'บาท/ลิตร', result['oilfund'].get('chg_1d'), oilfund_theme)}
+            {metric_card('ราคาขายปลีก', fmt_num(result['retail'].get('latest'), 2), 'บาท/ลิตร', result['retail'].get('chg_1d'), 'success')}
+            {metric_card('ราคาขายส่ง', fmt_num(result['wholesale'].get('latest'), 2), 'บาท/ลิตร', result['wholesale'].get('chg_1d'))}
         </div>
     </section>
     """
 
 
-def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap: dict, warnings: list[str]) -> str:
+def build_news_section(news_df: pd.DataFrame, max_items: int = 1) -> str:
+    if news_df is None or news_df.empty:
+        return """
+        <section class="news-panel">
+          <div class="news-head">
+            <div class="eyebrow">NEWS</div>
+            <h2>ข่าวและประเด็นสำคัญ</h2>
+          </div>
+          <div class="news-empty">ยังไม่มีข้อมูลข่าวในชีต NEWS</div>
+        </section>
+        """
+
+    rows = []
+    for _, row in news_df.head(max_items).iterrows():
+        ts = row.get("Timestamp")
+        ctx = row.get("Context", "")
+        ts_text = ts.strftime("%d/%m/%Y %H:%M") if pd.notna(ts) else "-"
+        rows.append(f"""
+        <div class="news-item">
+          <div class="news-time">{ts_text}</div>
+          <div class="news-content">{nl2br(ctx)}</div>
+        </div>
+        """)
+
+    items_html = "\n".join(rows)
+    return f"""
+    <section class="news-panel">
+      <div class="news-head">
+        <div class="eyebrow">NEWS</div>
+        <h2>ข่าวและประเด็นสำคัญ</h2>
+      </div>
+      <div class="news-list">
+        {items_html}
+      </div>
+    </section>
+    """
+
+
+def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str]) -> str:
     updated_at = datetime.now(TZ).strftime("%d/%m/%Y %H:%M")
     sections = "\n".join(build_fuel_section(r) for r in results)
+    news_html = build_news_section(news_df)
 
     fund_date = fund_snap.get("date")
     fund_date_text = fund_date.strftime("%d/%m/%Y") if fund_date else "-"
 
     warnings_html = ""
     if warnings:
-        items = "".join(f"<li>{w}</li>" for w in warnings)
+        items = "".join(f"<li>{html_escape(w)}</li>" for w in warnings)
         warnings_html = f"<div class='warning-box'><strong>Data warnings</strong><ul>{items}</ul></div>"
 
-    return f"""
-<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html lang="th">
 <head>
   <meta charset="UTF-8" />
@@ -672,63 +730,84 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
       --primary: #0d6efd;
     }}
     * {{ box-sizing: border-box; }}
-    body {{ margin:0; font-family: Arial, Helvetica, sans-serif; background:var(--bg); color:var(--text);} }
+    body {{ margin: 0; font-family: Arial, Helvetica, sans-serif; background: var(--bg); color: var(--text); }}
     .container {{ max-width: 1260px; margin: 0 auto; padding: 24px; }}
-    .hero {{ background: linear-gradient(135deg, #0f172a, #1d4ed8); color:#fff; border-radius: 24px; padding: 28px; margin-bottom: 24px; }}
-    .hero-grid {{ display:grid; grid-template-columns: 1.5fr 1fr; gap:20px; }}
-    .hero h1 {{ margin:0 0 8px; font-size: 2rem; }}
-    .hero p {{ margin:0; opacity:0.92; line-height:1.6; }}
-    .snapshot-grid {{ display:grid; grid-template-columns: repeat(2, 1fr); gap:12px; }}
-    .snapshot-card {{ background: rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.15); border-radius:18px; padding:16px; }}
+    .hero {{ background: linear-gradient(135deg, #0f172a, #1d4ed8); color: #fff; border-radius: 24px; padding: 28px; margin-bottom: 24px; }}
+    .hero-grid {{ display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; }}
+    .hero h1 {{ margin: 0 0 8px; font-size: 2rem; }}
+    .hero p {{ margin: 0; opacity: 0.92; line-height: 1.6; }}
+    .snapshot-grid {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }}
+    .snapshot-card {{ background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.15); border-radius: 18px; padding: 16px; }}
     .snapshot-card .k {{ font-size: .75rem; text-transform: uppercase; opacity: .8; }}
-    .snapshot-card .v {{ font-size: 1.5rem; font-weight: 800; margin-top:6px; }}
-    .top-grid {{ display:grid; grid-template-columns: repeat(4, 1fr); gap:16px; margin-bottom: 20px; }}
-    .top-card {{ background:var(--card); border-radius:20px; padding:18px; box-shadow: 0 10px 24px rgba(15,23,42,.06); }}
-    .top-card .label {{ font-size:.8rem; color:var(--muted); text-transform:uppercase; }}
-    .top-card .value {{ font-size:1.6rem; font-weight:800; margin-top:8px; }}
-    .fuel-panel {{ background:var(--card); border-radius:22px; padding:24px; box-shadow: 0 10px 24px rgba(15,23,42,.06); margin-bottom:24px; }}
-    .fuel-head {{ display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; }}
-    .fuel-head h2 {{ margin:4px 0 4px; }}
-    .eyebrow {{ font-size:.78rem; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; }}
-    .muted {{ color:var(--muted); }}
-    .action-box {{ min-width:180px; border-radius:18px; padding:14px 16px; color:#fff; }}
-    .action-success {{ background:var(--success); }}
-    .action-warning {{ background:#d39e00; }}
-    .action-danger {{ background:var(--danger); }}
-    .action-primary {{ background:var(--primary); }}
-    .action-secondary {{ background:#6c757d; }}
-    .action-label {{ font-size:.78rem; opacity:.9; text-transform:uppercase; }}
-    .action-value {{ font-size:1.4rem; font-weight:800; margin-top:4px; }}
-    .summary-box {{ background:#f8fafc; border:1px solid var(--line); border-radius:18px; padding:16px; margin:18px 0; }}
-    .summary-title {{ font-weight:800; margin-bottom:8px; }}
-    .summary-box ul {{ margin:10px 0 0 18px; padding:0; line-height:1.6; }}
-    .score-row {{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:18px; }}
-    .score-pill {{ background:#fff; border:1px solid var(--line); border-radius:999px; padding:10px 14px; display:flex; gap:10px; align-items:center; }}
-    .metric-grid {{ display:grid; grid-template-columns: repeat(5, 1fr); gap:14px; }}
-    .metric-card {{ background:#fff; border:1px solid var(--line); border-radius:18px; padding:16px; min-height:130px; }}
-    .metric-card.primary {{ background:#eef5ff; }}
-    .metric-card.success {{ background:#eefaf3; }}
-    .metric-card.danger {{ background:#fff1f2; }}
-    .metric-title {{ font-size:.8rem; color:var(--muted); text-transform:uppercase; min-height:32px; }}
-    .metric-value {{ font-size:1.4rem; font-weight:800; margin-top:10px; }}
-    .metric-unit {{ color:var(--muted); font-size:.85rem; margin-top:4px; }}
-    .metric-badge {{ margin-top:12px; }}
-    .badge {{ display:inline-block; padding:6px 10px; border-radius:999px; color:#fff; font-size:.8rem; }}
-    .text-bg-success {{ background:var(--success); }}
-    .text-bg-danger {{ background:var(--danger); }}
-    .text-bg-secondary {{ background:#6c757d; }}
-    .warning-box {{ background:#fff7ed; border:1px solid #fdba74; border-radius:18px; padding:16px; margin-bottom:20px; }}
-    .footer {{ color:var(--muted); text-align:center; padding:16px 0 28px; }}
+    .snapshot-card .v {{ font-size: 1.5rem; font-weight: 800; margin-top: 6px; }}
+
+    .top-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }}
+    .top-card {{ background: var(--card); border-radius: 20px; padding: 18px; box-shadow: 0 10px 24px rgba(15,23,42,.06); }}
+    .top-card .label {{ font-size: .8rem; color: var(--muted); text-transform: uppercase; }}
+    .top-card .value {{ font-size: 1.6rem; font-weight: 800; margin-top: 8px; }}
+
+    .fuel-panel, .news-panel {{ background: var(--card); border-radius: 22px; padding: 24px; box-shadow: 0 10px 24px rgba(15,23,42,.06); margin-bottom: 24px; }}
+    .fuel-panel {{ border-top: 6px solid var(--primary); }}
+    .fuel-head, .news-head {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }}
+    .fuel-head h2, .news-head h2 {{ margin: 4px 0 4px; }}
+    .eyebrow {{ font-size: .78rem; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }}
+    .muted {{ color: var(--muted); }}
+
+    .action-box {{ min-width: 180px; border-radius: 18px; padding: 14px 16px; color: #fff; }}
+    .action-success {{ background: var(--success); }}
+    .action-warning {{ background: #d39e00; }}
+    .action-danger {{ background: var(--danger); }}
+    .action-primary {{ background: var(--primary); }}
+    .action-secondary {{ background: #6c757d; }}
+    .action-label {{ font-size: .78rem; opacity: .9; text-transform: uppercase; }}
+    .action-value {{ font-size: 1.4rem; font-weight: 800; margin-top: 4px; }}
+
+    .summary-box {{ background: #f8fafc; border: 1px solid var(--line); border-radius: 18px; padding: 16px; margin: 18px 0; }}
+    .summary-title {{ font-weight: 800; margin-bottom: 8px; }}
+    .summary-box ul {{ margin: 10px 0 0 18px; padding: 0; line-height: 1.6; }}
+    .summary-text {{ line-height: 1.6; }}
+
+    .metric-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }}
+    .metric-card {{ background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 16px; min-height: 130px; }}
+    .metric-card.primary {{ background: #eef5ff; }}
+    .metric-card.success {{ background: #eefaf3; }}
+    .metric-card.danger {{ background: #fff1f2; }}
+    .metric-title {{ font-size: .8rem; color: var(--muted); text-transform: uppercase; min-height: 32px; }}
+    .metric-value {{ font-size: 1.4rem; font-weight: 800; margin-top: 10px; }}
+    .metric-unit {{ color: var(--muted); font-size: .85rem; margin-top: 4px; }}
+    .metric-badge {{ margin-top: 12px; }}
+
+    .badge {{ display: inline-block; padding: 6px 10px; border-radius: 999px; color: #fff; font-size: .8rem; }}
+    .text-bg-success {{ background: var(--success); }}
+    .text-bg-danger {{ background: var(--danger); }}
+    .text-bg-secondary {{ background: #6c757d; }}
+
+    .warning-box {{ background: #fff7ed; border: 1px solid #fdba74; border-radius: 18px; padding: 16px; margin-bottom: 20px; }}
+    .footer {{ color: var(--muted); text-align: center; padding: 16px 0 28px; }}
+
+    .news-list {{ display: grid; gap: 14px; margin-top: 10px; }}
+    .news-item {{ border: 1px solid var(--line); border-radius: 18px; padding: 16px; background: #fbfdff; }}
+    .news-time {{ font-size: .9rem; font-weight: 700; color: var(--primary); margin-bottom: 10px; }}
+    .news-content {{ line-height: 1.7; white-space: normal; word-break: break-word; }}
+    .news-empty {{ color: var(--muted); padding-top: 10px; }}
+
     @media (max-width: 1100px) {{
-      .metric-grid {{ grid-template-columns: repeat(3, 1fr); }}
+      .metric-grid {{ grid-template-columns: repeat(2, 1fr); }}
       .top-grid {{ grid-template-columns: repeat(2, 1fr); }}
       .hero-grid {{ grid-template-columns: 1fr; }}
     }}
+
     @media (max-width: 680px) {{
-      .metric-grid {{ grid-template-columns: repeat(2, 1fr); }}
+      .metric-grid {{ grid-template-columns: 1fr; }}
       .top-grid {{ grid-template-columns: 1fr; }}
+      .snapshot-grid {{ grid-template-columns: 1fr; }}
       .container {{ padding: 16px; }}
+      .hero {{ padding: 20px; border-radius: 20px; }}
       .hero h1 {{ font-size: 1.5rem; }}
+      .fuel-panel, .news-panel {{ padding: 18px; border-radius: 18px; }}
+      .action-box {{ width: 100%; min-width: auto; }}
+      .metric-card {{ min-height: auto; }}
+      .news-content {{ font-size: .95rem; }}
     }}
   </style>
 </head>
@@ -793,11 +872,13 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
 
     {sections}
 
+    {news_html}
+
     <div class="footer">Phase ปัจจุบันยังไม่ใช้ Inventory และ Jobber ในการตัดสินใจโดยตรง แต่โค้ดเตรียมโครงไว้สำหรับต่อยอดในเฟสถัดไป</div>
   </div>
 </body>
 </html>
-    """}
+"""
 
 
 # ============================================================
@@ -813,10 +894,17 @@ def main():
         df_eppo = prep_eppo_sheet(load_sheet(GIDS["ENTRY_EPPO"]))
         df_oilfund = prep_oilfund_sheet(load_sheet(GIDS["ENTRY_OILFUND_SUSTAINABILITY"]))
         df_setting = load_sheet(GIDS["SETTING"])
+
+        try:
+            df_news = prep_news_sheet(load_sheet(GIDS["NEWS"]))
+        except Exception as news_err:
+            df_news = pd.DataFrame(columns=["Timestamp", "Context"])
+            warnings.append(f"โหลด NEWS ไม่สำเร็จ: {news_err}")
+
     except Exception as e:
         write_text(
             "index.html",
-            f"<html><body style='font-family:Arial;padding:24px'><h1>Dashboard Error</h1><p>{str(e)}</p></body></html>",
+            f"<html><body style='font-family:Arial;padding:24px'><h1>Dashboard Error</h1><p>{html_escape(str(e))}</p></body></html>",
         )
         raise
 
@@ -849,7 +937,7 @@ def main():
             warnings.append(f"ไม่พบข้อมูลล่าสุดของ {config['label_th']} ใน EPPO/MOPS")
         results.append(result)
 
-    html = build_html(results, nymex_snap, wti_snap, fund_snap, warnings)
+    html = build_html(results, nymex_snap, wti_snap, fund_snap, df_news, warnings)
     write_text("index.html", html)
     print("Dashboard created successfully")
 
