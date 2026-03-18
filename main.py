@@ -832,12 +832,12 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
             <div>Δ1D {fmt_change(wti_snap.get('chg_1d'), 2)} | Δ3D {fmt_change(wti_snap.get('chg_3d'), 2)}</div>
           </div>
           <div class="snapshot-card">
-            <div class="k">Oil Fund Balance</div>
+            <div class="k">ฐานะกองทุนน้ำมัน สุทธิ</div>
             <div class="v">{fmt_num(fund_snap.get('balance'), 0)}</div>
             <div>ล้านบาท | วันที่ {fund_date_text}</div>
           </div>
           <div class="snapshot-card">
-            <div class="k">Runway</div>
+            <div class="k">กองทุนน้ำมันจะพยุงราคาได้กี่วัน</div>
             <div class="v">{fmt_num(fund_snap.get('runway'), 1)}</div>
             <div>วัน | Subsidy {fmt_num(fund_snap.get('subsidy'), 0)} ล้านบาท/วัน</div>
           </div>
@@ -874,7 +874,7 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
 
     {news_html}
 
-    <div class="footer">Phase ปัจจุบันยังไม่ใช้ Inventory และ Jobber ในการตัดสินใจโดยตรง แต่โค้ดเตรียมโครงไว้สำหรับต่อยอดในเฟสถัดไป</div>
+    <div class="footer">Fuel Procurement Decision Dashboard VOl.1</div>
   </div>
 </body>
 </html>
