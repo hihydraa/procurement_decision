@@ -797,7 +797,7 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
   </div>
 </body>
 </html>
-    """
+    """}
 
 
 # ============================================================
