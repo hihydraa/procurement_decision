@@ -23,17 +23,17 @@ GIDS = {
 }
 
 FUEL_CONFIG = {
-    "GASOHOL95": {
-        "label_th": "เบนซิน/แก๊สโซฮอล์ 95",
-        "aliases": ["g95", "95", "gasohol95", "gasohol 95", "ulg95", "gasohol95 e10"],
+    "G95": {
+        "label_th": "แก๊สโซฮอล์ 95",
+        "eppo_aliases": ["GASOHOL95 E10", "GASOHOL 95 E10", "GSH95 E10"],
+        "mops_aliases": ["MOGAS 95", "GASOLINE 95", "UNLEADED 95", "MOGAS95"],
         "margin_default": 2.20,
-        "mops_aliases": ["mogas 95", "gasoline 95", "unleaded 95", "mogas95"],
     },
     "DIESEL": {
         "label_th": "ดีเซล",
-        "aliases": ["diesel", "hsd", "ds", "b7", "b10", "h-diesel"],
+        "eppo_aliases": ["H-DIESEL", "DIESEL", "B7", "B10"],
+        "mops_aliases": ["GASOIL", "DIESEL", "10 PPM GASOIL", "ULSD", "GASOIL 10PPM"],
         "margin_default": 1.60,
-        "mops_aliases": ["gasoil", "diesel", "10 ppm gasoil", "ulsd", "gasoil 10ppm"],
     },
 }
 
@@ -314,13 +314,20 @@ def compute_market_snapshot(df: pd.DataFrame, label: str) -> dict:
     }
 
 
-def filter_by_aliases(df: pd.DataFrame, aliases: list[str]) -> pd.DataFrame:
+def filter_by_aliases(df: pd.DataFrame, aliases: list[str], exact_first: bool = True) -> pd.DataFrame:
     if df.empty:
         return df
     alias_norms = [norm(a) for a in aliases]
     oil_norm = df["Oil Type"].astype(str).map(norm)
-    mask = oil_norm.apply(lambda x: any(a in x for a in alias_norms))
-    return df.loc[mask].copy().sort_values("Date", ascending=False).reset_index(drop=True)
+
+    if exact_first:
+        exact_mask = oil_norm.isin(alias_norms)
+        exact = df.loc[exact_mask].copy().sort_values("Date", ascending=False).reset_index(drop=True)
+        if not exact.empty:
+            return exact
+
+    contains_mask = oil_norm.apply(lambda x: any(a in x for a in alias_norms))
+    return df.loc[contains_mask].copy().sort_values("Date", ascending=False).reset_index(drop=True)
 
 
 def fuel_eppo_snapshot(df: pd.DataFrame, aliases: list[str]) -> dict:
@@ -529,8 +536,8 @@ def build_reason_bullets(signals: list[str], max_items=4) -> list[str]:
 
 
 def fuel_analysis(fuel_key, config, eppo_df, mops_df, nymex_snap, wti_snap, fund_snap, settings):
-    eppo = fuel_eppo_snapshot(eppo_df, config["aliases"])
-    mops = fuel_mops_snapshot(mops_df, config["mops_aliases"] + config["aliases"])
+    eppo = fuel_eppo_snapshot(eppo_df, config["eppo_aliases"])
+    mops = fuel_mops_snapshot(mops_df, config["mops_aliases"])
     mm = eppo["latest"].get("MarketingMargin", {})
     ex = eppo["latest"].get("ExRefinery", {})
     oilfund = eppo["latest"].get("OilFund", {})
@@ -538,7 +545,7 @@ def fuel_analysis(fuel_key, config, eppo_df, mops_df, nymex_snap, wti_snap, fund
     wholesale = eppo["latest"].get("Wholesale", {})
 
     threshold = (
-        settings["gasohol95_margin_threshold"] if fuel_key == "GASOHOL95" else settings["diesel_margin_threshold"]
+        settings["gasohol95_margin_threshold"] if fuel_key == "G95" else settings["diesel_margin_threshold"]
     )
 
     market_score, market_signals = compute_market_score(mops, nymex_snap, wti_snap, settings)
@@ -688,16 +695,16 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
     }}
     * {{ box-sizing: border-box; }}
     body {{ margin:0; font-family: Arial, Helvetica, sans-serif; background:var(--bg); color:var(--text); }}
-    .container {{ max-width: 1260px; margin: 0 auto; padding: 24px; }}
+    .container {{ max-width: 1260px; margin: 0 auto; padding: 20px; }}
     .hero {{ background: linear-gradient(135deg, #0f172a, #1d4ed8); color:#fff; border-radius: 24px; padding: 28px; margin-bottom: 24px; }}
     .hero-grid {{ display:grid; grid-template-columns: 1.5fr 1fr; gap:20px; }}
     .hero h1 {{ margin:0 0 8px; font-size: 2rem; }}
     .hero p {{ margin:0; opacity:0.92; line-height:1.6; }}
-    .snapshot-grid {{ display:grid; grid-template-columns: repeat(2, 1fr); gap:12px; }}
+    .snapshot-grid {{ display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px; }}
     .snapshot-card {{ background: rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.15); border-radius:18px; padding:16px; }}
     .snapshot-card .k {{ font-size: .75rem; text-transform: uppercase; opacity: .8; }}
     .snapshot-card .v {{ font-size: 1.5rem; font-weight: 800; margin-top:6px; }}
-    .top-grid {{ display:grid; grid-template-columns: repeat(4, 1fr); gap:16px; margin-bottom: 20px; }}
+    .top-grid {{ display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:16px; margin-bottom: 20px; }}
     .top-card {{ background:var(--card); border-radius:20px; padding:18px; box-shadow: 0 10px 24px rgba(15,23,42,.06); }}
     .top-card .label {{ font-size:.8rem; color:var(--muted); text-transform:uppercase; }}
     .top-card .value {{ font-size:1.6rem; font-weight:800; margin-top:8px; }}
@@ -719,8 +726,8 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
     .summary-box ul {{ margin:10px 0 0 18px; padding:0; line-height:1.6; }}
     .score-row {{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:18px; }}
     .score-pill {{ background:#fff; border:1px solid var(--line); border-radius:999px; padding:10px 14px; display:flex; gap:10px; align-items:center; }}
-    .metric-grid {{ display:grid; grid-template-columns: repeat(5, 1fr); gap:14px; }}
-    .metric-card {{ background:#fff; border:1px solid var(--line); border-radius:18px; padding:16px; min-height:130px; }}
+    .metric-grid {{ display:grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap:14px; }}
+    .metric-card {{ background:#fff; border:1px solid var(--line); border-radius:18px; padding:16px; min-height:130px; min-width:0; }}
     .metric-card.primary {{ background:#eef5ff; }}
     .metric-card.success {{ background:#eefaf3; }}
     .metric-card.danger {{ background:#fff1f2; }}
@@ -735,12 +742,37 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
     .warning-box {{ background:#fff7ed; border:1px solid #fdba74; border-radius:18px; padding:16px; margin-bottom:20px; }}
     .footer {{ color:var(--muted); text-align:center; padding:16px 0 28px; }}
     @media (max-width: 1100px) {{
-      .metric-grid {{ grid-template-columns: repeat(3, 1fr); }}
-      .top-grid {{ grid-template-columns: repeat(2, 1fr); }}
+      .metric-grid {{ grid-template-columns: repeat(3, minmax(0,1fr)); }}
+      .top-grid {{ grid-template-columns: repeat(2, minmax(0,1fr)); }}
       .hero-grid {{ grid-template-columns: 1fr; }}
     }}
-    @media (max-width: 680px) {{
-      .metric-grid {{ grid-template-columns: repeat(2, 1fr); }}
+    @media (max-width: 820px) {{
+      .container {{ padding: 14px; }}
+      .fuel-panel {{ padding: 18px; border-radius: 18px; }}
+      .action-box {{ width: 100%; min-width: 0; }}
+      .score-row {{ gap: 8px; }}
+      .score-pill {{ width: calc(50% - 4px); justify-content: space-between; }}
+      .metric-grid {{ grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }}
+      .metric-card {{ min-height: 116px; padding: 14px; }}
+    }}
+    @media (max-width: 560px) {{
+      .container {{ padding: 10px; }}
+      .hero {{ padding: 18px; border-radius: 18px; }}
+      .hero h1 {{ font-size: 1.28rem; line-height: 1.3; }}
+      .hero p {{ font-size: .94rem; }}
+      .snapshot-grid {{ grid-template-columns: 1fr; }}
+      .top-grid {{ grid-template-columns: 1fr; }}
+      .fuel-head {{ gap: 10px; }}
+      .fuel-head h2 {{ font-size: 1.45rem; }}
+      .summary-box {{ padding: 14px; }}
+      .score-pill {{ width: 100%; }}
+      .metric-grid {{ grid-template-columns: 1fr; }}
+      .metric-title {{ min-height: 0; font-size: .76rem; }}
+      .metric-value {{ font-size: 1.25rem; margin-top: 8px; word-break: break-word; }}
+      .metric-unit {{ font-size: .8rem; }}
+      .snapshot-card .v, .top-card .value {{ font-size: 1.3rem; }}
+      .action-value {{ font-size: 1.2rem; }}
+    }}
       .top-grid {{ grid-template-columns: 1fr; }}
       .container {{ padding: 16px; }}
       .hero h1 {{ font-size: 1.5rem; }}
@@ -753,7 +785,7 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
       <div class="hero-grid">
         <div>
           <h1>{DASHBOARD_TITLE}</h1>
-          <p>ระบบช่วยตัดสินใจจัดซื้อน้ำมัน โดยผสานข้อมูลจาก NYMEX, WTI, MOPS, EPPO และฐานะกองทุนน้ำมัน เพื่อสรุปเป็น Action ที่ใช้งานได้จริงสำหรับทีมจัดซื้อ</p>
+          <p>ระบบช่วยตัดสินใจจัดซื้อน้ำมัน โดยผสานข้อมูลจาก NYMEX, WTI, MOPS, EPPO และฐานะกองทุนน้ำมัน เพื่อสรุปเป็น Action ที่ใช้งานได้จริงสำหรับทีมจัดซื้อ รองรับการเปิดผ่านมือถือได้ดีขึ้น</p>
           <p style="margin-top:10px;">อัปเดตล่าสุด: {updated_at}</p>
         </div>
         <div class="snapshot-grid">
