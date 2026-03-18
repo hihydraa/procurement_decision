@@ -20,7 +20,7 @@ GIDS = {
 }
 
 TZ = ZoneInfo("Asia/Bangkok")
-DASHBOARD_TITLE = "แดชบอร์ดช่วยตัดสินใจจัดซื้อน้ำมัน"
+DASHBOARD_TITLE = "Fuel Procurement Decision Dashboard"
 
 FUEL_CONFIG = {
     "G95": {
@@ -762,7 +762,7 @@ def build_html(results, nymex_snap, wti_snap, fund_snap, warnings):
             <div class="s">ล้านบาท | วันที่ {fund_date_text}</div>
           </div>
           <div class="snapshot-card">
-            <div class="k">Runway</div>
+            <div class="k">กองทุนพยุงราคาได้อีกกี่วัน</div>
             <div class="v">{fmt_num(fund_snap.get('runway'), 1)}</div>
             <div class="s">วัน | ชดเชย {fmt_num(fund_snap.get('subsidy'), 0)} ล้านบาท/วัน</div>
           </div>
@@ -774,22 +774,22 @@ def build_html(results, nymex_snap, wti_snap, fund_snap, warnings):
 
     <section class="top-grid">
       <div class="top-card">
-        <div class="label">เงินสดคงเหลือ</div>
+        <div class="label">เงินสดคงเหลือ (กองทุน)</div>
         <div class="value">{fmt_num(fund_snap.get('cash'), 0)}</div>
         <div class="muted">ล้านบาท</div>
       </div>
       <div class="top-card">
-        <div class="label">ภาระชดเชยต่อวัน</div>
+        <div class="label">ภาระชดเชยต่อวัน (กองทุน)</div>
         <div class="value">{fmt_num(fund_snap.get('subsidy'), 0)}</div>
         <div class="muted">ล้านบาท/วัน</div>
       </div>
       <div class="top-card">
-        <div class="label">การจัดเก็บต่อวัน</div>
+        <div class="label">การจัดเก็บต่อวัน (กองทุน)</div>
         <div class="value">{fmt_num(fund_snap.get('collection'), 0)}</div>
         <div class="muted">ล้านบาท/วัน</div>
       </div>
       <div class="top-card">
-        <div class="label">ผลกระทบสุทธิต่อวัน</div>
+        <div class="label">ผลกระทบสุทธิต่อวัน (กองทุน)</div>
         <div class="value">{fmt_num(fund_snap.get('net_impact'), 0)}</div>
         <div class="muted">ล้านบาท/วัน</div>
       </div>
@@ -797,7 +797,7 @@ def build_html(results, nymex_snap, wti_snap, fund_snap, warnings):
 
     {sections}
 
-    <div class="footer">เวอร์ชันปัจจุบันยังไม่ใช้ Inventory และ Jobber ในการตัดสินใจโดยตรง แต่เตรียมโครงไว้สำหรับต่อยอดในเฟสถัดไป</div>
+    <div class="footer">Fuel Procurement Decision Dashboard Vol.1</div>
   </div>
 </body>
 </html>'''
