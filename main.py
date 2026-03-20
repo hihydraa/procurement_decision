@@ -80,7 +80,34 @@ def parse_number_series(series: pd.Series) -> pd.Series:
 
 
 def parse_date_series(series: pd.Series) -> pd.Series:
-    return pd.to_datetime(series, errors="coerce", dayfirst=False).dt.date
+    # รองรับหลาย format ใน Google Sheet / CSV export
+    def parse_one(x):
+        if pd.isna(x):
+            return pd.NaT
+
+        s = str(x).strip()
+        if not s:
+            return pd.NaT
+
+        # รองรับหลายรูปแบบที่เจอจริง
+        for dayfirst in (False, True):
+            try:
+                dt = pd.to_datetime(s, errors="raise", dayfirst=dayfirst)
+                if pd.notna(dt):
+                    return dt.date()
+            except Exception:
+                pass
+
+        # fallback แบบ explicit
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d"):
+            try:
+                return datetime.strptime(s, fmt).date()
+            except Exception:
+                pass
+
+        return pd.NaT
+
+    return series.apply(parse_one)
 
 
 def parse_datetime_series(series: pd.Series) -> pd.Series:
@@ -153,6 +180,41 @@ def html_escape(text) -> str:
 
 def nl2br(text) -> str:
     return html_escape(text).replace("\n", "<br>")
+
+
+# ============================================================
+# VISUAL TONES
+# ============================================================
+def classify_market_tone(change_1d, change_3d):
+    vals = [v for v in [change_1d, change_3d] if v is not None and not pd.isna(v)]
+    if not vals:
+        return {"tone": "neutral", "label": "ข้อมูลไม่พอ"}
+    score = sum(vals)
+    if score >= 0.75:
+        return {"tone": "danger", "label": "แรงกดดันสูง"}
+    if score <= -0.75:
+        return {"tone": "success", "label": "ผ่อนคลาย"}
+    return {"tone": "warning", "label": "แกว่งตัว"}
+
+
+def classify_balance_tone(balance):
+    if balance is None or pd.isna(balance):
+        return {"tone": "neutral", "label": "ข้อมูลไม่พอ"}
+    if balance >= 0:
+        return {"tone": "success", "label": "ฐานะบวก"}
+    if balance <= -15000:
+        return {"tone": "danger", "label": "ติดลบหนัก"}
+    return {"tone": "warning", "label": "ติดลบ"}
+
+
+def classify_runway_tone(runway):
+    if runway is None or pd.isna(runway):
+        return {"tone": "neutral", "label": "ข้อมูลไม่พอ"}
+    if runway <= 20:
+        return {"tone": "danger", "label": "ตึงมาก"}
+    if runway <= 35:
+        return {"tone": "warning", "label": "เฝ้าระวัง"}
+    return {"tone": "success", "label": "ยังพอมีเวลา"}
 
 
 # ============================================================
@@ -230,10 +292,14 @@ def prep_oilfund_sheet(df: pd.DataFrame) -> pd.DataFrame:
 
     out = df.copy()
     out[date_col] = parse_date_series(out[date_col])
+
     for col in [balance_col, cash_col, subsidy_col, collection_col, net_col, runway_col]:
         if col:
             out[col] = parse_number_series(out[col])
-    out = out.dropna(subset=[date_col]).sort_values(date_col, ascending=False).reset_index(drop=True)
+
+    out = out.dropna(subset=[date_col]).copy()
+    out["_sort_date"] = pd.to_datetime(out[date_col], errors="coerce")
+    out = out.sort_values("_sort_date", ascending=False).drop(columns=["_sort_date"]).reset_index(drop=True)
 
     rename_map = {date_col: "Date"}
     opt_map = {
@@ -612,6 +678,20 @@ def metric_card(title, value, unit, delta=None, theme="default"):
     """
 
 
+def snapshot_card(title, value, subtext, tone="neutral", badge_text=""):
+    badge_html = f'<div class="tone-badge badge-{tone}">{html_escape(badge_text)}</div>' if badge_text else ""
+    return f"""
+    <div class="snapshot-card tone-{tone}">
+      <div class="snapshot-top">
+        <div class="k">{html_escape(title)}</div>
+        {badge_html}
+      </div>
+      <div class="v">{value}</div>
+      <div class="sub">{html_escape(subtext)}</div>
+    </div>
+    """
+
+
 def build_fuel_section(result: dict) -> str:
     color_map = {
         "success": "#198754",
@@ -706,6 +786,44 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
     fund_date = fund_snap.get("date")
     fund_date_text = fund_date.strftime("%d/%m/%Y") if fund_date else "-"
 
+    nymex_tone = classify_market_tone(nymex_snap.get("chg_1d"), nymex_snap.get("chg_3d"))
+    wti_tone = classify_market_tone(wti_snap.get("chg_1d"), wti_snap.get("chg_3d"))
+    balance_tone = classify_balance_tone(fund_snap.get("balance"))
+    runway_tone = classify_runway_tone(fund_snap.get("runway"))
+
+    snapshot_html = f"""
+    <div class="snapshot-grid">
+      {snapshot_card(
+          "NYMEX",
+          fmt_num(nymex_snap.get('latest'), 2),
+          f"Δ1D {fmt_change(nymex_snap.get('chg_1d'), 2)} | Δ3D {fmt_change(nymex_snap.get('chg_3d'), 2)}",
+          nymex_tone["tone"],
+          nymex_tone["label"]
+      )}
+      {snapshot_card(
+          "WTI",
+          fmt_num(wti_snap.get('latest'), 2),
+          f"Δ1D {fmt_change(wti_snap.get('chg_1d'), 2)} | Δ3D {fmt_change(wti_snap.get('chg_3d'), 2)}",
+          wti_tone["tone"],
+          wti_tone["label"]
+      )}
+      {snapshot_card(
+          "ฐานะกองทุนน้ำมันสุทธิ",
+          fmt_num(fund_snap.get('balance'), 0),
+          f"ล้านบาท | วันที่ {fund_date_text}",
+          balance_tone["tone"],
+          balance_tone["label"]
+      )}
+      {snapshot_card(
+          "กองทุนน้ำมันจะพยุงราคาได้อีก",
+          fmt_num(fund_snap.get('runway'), 1),
+          f"วัน | เงินอุดหนุน {fmt_num(fund_snap.get('subsidy'), 0)} ล้านบาท/วัน",
+          runway_tone["tone"],
+          runway_tone["label"]
+      )}
+    </div>
+    """
+
     warnings_html = ""
     if warnings:
         items = "".join(f"<li>{html_escape(w)}</li>" for w in warnings)
@@ -736,10 +854,120 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
     .hero-grid {{ display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; }}
     .hero h1 {{ margin: 0 0 8px; font-size: 2rem; }}
     .hero p {{ margin: 0; opacity: 0.92; line-height: 1.6; }}
-    .snapshot-grid {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }}
-    .snapshot-card {{ background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.15); border-radius: 18px; padding: 16px; }}
-    .snapshot-card .k {{ font-size: .75rem; text-transform: uppercase; opacity: .8; }}
-    .snapshot-card .v {{ font-size: 1.5rem; font-weight: 800; margin-top: 6px; }}
+
+    .snapshot-grid {{
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }}
+
+    .snapshot-card {{
+      border-radius: 18px;
+      padding: 16px;
+      border: 1px solid rgba(255,255,255,0.18);
+      position: relative;
+      overflow: hidden;
+      color: #fff;
+    }}
+
+    .snapshot-card::before {{
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 5px;
+      opacity: 0.95;
+    }}
+
+    .snapshot-top {{
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+    }}
+
+    .snapshot-card .k {{
+      font-size: .78rem;
+      opacity: .92;
+      font-weight: 700;
+    }}
+
+    .snapshot-card .v {{
+      font-size: 1.7rem;
+      font-weight: 800;
+      margin-top: 10px;
+      line-height: 1.1;
+    }}
+
+    .snapshot-card .sub {{
+      margin-top: 8px;
+      line-height: 1.5;
+      font-size: .95rem;
+      opacity: .96;
+      white-space: pre-line;
+    }}
+
+    .tone-badge {{
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: .72rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }}
+
+    .tone-danger {{
+      background: linear-gradient(180deg, rgba(220,53,69,.28), rgba(220,53,69,.18));
+    }}
+    .tone-danger::before {{
+      background: #ff6b6b;
+    }}
+
+    .tone-warning {{
+      background: linear-gradient(180deg, rgba(255,193,7,.26), rgba(255,193,7,.16));
+    }}
+    .tone-warning::before {{
+      background: #ffd43b;
+    }}
+
+    .tone-success {{
+      background: linear-gradient(180deg, rgba(25,135,84,.28), rgba(25,135,84,.18));
+    }}
+    .tone-success::before {{
+      background: #51cf66;
+    }}
+
+    .tone-neutral {{
+      background: rgba(255,255,255,0.12);
+    }}
+    .tone-neutral::before {{
+      background: rgba(255,255,255,0.45);
+    }}
+
+    .badge-danger {{
+      background: rgba(220,53,69,.22);
+      color: #ffd7dc;
+      border: 1px solid rgba(255,255,255,.16);
+    }}
+
+    .badge-warning {{
+      background: rgba(255,193,7,.22);
+      color: #fff3bf;
+      border: 1px solid rgba(255,255,255,.16);
+    }}
+
+    .badge-success {{
+      background: rgba(25,135,84,.22);
+      color: #d3f9d8;
+      border: 1px solid rgba(255,255,255,.16);
+    }}
+
+    .badge-neutral {{
+      background: rgba(255,255,255,.14);
+      color: #eef2ff;
+      border: 1px solid rgba(255,255,255,.16);
+    }}
 
     .top-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }}
     .top-card {{ background: var(--card); border-radius: 20px; padding: 18px; box-shadow: 0 10px 24px rgba(15,23,42,.06); }}
@@ -755,7 +983,7 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
 
     .action-box {{ min-width: 180px; border-radius: 18px; padding: 14px 16px; color: #fff; }}
     .action-success {{ background: var(--success); }}
-    .action-warning {{ background: #d39e00; }}
+    .action-warning {{ background: #d39e00; color: #1f2937; }}
     .action-danger {{ background: var(--danger); }}
     .action-primary {{ background: var(--primary); }}
     .action-secondary {{ background: #6c757d; }}
@@ -820,28 +1048,7 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
           <p>ระบบช่วยตัดสินใจจัดซื้อน้ำมัน โดยผสานข้อมูลจาก NYMEX, WTI, MOPS, EPPO และฐานะกองทุนน้ำมัน เพื่อสรุปเป็น Action ที่ใช้งานได้จริงสำหรับทีมจัดซื้อ</p>
           <p style="margin-top:10px;">อัปเดตล่าสุด: {updated_at}</p>
         </div>
-        <div class="snapshot-grid">
-          <div class="snapshot-card">
-            <div class="k">NYMEX</div>
-            <div class="v">{fmt_num(nymex_snap.get('latest'), 2)}</div>
-            <div>Δ1D {fmt_change(nymex_snap.get('chg_1d'), 2)} | Δ3D {fmt_change(nymex_snap.get('chg_3d'), 2)}</div>
-          </div>
-          <div class="snapshot-card">
-            <div class="k">WTI</div>
-            <div class="v">{fmt_num(wti_snap.get('latest'), 2)}</div>
-            <div>Δ1D {fmt_change(wti_snap.get('chg_1d'), 2)} | Δ3D {fmt_change(wti_snap.get('chg_3d'), 2)}</div>
-          </div>
-          <div class="snapshot-card">
-            <div class="k">ฐานะกองทุนน้ำมัน สุทธิ</div>
-            <div class="v">{fmt_num(fund_snap.get('balance'), 0)}</div>
-            <div>ล้านบาท | วันที่ {fund_date_text}</div>
-          </div>
-          <div class="snapshot-card">
-            <div class="k">กองทุนน้ำมันจะพยุงราคาได้กี่วัน</div>
-            <div class="v">{fmt_num(fund_snap.get('runway'), 1)}</div>
-            <div>วัน | Subsidy {fmt_num(fund_snap.get('subsidy'), 0)} ล้านบาท/วัน</div>
-          </div>
-        </div>
+        {snapshot_html}
       </div>
     </section>
 
@@ -849,22 +1056,22 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
 
     <section class="top-grid">
       <div class="top-card">
-        <div class="label">Cash Remaining</div>
+        <div class="label">เงินสดคงเหลือ</div>
         <div class="value">{fmt_num(fund_snap.get('cash'), 0)}</div>
         <div class="muted">ล้านบาท</div>
       </div>
       <div class="top-card">
-        <div class="label">Daily Subsidy</div>
+        <div class="label">เงินอุดหนุนต่อวัน</div>
         <div class="value">{fmt_num(fund_snap.get('subsidy'), 0)}</div>
         <div class="muted">ล้านบาท/วัน</div>
       </div>
       <div class="top-card">
-        <div class="label">Daily Collection</div>
+        <div class="label">เงินไหลเข้าต่อวัน</div>
         <div class="value">{fmt_num(fund_snap.get('collection'), 0)}</div>
         <div class="muted">ล้านบาท/วัน</div>
       </div>
       <div class="top-card">
-        <div class="label">Net Fund Impact</div>
+        <div class="label">ผลกระทบสุทธิต่อวัน</div>
         <div class="value">{fmt_num(fund_snap.get('net_impact'), 0)}</div>
         <div class="muted">ล้านบาท/วัน</div>
       </div>
@@ -874,7 +1081,7 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
 
     {news_html}
 
-    <div class="footer">Fuel Procurement Decision Dashboard VOl.1</div>
+    <div class="footer">Fuel Procurement Decision Dashboard Vol.1</div>
   </div>
 </body>
 </html>
@@ -944,3 +1151,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
