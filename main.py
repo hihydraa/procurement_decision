@@ -25,15 +25,15 @@ GIDS = {
 FUEL_CONFIG = {
     "GASOHOL95": {
         "label_th": "แก๊สโซฮอล์ 95",
-        "aliases": ["gasohol95 e10", "gasohol 95 e10"],
+        "aliases": ["gasohol95 e10", "gasohol 95 e10", "g95", "95"],
         "margin_default": 2.20,
-        "mops_aliases": ["mogas 95", "gasoline 95", "unleaded 95", "mogas95"],
+        "mops_aliases": ["mogas 95", "gasoline 95", "unleaded 95", "mogas95", "g95", "95"],
     },
     "DIESEL": {
         "label_th": "ดีเซล",
         "aliases": ["h-diesel", "diesel", "b7", "b10", "hsd", "ds"],
         "margin_default": 1.60,
-        "mops_aliases": ["gasoil", "diesel", "10 ppm gasoil", "ulsd", "gasoil 10ppm"],
+        "mops_aliases": ["gasoil", "diesel", "10 ppm gasoil", "ulsd", "gasoil 10ppm", "ds"],
     },
 }
 
