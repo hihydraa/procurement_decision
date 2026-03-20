@@ -654,8 +654,8 @@ def fuel_analysis(fuel_key, config, eppo_df, mops_df, nymex_snap, wti_snap, fund
         "oilfund": oilfund,
         "retail": retail,
         "wholesale": wholesale,
+        "mops": mops,
     }
-
 
 # ============================================================
 # HTML BUILDERS
@@ -778,6 +778,8 @@ def build_news_section(news_df: pd.DataFrame, max_items: int = 1) -> str:
     """
 
 
+
+
 def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str]) -> str:
     updated_at = datetime.now(TZ).strftime("%d/%m/%Y %H:%M")
     sections = "\n".join(build_fuel_section(r) for r in results)
@@ -786,8 +788,16 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
     fund_date = fund_snap.get("date")
     fund_date_text = fund_date.strftime("%d/%m/%Y") if fund_date else "-"
 
+    g95_result = next((r for r in results if r.get("fuel_key") == "GASOHOL95"), {})
+    ds_result = next((r for r in results if r.get("fuel_key") == "DIESEL"), {})
+
+    g95_mops = g95_result.get("mops", {})
+    ds_mops = ds_result.get("mops", {})
+
     nymex_tone = classify_market_tone(nymex_snap.get("chg_1d"), nymex_snap.get("chg_3d"))
     wti_tone = classify_market_tone(wti_snap.get("chg_1d"), wti_snap.get("chg_3d"))
+    g95_mops_tone = classify_market_tone(g95_mops.get("chg_1d"), g95_mops.get("chg_3d"))
+    ds_mops_tone = classify_market_tone(ds_mops.get("chg_1d"), ds_mops.get("chg_3d"))
     balance_tone = classify_balance_tone(fund_snap.get("balance"))
     runway_tone = classify_runway_tone(fund_snap.get("runway"))
 
@@ -806,6 +816,20 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
           f"Δ1D {fmt_change(wti_snap.get('chg_1d'), 2)} | Δ3D {fmt_change(wti_snap.get('chg_3d'), 2)}",
           wti_tone["tone"],
           wti_tone["label"]
+      )}
+      {snapshot_card(
+          "MOPS G95",
+          fmt_num(g95_mops.get('latest'), 2),
+          f"USD/BBL | Δ1D {fmt_change(g95_mops.get('chg_1d'), 2)} | Δ3D {fmt_change(g95_mops.get('chg_3d'), 2)}",
+          g95_mops_tone["tone"],
+          g95_mops_tone["label"]
+      )}
+      {snapshot_card(
+          "MOPS ดีเซล",
+          fmt_num(ds_mops.get('latest'), 2),
+          f"USD/BBL | Δ1D {fmt_change(ds_mops.get('chg_1d'), 2)} | Δ3D {fmt_change(ds_mops.get('chg_3d'), 2)}",
+          ds_mops_tone["tone"],
+          ds_mops_tone["label"]
       )}
       {snapshot_card(
           "ฐานะกองทุนน้ำมันสุทธิ",
@@ -857,8 +881,9 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
 
     .snapshot-grid {{
       display: grid;
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 12px;
+      align-content: start;
     }}
 
     .snapshot-card {{
@@ -917,57 +942,22 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
       white-space: nowrap;
     }}
 
-    .tone-danger {{
-      background: linear-gradient(180deg, rgba(220,53,69,.28), rgba(220,53,69,.18));
-    }}
-    .tone-danger::before {{
-      background: #ff6b6b;
-    }}
+    .tone-danger {{ background: linear-gradient(180deg, rgba(220,53,69,.28), rgba(220,53,69,.18)); }}
+    .tone-danger::before {{ background: #ff6b6b; }}
 
-    .tone-warning {{
-      background: linear-gradient(180deg, rgba(255,193,7,.26), rgba(255,193,7,.16));
-    }}
-    .tone-warning::before {{
-      background: #ffd43b;
-    }}
+    .tone-warning {{ background: linear-gradient(180deg, rgba(255,193,7,.26), rgba(255,193,7,.16)); }}
+    .tone-warning::before {{ background: #ffd43b; }}
 
-    .tone-success {{
-      background: linear-gradient(180deg, rgba(25,135,84,.28), rgba(25,135,84,.18));
-    }}
-    .tone-success::before {{
-      background: #51cf66;
-    }}
+    .tone-success {{ background: linear-gradient(180deg, rgba(25,135,84,.28), rgba(25,135,84,.18)); }}
+    .tone-success::before {{ background: #51cf66; }}
 
-    .tone-neutral {{
-      background: rgba(255,255,255,0.12);
-    }}
-    .tone-neutral::before {{
-      background: rgba(255,255,255,0.45);
-    }}
+    .tone-neutral {{ background: rgba(255,255,255,0.12); }}
+    .tone-neutral::before {{ background: rgba(255,255,255,0.45); }}
 
-    .badge-danger {{
-      background: rgba(220,53,69,.22);
-      color: #ffd7dc;
-      border: 1px solid rgba(255,255,255,.16);
-    }}
-
-    .badge-warning {{
-      background: rgba(255,193,7,.22);
-      color: #fff3bf;
-      border: 1px solid rgba(255,255,255,.16);
-    }}
-
-    .badge-success {{
-      background: rgba(25,135,84,.22);
-      color: #d3f9d8;
-      border: 1px solid rgba(255,255,255,.16);
-    }}
-
-    .badge-neutral {{
-      background: rgba(255,255,255,.14);
-      color: #eef2ff;
-      border: 1px solid rgba(255,255,255,.16);
-    }}
+    .badge-danger {{ background: rgba(220,53,69,.22); color: #ffd7dc; border: 1px solid rgba(255,255,255,.16); }}
+    .badge-warning {{ background: rgba(255,193,7,.22); color: #fff3bf; border: 1px solid rgba(255,255,255,.16); }}
+    .badge-success {{ background: rgba(25,135,84,.22); color: #d3f9d8; border: 1px solid rgba(255,255,255,.16); }}
+    .badge-neutral {{ background: rgba(255,255,255,.14); color: #eef2ff; border: 1px solid rgba(255,255,255,.16); }}
 
     .top-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }}
     .top-card {{ background: var(--card); border-radius: 20px; padding: 18px; box-shadow: 0 10px 24px rgba(15,23,42,.06); }}
@@ -1023,6 +1013,7 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
       .metric-grid {{ grid-template-columns: repeat(2, 1fr); }}
       .top-grid {{ grid-template-columns: repeat(2, 1fr); }}
       .hero-grid {{ grid-template-columns: 1fr; }}
+      .snapshot-grid {{ grid-template-columns: repeat(2, 1fr); }}
     }}
 
     @media (max-width: 680px) {{
