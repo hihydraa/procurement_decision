@@ -1152,5 +1152,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-
-แก้ไข code ให้พร้อมใช้เลย
