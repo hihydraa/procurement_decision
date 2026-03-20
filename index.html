@@ -26,8 +26,9 @@
 
     .snapshot-grid {
       display: grid;
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 12px;
+      align-content: start;
     }
 
     .snapshot-card {
@@ -86,57 +87,22 @@
       white-space: nowrap;
     }
 
-    .tone-danger {
-      background: linear-gradient(180deg, rgba(220,53,69,.28), rgba(220,53,69,.18));
-    }
-    .tone-danger::before {
-      background: #ff6b6b;
-    }
+    .tone-danger { background: linear-gradient(180deg, rgba(220,53,69,.28), rgba(220,53,69,.18)); }
+    .tone-danger::before { background: #ff6b6b; }
 
-    .tone-warning {
-      background: linear-gradient(180deg, rgba(255,193,7,.26), rgba(255,193,7,.16));
-    }
-    .tone-warning::before {
-      background: #ffd43b;
-    }
+    .tone-warning { background: linear-gradient(180deg, rgba(255,193,7,.26), rgba(255,193,7,.16)); }
+    .tone-warning::before { background: #ffd43b; }
 
-    .tone-success {
-      background: linear-gradient(180deg, rgba(25,135,84,.28), rgba(25,135,84,.18));
-    }
-    .tone-success::before {
-      background: #51cf66;
-    }
+    .tone-success { background: linear-gradient(180deg, rgba(25,135,84,.28), rgba(25,135,84,.18)); }
+    .tone-success::before { background: #51cf66; }
 
-    .tone-neutral {
-      background: rgba(255,255,255,0.12);
-    }
-    .tone-neutral::before {
-      background: rgba(255,255,255,0.45);
-    }
+    .tone-neutral { background: rgba(255,255,255,0.12); }
+    .tone-neutral::before { background: rgba(255,255,255,0.45); }
 
-    .badge-danger {
-      background: rgba(220,53,69,.22);
-      color: #ffd7dc;
-      border: 1px solid rgba(255,255,255,.16);
-    }
-
-    .badge-warning {
-      background: rgba(255,193,7,.22);
-      color: #fff3bf;
-      border: 1px solid rgba(255,255,255,.16);
-    }
-
-    .badge-success {
-      background: rgba(25,135,84,.22);
-      color: #d3f9d8;
-      border: 1px solid rgba(255,255,255,.16);
-    }
-
-    .badge-neutral {
-      background: rgba(255,255,255,.14);
-      color: #eef2ff;
-      border: 1px solid rgba(255,255,255,.16);
-    }
+    .badge-danger { background: rgba(220,53,69,.22); color: #ffd7dc; border: 1px solid rgba(255,255,255,.16); }
+    .badge-warning { background: rgba(255,193,7,.22); color: #fff3bf; border: 1px solid rgba(255,255,255,.16); }
+    .badge-success { background: rgba(25,135,84,.22); color: #d3f9d8; border: 1px solid rgba(255,255,255,.16); }
+    .badge-neutral { background: rgba(255,255,255,.14); color: #eef2ff; border: 1px solid rgba(255,255,255,.16); }
 
     .top-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
     .top-card { background: var(--card); border-radius: 20px; padding: 18px; box-shadow: 0 10px 24px rgba(15,23,42,.06); }
@@ -192,6 +158,7 @@
       .metric-grid { grid-template-columns: repeat(2, 1fr); }
       .top-grid { grid-template-columns: repeat(2, 1fr); }
       .hero-grid { grid-template-columns: 1fr; }
+      .snapshot-grid { grid-template-columns: repeat(2, 1fr); }
     }
 
     @media (max-width: 680px) {
@@ -215,7 +182,7 @@
         <div>
           <h1>Fuel Procurement Decision Dashboard</h1>
           <p>ระบบช่วยตัดสินใจจัดซื้อน้ำมัน โดยผสานข้อมูลจาก NYMEX, WTI, MOPS, EPPO และฐานะกองทุนน้ำมัน เพื่อสรุปเป็น Action ที่ใช้งานได้จริงสำหรับทีมจัดซื้อ</p>
-          <p style="margin-top:10px;">อัปเดตล่าสุด: 21/03/2026 00:02</p>
+          <p style="margin-top:10px;">อัปเดตล่าสุด: 21/03/2026 00:27</p>
         </div>
         
     <div class="snapshot-grid">
@@ -237,6 +204,26 @@
       </div>
       <div class="v">96.56</div>
       <div class="sub">Δ1D -1.47 | Δ3D +1.11</div>
+    </div>
+    
+      
+    <div class="snapshot-card tone-neutral">
+      <div class="snapshot-top">
+        <div class="k">MOPS G95</div>
+        <div class="tone-badge badge-neutral">ข้อมูลไม่พอ</div>
+      </div>
+      <div class="v">-</div>
+      <div class="sub">USD/BBL | Δ1D - | Δ3D -</div>
+    </div>
+    
+      
+    <div class="snapshot-card tone-danger">
+      <div class="snapshot-top">
+        <div class="k">MOPS ดีเซล</div>
+        <div class="tone-badge badge-danger">แรงกดดันสูง</div>
+      </div>
+      <div class="v">223.02</div>
+      <div class="sub">USD/BBL | Δ1D -1.48 | Δ3D +24.82</div>
     </div>
     
       
