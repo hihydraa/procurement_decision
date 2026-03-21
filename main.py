@@ -80,38 +80,39 @@ def parse_number_series(series: pd.Series) -> pd.Series:
 
 
 def parse_date_series(series: pd.Series) -> pd.Series:
-    # รองรับหลาย format ใน Google Sheet / CSV export
-    def parse_one(x):
-        if pd.isna(x):
-            return pd.NaT
+    s = series.astype(str).str.strip()
 
-        s = str(x).strip()
-        if not s:
-            return pd.NaT
+    parsed = pd.to_datetime(s, errors="coerce")
 
-        # รองรับหลายรูปแบบที่เจอจริง
-        for dayfirst in (False, True):
-            try:
-                dt = pd.to_datetime(s, errors="raise", dayfirst=dayfirst)
-                if pd.notna(dt):
-                    return dt.date()
-            except Exception:
-                pass
+    missing = parsed.isna()
+    if missing.any():
+        parsed2 = pd.to_datetime(s[missing], errors="coerce", dayfirst=False)
+        parsed.loc[missing] = parsed2
 
-        # fallback แบบ explicit
-        for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d"):
-            try:
-                return datetime.strptime(s, fmt).date()
-            except Exception:
-                pass
+    missing = parsed.isna()
+    if missing.any():
+        parsed3 = pd.to_datetime(s[missing], errors="coerce", dayfirst=True)
+        parsed.loc[missing] = parsed3
 
-        return pd.NaT
-
-    return series.apply(parse_one)
+    return parsed.dt.date
 
 
 def parse_datetime_series(series: pd.Series) -> pd.Series:
-    return pd.to_datetime(series, errors="coerce")
+    s = series.astype(str).str.strip()
+
+    parsed = pd.to_datetime(s, errors="coerce")
+
+    missing = parsed.isna()
+    if missing.any():
+        parsed2 = pd.to_datetime(s[missing], errors="coerce", dayfirst=False)
+        parsed.loc[missing] = parsed2
+
+    missing = parsed.isna()
+    if missing.any():
+        parsed3 = pd.to_datetime(s[missing], errors="coerce", dayfirst=True)
+        parsed.loc[missing] = parsed3
+
+    return parsed
 
 
 def find_column(df: pd.DataFrame, candidates: list[str], required: bool = True) -> str | None:
@@ -298,7 +299,9 @@ def prep_oilfund_sheet(df: pd.DataFrame) -> pd.DataFrame:
             out[col] = parse_number_series(out[col])
 
     out = out.dropna(subset=[date_col]).copy()
-    out["_sort_date"] = pd.to_datetime(out[date_col], errors="coerce")
+
+    # สร้าง datetime สำหรับ sort ให้ชัวร์
+    out["_sort_date"] = pd.to_datetime(out[date_col].astype(str), errors="coerce")
     out = out.sort_values("_sort_date", ascending=False).drop(columns=["_sort_date"]).reset_index(drop=True)
 
     rename_map = {date_col: "Date"}
@@ -1120,6 +1123,15 @@ def main():
     wti_snap = compute_market_snapshot(df_wti, "WTI")
     fund_snap = oilfund_snapshot(df_oilfund)
 
+    print("NYMEX latest date:", nymex_snap.get("date"))
+    print("WTI latest date:", wti_snap.get("date"))
+    print("Oil Fund latest date:", fund_snap.get("date"))
+
+    if not df_oilfund.empty:
+        cols = [c for c in ["Date", "TotalBalance", "CashRemaining", "DailySubsidy", "RunwayDays"] if c in df_oilfund.columns]
+        print("Oil Fund top rows after parse/sort:")
+        print(df_oilfund[cols].head(5).to_string(index=False))
+
     results = []
     for fuel_key, config in FUEL_CONFIG.items():
         result = fuel_analysis(
@@ -1143,4 +1155,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
