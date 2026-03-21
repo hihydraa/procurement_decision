@@ -79,8 +79,27 @@ def parse_number_series(series: pd.Series) -> pd.Series:
     return pd.to_numeric(cleaned, errors="coerce")
 
 
+def parse_date_series(series: pd.Series) -> pd.Series:
+    s = series.astype(str).str.strip()
+
+    parsed = pd.to_datetime(s, errors="coerce")
+
+    missing = parsed.isna()
+    if missing.any():
+        parsed2 = pd.to_datetime(s[missing], errors="coerce", dayfirst=False)
+        parsed.loc[missing] = parsed2
+
+    missing = parsed.isna()
+    if missing.any():
+        parsed3 = pd.to_datetime(s[missing], errors="coerce", dayfirst=True)
+        parsed.loc[missing] = parsed3
+
+    return parsed.dt.date
+
+
 def parse_datetime_series(series: pd.Series) -> pd.Series:
     s = series.astype(str).str.strip()
+
     parsed = pd.to_datetime(s, errors="coerce")
 
     missing = parsed.isna()
@@ -94,10 +113,6 @@ def parse_datetime_series(series: pd.Series) -> pd.Series:
         parsed.loc[missing] = parsed3
 
     return parsed
-
-
-def parse_datetime_series(series: pd.Series) -> pd.Series:
-    return pd.to_datetime(series, errors="coerce")
 
 
 def find_column(df: pd.DataFrame, candidates: list[str], required: bool = True) -> str | None:
@@ -1107,14 +1122,15 @@ def main():
     nymex_snap = compute_market_snapshot(df_nymex, "NYMEX")
     wti_snap = compute_market_snapshot(df_wti, "WTI")
     fund_snap = oilfund_snapshot(df_oilfund)
+
     print("NYMEX latest date:", nymex_snap.get("date"))
     print("WTI latest date:", wti_snap.get("date"))
     print("Oil Fund latest date:", fund_snap.get("date"))
 
-if not df_oilfund.empty:
-    cols = [c for c in ["Date", "TotalBalance", "CashRemaining", "DailySubsidy", "RunwayDays"] if c in df_oilfund.columns]
-    print("Oil Fund top rows after parse/sort:")
-    print(df_oilfund[cols].head(5).to_string(index=False))
+    if not df_oilfund.empty:
+        cols = [c for c in ["Date", "TotalBalance", "CashRemaining", "DailySubsidy", "RunwayDays"] if c in df_oilfund.columns]
+        print("Oil Fund top rows after parse/sort:")
+        print(df_oilfund[cols].head(5).to_string(index=False))
 
     results = []
     for fuel_key, config in FUEL_CONFIG.items():
@@ -1139,4 +1155,3 @@ if not df_oilfund.empty:
 
 if __name__ == "__main__":
     main()
-
