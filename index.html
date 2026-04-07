@@ -183,7 +183,7 @@
         <div>
           <h1>Fuel Procurement Decision Dashboard</h1>
           <p>ระบบช่วยตัดสินใจจัดซื้อน้ำมัน โดยผสานข้อมูลจาก NYMEX, WTI, MOPS, EPPO และฐานะกองทุนน้ำมัน เพื่อสรุปเป็น Action ที่ใช้งานได้จริงสำหรับทีมจัดซื้อ</p>
-          <p style="margin-top:10px;">อัปเดตล่าสุด: 07/04/2026 14:42</p>
+          <p style="margin-top:10px;">อัปเดตล่าสุด: 07/04/2026 16:55</p>
         </div>
         
     <div class="snapshot-grid">
@@ -278,23 +278,29 @@
     </section>
 
     
-    <section class="fuel-panel" style="border-top: 6px solid #0d6efd;">
+    <section class="fuel-panel" style="border-top: 6px solid #dc3545;">
         <div class="fuel-head">
             <div>
                 <div class="eyebrow">คำแนะนำการจัดซื้อ</div>
                 <h2>แก๊สโซฮอล์ 95</h2>
                 <div class="muted">ข้อมูลอ้างอิงล่าสุด: 07/04/2026</div>
             </div>
-            <div class="action-box action-primary">
+            <div class="action-box action-danger">
                 <div class="action-label">Action</div>
-                <div class="action-value">ซื้อปกติ</div>
+                <div class="action-value">ชะลอการซื้อ</div>
             </div>
         </div>
 
-        <div class="summary-box">
+            <div class="summary-box">
             <div class="summary-title">บทสรุปเชิงวิเคราะห์</div>
-            <div class="summary-text">ภาพรวมยังสมดุล จัดซื้อตามรอบปกติและติดตามรายวัน</div>
-            <ul><li>ตลาดโลกและ MOPS ขึ้นต่อเนื่อง</li><li>ค่าการตลาดสูงกว่าจุดเฝ้าระวัง (5.09 &gt; 2.20)</li><li>ค่าการตลาดปรับขึ้นจากวันก่อน</li><li>Runway กองทุนน้ำมันอยู่ในโซนตึงตัว (20.2 วัน)</li></ul>
+            <div class="summary-text">ต้นทุนลงและยังมีแรงช่วยกดราคา จึงควรรอ</div>
+            <div class="muted" style="margin-top:8px;">
+              MOPS: DOWN
+              | ตลาดโลก: FLAT
+              | MM: HIGH
+              | Fund: SUPPORTING
+            </div>
+            <ul><li>MOPS อยู่ฝั่งขาลง</li><li>มีการอุดหนุนกองทุน</li><li>MOPS state = DOWN</li><li>WTI/NYMEX state = FLAT</li><li>MM state = HIGH</li></ul>
         </div>
 
         <div class="metric-grid">
@@ -309,7 +315,7 @@
             
     <div class="metric-card default">
         <div class="metric-title">จุดเฝ้าระวัง</div>
-        <div class="metric-value">2.20</div>
+        <div class="metric-value">3.37</div>
         <div class="metric-unit">บาท/ลิตร</div>
         <div class="metric-badge"></div>
     </div>
@@ -350,23 +356,29 @@
     </section>
     
 
-    <section class="fuel-panel" style="border-top: 6px solid #198754;">
+    <section class="fuel-panel" style="border-top: 6px solid #dc3545;">
         <div class="fuel-head">
             <div>
                 <div class="eyebrow">คำแนะนำการจัดซื้อ</div>
                 <h2>ดีเซล</h2>
                 <div class="muted">ข้อมูลอ้างอิงล่าสุด: 07/04/2026</div>
             </div>
-            <div class="action-box action-success">
+            <div class="action-box action-danger">
                 <div class="action-label">Action</div>
-                <div class="action-value">เร่งซื้อ</div>
+                <div class="action-value">ชะลอการซื้อ</div>
             </div>
         </div>
 
-        <div class="summary-box">
+            <div class="summary-box">
             <div class="summary-title">บทสรุปเชิงวิเคราะห์</div>
-            <div class="summary-text">แรงกดดันด้านต้นทุนมีแนวโน้มเพิ่ม ควรล็อคการจัดซื้อเร็วขึ้น</div>
-            <ul><li>ตลาดโลกและ MOPS ขึ้นต่อเนื่อง</li><li>ค่าการตลาดต่ำกว่าจุดเฝ้าระวัง (-3.58 &lt; 1.60)</li><li>ค่าการตลาดปรับขึ้นจากวันก่อน</li><li>Runway กองทุนน้ำมันอยู่ในโซนตึงตัว (20.2 วัน)</li></ul>
+            <div class="summary-text">ต้นทุนลงและยังมีแรงช่วยกดราคา จึงควรรอ</div>
+            <div class="muted" style="margin-top:8px;">
+              MOPS: DOWN
+              | ตลาดโลก: FLAT
+              | MM: VERY_LOW
+              | Fund: SUPPORTING
+            </div>
+            <ul><li>MOPS อยู่ฝั่งขาลง</li><li>มีการอุดหนุนกองทุน</li><li>MOPS state = DOWN</li><li>WTI/NYMEX state = FLAT</li><li>MM state = VERY_LOW</li></ul>
         </div>
 
         <div class="metric-grid">
@@ -381,7 +393,7 @@
             
     <div class="metric-card default">
         <div class="metric-title">จุดเฝ้าระวัง</div>
-        <div class="metric-value">1.60</div>
+        <div class="metric-value">1.94</div>
         <div class="metric-unit">บาท/ลิตร</div>
         <div class="metric-badge"></div>
     </div>

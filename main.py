@@ -26,13 +26,13 @@ FUEL_CONFIG = {
     "GASOHOL95": {
         "label_th": "แก๊สโซฮอล์ 95",
         "aliases": ["gasohol95 e10", "gasohol 95 e10", "g95", "95"],
-        "margin_default": 2.20,
+        "margin_default": 3.37,
         "mops_aliases": ["mogas 95", "gasoline 95", "unleaded 95", "mogas95", "g95", "95"],
     },
     "DIESEL": {
         "label_th": "ดีเซล",
         "aliases": ["h-diesel", "diesel", "b7", "b10", "hsd", "ds"],
-        "margin_default": 1.60,
+        "margin_default": 1.94,
         "mops_aliases": ["gasoil", "diesel", "10 ppm gasoil", "ulsd", "gasoil 10ppm", "ds"],
     },
 }
@@ -344,19 +344,51 @@ def prep_news_sheet(df: pd.DataFrame) -> pd.DataFrame:
 # ============================================================
 def read_settings(df: pd.DataFrame) -> dict:
     settings = {
-        "gasohol95_margin_threshold": 2.20,
-        "diesel_margin_threshold": 1.60,
-        "buy_score_high": 65.0,
-        "buy_score_medium": 45.0,
-        "runway_danger_days": 21.0,
-        "runway_warning_days": 35.0,
-        "mops_weight": 0.45,
-        "nymex_weight": 0.35,
-        "wti_weight": 0.20,
+        "gasohol95_margin_threshold": 3.37,
+        "diesel_margin_threshold": 1.94,
+        "mm_low_buffer": 0.00,          # ต่ำกว่าค่ากลาง = low
+        "mm_very_low_buffer": 0.20,     # ต่ำกว่าค่ากลางเกิน 0.20 = very low
+        "fund_tight_balance": -15000.0,
+        "fund_strong_balance": 0.0,
+        "fund_subsidy_active": 1.0,
+        "mops_up_trigger": 0.01,
+        "mops_down_trigger": -0.01,
+        "wti_confirm_trigger": 0.01,
     }
 
     if df is None or df.empty:
         return settings
+
+    work = df.copy()
+    work.columns = [str(c).strip() for c in work.columns]
+    key_col = work.columns[0]
+    val_col = work.columns[1] if len(work.columns) > 1 else work.columns[0]
+
+    work[key_col] = work[key_col].astype(str)
+    work[val_col] = parse_number_series(work[val_col])
+
+    key_map = {
+        "gasohol95marginthreshold": "gasohol95_margin_threshold",
+        "dieselmarginthreshold": "diesel_margin_threshold",
+        "mmlowbuffer": "mm_low_buffer",
+        "mmverylowbuffer": "mm_very_low_buffer",
+        "fundtightbalance": "fund_tight_balance",
+        "fundstrongbalance": "fund_strong_balance",
+        "fundsubsidyactive": "fund_subsidy_active",
+        "mopsuptrigger": "mops_up_trigger",
+        "mopsdowntrigger": "mops_down_trigger",
+        "wticonfirmtrigger": "wti_confirm_trigger",
+    }
+
+    for _, row in work.iterrows():
+        key = norm(row[key_col])
+        val = safe_float(row[val_col])
+        if key in key_map and val is not None:
+            settings[key_map[key]] = val
+
+    return settings
+
+
 
     work = df.copy()
     work.columns = [str(c).strip() for c in work.columns]
@@ -502,115 +534,162 @@ def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
-def compute_market_score(mops, nymex, wti, settings):
-    score = 50.0
-    signals = []
+def classify_mops_state(mops: dict, settings: dict) -> str:
+    chg_1d = safe_float(mops.get("chg_1d"))
+    chg_3d = safe_float(mops.get("chg_3d"))
 
-    mops_pct = 0.0 if mops.get("chg_3d") is None or mops.get("latest") in (None, 0) else (mops["chg_3d"] / mops["latest"]) * 100
-    nymex_pct = 0.0 if nymex.get("pct_3d") is None else nymex["pct_3d"]
-    wti_pct = 0.0 if wti.get("pct_3d") is None else wti["pct_3d"]
+    # ตลาดคุณ sensitive มาก -> ใช้ 1D เป็น trigger หลัก
+    if chg_1d is not None and chg_1d > settings["mops_up_trigger"]:
+        return "UP"
+    if chg_1d is not None and chg_1d < settings["mops_down_trigger"]:
+        return "DOWN"
 
-    blended = (
-        mops_pct * settings["mops_weight"]
-        + nymex_pct * settings["nymex_weight"]
-        + wti_pct * settings["wti_weight"]
-    )
-    score += blended * 7.5
+    if chg_3d is not None and chg_3d > 0:
+        return "UP"
+    if chg_3d is not None and chg_3d < 0:
+        return "DOWN"
 
-    if blended > 1.2:
-        signals.append("ตลาดโลกและ MOPS ขึ้นต่อเนื่อง")
-    elif blended < -1.2:
-        signals.append("ตลาดโลกและ MOPS อ่อนตัวต่อเนื่อง")
-    else:
-        signals.append("ตลาดโลกแกว่งในกรอบ")
-
-    return clamp(score, 0, 100), signals
+    return "FLAT"
 
 
-def compute_margin_score(mm_value, mm_change, threshold):
-    score = 50.0
-    signals = []
+def classify_wti_state(wti: dict, nymex: dict, settings: dict) -> str:
+    wti_1d = safe_float(wti.get("chg_1d"))
+    wti_3d = safe_float(wti.get("chg_3d"))
+    nymex_1d = safe_float(nymex.get("chg_1d"))
+    nymex_3d = safe_float(nymex.get("chg_3d"))
 
+    signals = [v for v in [wti_1d, wti_3d, nymex_1d, nymex_3d] if v is not None]
+    if not signals:
+        return "FLAT"
+
+    pos = sum(1 for v in signals if v > settings["wti_confirm_trigger"])
+    neg = sum(1 for v in signals if v < -settings["wti_confirm_trigger"])
+
+    if pos >= 2 and pos > neg:
+        return "UP"
+    if neg >= 2 and neg > pos:
+        return "DOWN"
+    return "FLAT"
+
+
+def classify_mm_state(mm_value: float | None, threshold: float, settings: dict) -> str:
     if mm_value is None:
-        signals.append("ไม่มีข้อมูลค่าการตลาดล่าสุด")
-        return score, signals
+        return "UNKNOWN"
 
-    gap = mm_value - threshold
-    score -= gap * 22
-
-    if mm_value < threshold - 0.20:
-        signals.append(f"ค่าการตลาดต่ำกว่าจุดเฝ้าระวัง ({mm_value:.2f} < {threshold:.2f})")
-    elif mm_value > threshold + 0.30:
-        signals.append(f"ค่าการตลาดสูงกว่าจุดเฝ้าระวัง ({mm_value:.2f} > {threshold:.2f})")
-    else:
-        signals.append("ค่าการตลาดอยู่ใกล้ค่ากลางที่กำหนด")
-
-    if mm_change is not None:
-        score -= mm_change * 18
-        if mm_change < -0.10:
-            signals.append("ค่าการตลาดลดลงจากวันก่อน ทำให้แรงกดดันด้านต้นทุนเพิ่ม")
-        elif mm_change > 0.10:
-            signals.append("ค่าการตลาดปรับขึ้นจากวันก่อน")
-
-    return clamp(score, 0, 100), signals
+    if mm_value < threshold - settings["mm_very_low_buffer"]:
+        return "VERY_LOW"
+    if mm_value < threshold - settings["mm_low_buffer"]:
+        return "LOW"
+    if mm_value > threshold + 0.30:
+        return "HIGH"
+    return "NORMAL"
 
 
-def compute_oilfund_score(fund: dict, oilfund_per_litre: float | None, settings: dict):
-    score = 50.0
-    signals = []
+def classify_fund_state(fund_snap: dict, settings: dict) -> str:
+    balance = safe_float(fund_snap.get("balance"))
+    subsidy = safe_float(fund_snap.get("subsidy"))
+    collection = safe_float(fund_snap.get("collection"))
 
-    runway = fund.get("runway")
-    balance = fund.get("balance")
-    subsidy = fund.get("subsidy")
+    if subsidy is not None and subsidy >= settings["fund_subsidy_active"]:
+        return "SUPPORTING"
 
-    if runway is not None:
-        if runway <= settings["runway_danger_days"]:
-            score += 20
-            signals.append(f"Runway กองทุนน้ำมันอยู่ในโซนตึงตัว ({runway:.1f} วัน)")
-        elif runway <= settings["runway_warning_days"]:
-            score += 10
-            signals.append(f"Runway กองทุนน้ำมันอยู่ในโซนเฝ้าระวัง ({runway:.1f} วัน)")
-        else:
-            score -= 8
-            signals.append(f"Runway กองทุนน้ำมันยังไม่ตึงมาก ({runway:.1f} วัน)")
+    if balance is not None and balance <= settings["fund_tight_balance"]:
+        return "TIGHT"
 
-    if balance is not None:
-        if balance < 0:
-            score += 8
-            signals.append("ฐานะกองทุนน้ำมันติดลบ")
-        else:
-            score -= 4
-            signals.append("ฐานะกองทุนน้ำมันยังเป็นบวก")
+    if balance is not None and balance >= settings["fund_strong_balance"]:
+        if collection is not None and collection > 0:
+            return "STRONG"
+        return "NEUTRAL"
 
-    if subsidy is not None and subsidy > 0:
-        if subsidy > 1000:
-            score += 8
-            signals.append("ภาระชดเชยรายวันอยู่ในระดับสูง")
-        elif subsidy < 300:
-            score -= 4
-            signals.append("ภาระชดเชยรายวันไม่สูงมาก")
-
-    if oilfund_per_litre is not None:
-        if oilfund_per_litre < -5:
-            score += 10
-            signals.append("รัฐกำลังกดราคาผ่านกองทุนในระดับสูง")
-        elif oilfund_per_litre > 0:
-            score -= 5
-            signals.append("กองทุนกลับมาเก็บเงินเข้าระบบ")
-
-    return clamp(score, 0, 100), signals
+    return "NEUTRAL"
 
 
-def decide_action(final_score, market_score, margin_score):
-    if final_score >= 65:
-        return "เร่งซื้อ", "success", "แรงกดดันด้านต้นทุนมีแนวโน้มเพิ่ม ควรล็อคการจัดซื้อเร็วขึ้น"
-    if final_score >= 52:
-        return "ทยอยซื้อ", "warning", "ต้นทุนมีความเสี่ยงขาขึ้น แต่ยังไม่ใช่จุด all-in ควรทยอยซื้อ"
-    if final_score >= 40:
-        return "ซื้อปกติ", "primary", "ภาพรวมยังสมดุล จัดซื้อตามรอบปกติและติดตามรายวัน"
-    if market_score < 45 and margin_score > 55:
-        return "รอราคา", "danger", "ตลาดต้นน้ำอ่อนตัวและค่าการตลาดไม่ตึงมาก จึงมีโอกาสรอจังหวะได้"
-    return "ระวัง/ติดตามใกล้ชิด", "secondary", "ข้อมูลยังไม่ชี้ขาด ควรติดตามการเปลี่ยนแปลงต่อเนื่อง"
+def decision_matrix_action(mops_state: str, wti_state: str, mm_state: str, fund_state: str):
+    """
+    Matrix ใหม่:
+    - MOPS = ตัวตัดหลัก
+    - WTI/NYMEX = confirm
+    - MM = pressure
+    - Fund = override
+    """
+
+    reasons = []
+
+    # ---------------------------
+    # CASE 1: MOPS ขึ้น -> ฝั่งซื้อ
+    # ---------------------------
+    if mops_state == "UP":
+        reasons.append("MOPS อยู่ฝั่งขาขึ้น")
+
+        if mm_state in ("LOW", "VERY_LOW"):
+            reasons.append("ค่าการตลาดต่ำกว่าค่ากลาง ทำให้ buffer ต่ำ")
+
+            if fund_state in ("TIGHT", "NEUTRAL") and wti_state in ("UP", "FLAT"):
+                return "เร่งซื้อ", "success", "ต้นทุนมีแนวโน้มขึ้นและ buffer ต่ำ ควรล็อคการซื้อเร็วขึ้น", reasons
+
+            if fund_state == "SUPPORTING":
+                return "ทยอยซื้อ", "warning", "ต้นทุนขึ้นแต่ยังมีแรงช่วยจากกองทุน ควรทยอยซื้อ", reasons
+
+            if wti_state == "DOWN":
+                reasons.append("WTI/NYMEX ยังไม่ confirm เต็มที่")
+                return "ทยอยซื้อ", "warning", "MOPS ขึ้นแล้ว แต่ตลาดโลกยังไม่ confirm เต็มที่ ควรทยอยซื้อ", reasons
+
+        if mm_state in ("NORMAL", "HIGH"):
+            reasons.append("ค่าการตลาดยังไม่ตึงมาก")
+            if wti_state == "UP":
+                return "ทยอยซื้อ", "warning", "ต้นทุนขึ้นและตลาดโลก confirm แต่ buffer ยังพอมี ควรทยอยซื้อ", reasons
+            return "ซื้อปกติ", "primary", "ต้นทุนเริ่มขึ้น แต่ยังไม่ใช่จุดเร่งซื้อเต็มที่", reasons
+
+        return "ซื้อปกติ", "primary", "MOPS ขึ้น แต่ข้อมูลประกอบยังไม่พอให้เร่งซื้อ", reasons
+
+    # ---------------------------
+    # CASE 2: MOPS ลง -> ฝั่งรอ
+    # ---------------------------
+    if mops_state == "DOWN":
+        reasons.append("MOPS อยู่ฝั่งขาลง")
+
+        # ต้นทุนลง ต้องให้ MOPS นำ MM
+        if fund_state == "STRONG":
+            reasons.append("ฐานะกองทุนยังแข็งแรง/มีเงินไหลเข้า")
+            return "ชะลอการซื้อ", "danger", "ต้นทุนลดลงและกองทุนไม่ตึง ควรรอจังหวะราคาที่ดีกว่า", reasons
+
+        if fund_state == "NEUTRAL":
+            return "ชะลอการซื้อ", "danger", "ต้นทุนลดลง จึงควรรอการส่งผ่านต้นทุนก่อนซื้อ", reasons
+
+        if fund_state == "TIGHT":
+            if mm_state in ("LOW", "VERY_LOW") and wti_state == "UP":
+                reasons.append("มีแรงกดดันสวนจาก MM ต่ำและตลาดโลก")
+                return "ระวัง/ติดตามใกล้ชิด", "secondary", "MOPS ลง แต่มีแรงกดดันสวนจาก MM/Fund ควรรอดูการยืนยันอีกระยะ", reasons
+
+            return "ชะลอการซื้อ", "danger", "แม้กองทุนตึง แต่ต้นทุนล่าสุดยังลง จึงยังไม่ควรเร่งซื้อ", reasons
+
+        if fund_state == "SUPPORTING":
+            reasons.append("มีการอุดหนุนกองทุน")
+            return "ชะลอการซื้อ", "danger", "ต้นทุนลงและยังมีแรงช่วยกดราคา จึงควรรอ", reasons
+
+        return "ชะลอการซื้อ", "danger", "ต้นทุนอยู่ฝั่งลง ควรรอมากกว่าซื้อทันที", reasons
+
+    # ---------------------------
+    # CASE 3: MOPS ยังไม่ชัด -> รอ confirm
+    # ---------------------------
+    reasons.append("MOPS ยังไม่ให้สัญญาณชัด")
+
+    if wti_state == "UP" and mm_state in ("LOW", "VERY_LOW") and fund_state in ("TIGHT", "NEUTRAL"):
+        reasons.append("ตลาดโลกขึ้น แต่ MOPS ยังไม่ confirm")
+        return "ระวัง/ติดตามใกล้ชิด", "secondary", "มีสัญญาณต้นน้ำเริ่มตึง แต่ยังควรรอ MOPS confirm", reasons
+
+    if wti_state == "DOWN":
+        reasons.append("ตลาดโลกยังอ่อนตัว")
+        return "รอราคา", "danger", "สัญญาณยังไม่ชัดและตลาดโลกอ่อนตัว จึงมีโอกาสรอจังหวะได้", reasons
+
+    return "ซื้อปกติ", "primary", "ภาพรวมยังไม่ชัดเจน ควรซื้อแบบปกติและติดตามต่อ", reasons
+
+
+
+
+def clamp(v, lo, hi):
+    return max(lo, min(hi, v))
+
 
 
 def build_reason_bullets(signals: list[str], max_items=4) -> list[str]:
@@ -634,13 +713,57 @@ def fuel_analysis(fuel_key, config, eppo_df, mops_df, nymex_snap, wti_snap, fund
         settings["gasohol95_margin_threshold"] if fuel_key == "GASOHOL95" else settings["diesel_margin_threshold"]
     )
 
-    market_score, market_signals = compute_market_score(mops, nymex_snap, wti_snap, settings)
-    margin_score, margin_signals = compute_margin_score(mm.get("latest"), mm.get("chg_1d"), threshold)
-    oilfund_score, oilfund_signals = compute_oilfund_score(fund_snap, oilfund.get("latest"), settings)
+    mm_value = safe_float(mm.get("latest"))
 
-    final_score = round(market_score * 0.45 + margin_score * 0.35 + oilfund_score * 0.20, 1)
-    action, color, summary = decide_action(final_score, market_score, margin_score)
-    reasons = build_reason_bullets(market_signals + margin_signals + oilfund_signals)
+    mops_state = classify_mops_state(mops, settings)
+    wti_state = classify_wti_state(wti_snap, nymex_snap, settings)
+    mm_state = classify_mm_state(mm_value, threshold, settings)
+    fund_state = classify_fund_state(fund_snap, settings)
+
+    action, color, summary, matrix_reasons = decision_matrix_action(
+        mops_state=mops_state,
+        wti_state=wti_state,
+        mm_state=mm_state,
+        fund_state=fund_state,
+    )
+
+    reasons = build_reason_bullets(
+        matrix_reasons + [
+            f"MOPS state = {mops_state}",
+            f"WTI/NYMEX state = {wti_state}",
+            f"MM state = {mm_state}",
+            f"Fund state = {fund_state}",
+        ],
+        max_items=5
+    )
+
+    # score เป็นแค่ชั้นรองเพื่อแสดงระดับความแรง ไม่ใช่ตัวตัดสินหลัก
+    confidence = 50.0
+    if mops_state == "UP":
+        confidence += 20
+    elif mops_state == "DOWN":
+        confidence -= 15
+
+    if wti_state == "UP":
+        confidence += 8
+    elif wti_state == "DOWN":
+        confidence -= 6
+
+    if mm_state == "VERY_LOW":
+        confidence += 12
+    elif mm_state == "LOW":
+        confidence += 8
+    elif mm_state == "HIGH":
+        confidence -= 8
+
+    if fund_state == "TIGHT":
+        confidence += 8
+    elif fund_state == "STRONG":
+        confidence -= 8
+    elif fund_state == "SUPPORTING":
+        confidence -= 5
+
+    final_score = round(clamp(confidence, 0, 100), 1)
 
     return {
         "fuel_key": fuel_key,
@@ -658,6 +781,10 @@ def fuel_analysis(fuel_key, config, eppo_df, mops_df, nymex_snap, wti_snap, fund
         "retail": retail,
         "wholesale": wholesale,
         "mops": mops,
+        "mops_state": mops_state,
+        "wti_state": wti_state,
+        "mm_state": mm_state,
+        "fund_state": fund_state,
     }
 
 # ============================================================
@@ -725,9 +852,15 @@ def build_fuel_section(result: dict) -> str:
             </div>
         </div>
 
-        <div class="summary-box">
+            <div class="summary-box">
             <div class="summary-title">บทสรุปเชิงวิเคราะห์</div>
             <div class="summary-text">{html_escape(result['summary'])}</div>
+            <div class="muted" style="margin-top:8px;">
+              MOPS: {html_escape(result.get('mops_state', '-'))}
+              | ตลาดโลก: {html_escape(result.get('wti_state', '-'))}
+              | MM: {html_escape(result.get('mm_state', '-'))}
+              | Fund: {html_escape(result.get('fund_state', '-'))}
+            </div>
             <ul>{reasons_html}</ul>
         </div>
 
