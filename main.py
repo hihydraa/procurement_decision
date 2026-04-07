@@ -340,24 +340,67 @@ def prep_news_sheet(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ============================================================
-# LOOKUPS / SETTINGS
+# LOOKUPS / S
 # ============================================================
 def read_settings(df: pd.DataFrame) -> dict:
     settings = {
         "gasohol95_margin_threshold": 3.37,
         "diesel_margin_threshold": 1.94,
-        "mm_low_buffer": 0.00,          # ต่ำกว่าค่ากลาง = low
-        "mm_very_low_buffer": 0.20,     # ต่ำกว่าค่ากลางเกิน 0.20 = very low
+
+        "mm_low_buffer": 0.00,
+        "mm_very_low_buffer": 0.20,
+
         "fund_tight_balance": -15000.0,
         "fund_strong_balance": 0.0,
         "fund_subsidy_active": 1.0,
+
         "mops_up_trigger": 0.01,
         "mops_down_trigger": -0.01,
         "wti_confirm_trigger": 0.01,
+
+        # NEW: extreme support / extreme pressure
+        "extreme_support_per_litre": -10.0,      # อุ้มเกิน 10 บาท/ลิตร = ผิดปกติ
+        "extreme_mm_negative": 0.0,              # MM < 0 = ตึงมาก
+        "very_low_mm_gap": 1.50,                 # ต่ำกว่าค่ากลางมาก
     }
 
     if df is None or df.empty:
         return settings
+
+    work = df.copy()
+    work.columns = [str(c).strip() for c in work.columns]
+    key_col = work.columns[0]
+    val_col = work.columns[1] if len(work.columns) > 1 else work.columns[0]
+
+    work[key_col] = work[key_col].astype(str)
+    work[val_col] = parse_number_series(work[val_col])
+
+    key_map = {
+        "gasohol95marginthreshold": "gasohol95_margin_threshold",
+        "dieselmarginthreshold": "diesel_margin_threshold",
+        "mmlowbuffer": "mm_low_buffer",
+        "mmverylowbuffer": "mm_very_low_buffer",
+        "fundtightbalance": "fund_tight_balance",
+        "fundstrongbalance": "fund_strong_balance",
+        "fundsubsidyactive": "fund_subsidy_active",
+        "mopsuptrigger": "mops_up_trigger",
+        "mopsdowntrigger": "mops_down_trigger",
+        "wticonfirmtrigger": "wti_confirm_trigger",
+        "extremesupportperlitr e": "extreme_support_per_litre",
+        "extreme_support_per_litre": "extreme_support_per_litre",
+        "extrememmnegative": "extreme_mm_negative",
+        "extreme_mm_negative": "extreme_mm_negative",
+        "verylowmmgap": "very_low_mm_gap",
+        "very_low_mm_gap": "very_low_mm_gap",
+    }
+
+    for _, row in work.iterrows():
+        key = norm(row[key_col])
+        val = safe_float(row[val_col])
+        if key in key_map and val is not None:
+            settings[key_map[key]] = val
+
+    return settings
 
     work = df.copy()
     work.columns = [str(c).strip() for c in work.columns]
@@ -590,7 +633,11 @@ def classify_fund_state(fund_snap: dict, settings: dict) -> str:
     subsidy = safe_float(fund_snap.get("subsidy"))
     collection = safe_float(fund_snap.get("collection"))
 
+    # มีอุดหนุนจริง
     if subsidy is not None and subsidy >= settings["fund_subsidy_active"]:
+        # อุดหนุนระดับสูงมาก
+        if subsidy >= 1000:
+            return "SUPPORTING_HEAVY"
         return "SUPPORTING"
 
     if balance is not None and balance <= settings["fund_tight_balance"]:
@@ -604,16 +651,36 @@ def classify_fund_state(fund_snap: dict, settings: dict) -> str:
     return "NEUTRAL"
 
 
-def decision_matrix_action(mops_state: str, wti_state: str, mm_state: str, fund_state: str):
-    """
-    Matrix ใหม่:
-    - MOPS = ตัวตัดหลัก
-    - WTI/NYMEX = confirm
-    - MM = pressure
-    - Fund = override
-    """
-
+def decision_matrix_action(
+    mops_state: str,
+    wti_state: str,
+    mm_state: str,
+    fund_state: str,
+    mm_value: float | None = None,
+    threshold: float | None = None,
+    oilfund_per_litre: float | None = None,
+    settings: dict | None = None,
+):
     reasons = []
+
+    mm_gap = None
+    if mm_value is not None and threshold is not None:
+        mm_gap = threshold - mm_value
+
+    extreme_support = (
+        oilfund_per_litre is not None
+        and oilfund_per_litre <= settings["extreme_support_per_litre"]
+    )
+
+    extreme_mm_negative = (
+        mm_value is not None
+        and mm_value < settings["extreme_mm_negative"]
+    )
+
+    extreme_mm_low = (
+        mm_gap is not None
+        and mm_gap >= settings["very_low_mm_gap"]
+    )
 
     # ---------------------------
     # CASE 1: MOPS ขึ้น -> ฝั่งซื้อ
@@ -627,8 +694,8 @@ def decision_matrix_action(mops_state: str, wti_state: str, mm_state: str, fund_
             if fund_state in ("TIGHT", "NEUTRAL") and wti_state in ("UP", "FLAT"):
                 return "เร่งซื้อ", "success", "ต้นทุนมีแนวโน้มขึ้นและ buffer ต่ำ ควรล็อคการซื้อเร็วขึ้น", reasons
 
-            if fund_state == "SUPPORTING":
-                return "ทยอยซื้อ", "warning", "ต้นทุนขึ้นแต่ยังมีแรงช่วยจากกองทุน ควรทยอยซื้อ", reasons
+            if fund_state in ("SUPPORTING", "SUPPORTING_HEAVY"):
+                return "ทยอยซื้อ", "warning", "ต้นทุนขึ้น แต่ยังมีแรงช่วยจากกองทุน ควรทยอยซื้อ", reasons
 
             if wti_state == "DOWN":
                 reasons.append("WTI/NYMEX ยังไม่ confirm เต็มที่")
@@ -642,6 +709,62 @@ def decision_matrix_action(mops_state: str, wti_state: str, mm_state: str, fund_
 
         return "ซื้อปกติ", "primary", "MOPS ขึ้น แต่ข้อมูลประกอบยังไม่พอให้เร่งซื้อ", reasons
 
+    # ---------------------------
+    # CASE 2: MOPS ลง -> ฝั่งรอ
+    # ---------------------------
+    if mops_state == "DOWN":
+        reasons.append("MOPS อยู่ฝั่งขาลง")
+
+        # NEW: เคสอุ้มหนักผิดปกติ
+        if fund_state in ("SUPPORTING", "SUPPORTING_HEAVY") and extreme_support:
+            reasons.append("กองทุนอุ้มราคาต่อลิตรในระดับสูงผิดปกติ")
+
+            if extreme_mm_negative:
+                reasons.append("ค่าการตลาดติดลบ สะท้อนความตึงตัวของระบบ")
+                return "ทยอยซื้อ", "warning", "แม้ MOPS ลง แต่ราคาปัจจุบันถูกกดด้วยกองทุนอย่างหนักและ MM ติดลบ ควรล็อคบางส่วนเพื่อลดความเสี่ยง policy reversal", reasons
+
+            if mm_state == "VERY_LOW" or extreme_mm_low:
+                reasons.append("ค่าการตลาดต่ำมากเมื่อเทียบค่ากลาง")
+                return "ระวัง/ติดตามใกล้ชิด", "secondary", "แม้ MOPS ลง แต่ราคาถูกกดด้วยกองทุนอย่างหนัก จึงไม่ควรรอแบบสบายใจ ควรติดตามใกล้ชิด", reasons
+
+        if fund_state == "STRONG":
+            reasons.append("ฐานะกองทุนยังแข็งแรง/มีเงินไหลเข้า")
+            return "ชะลอการซื้อ", "danger", "ต้นทุนลดลงและกองทุนไม่ตึง ควรรอจังหวะราคาที่ดีกว่า", reasons
+
+        if fund_state == "NEUTRAL":
+            return "ชะลอการซื้อ", "danger", "ต้นทุนลดลง จึงควรรอการส่งผ่านต้นทุนก่อนซื้อ", reasons
+
+        if fund_state == "TIGHT":
+            if mm_state in ("LOW", "VERY_LOW") and wti_state == "UP":
+                reasons.append("มีแรงกดดันสวนจาก MM ต่ำและตลาดโลก")
+                return "ระวัง/ติดตามใกล้ชิด", "secondary", "MOPS ลง แต่มีแรงกดดันสวนจาก MM/Fund ควรรอดูการยืนยันอีกระยะ", reasons
+
+            return "ชะลอการซื้อ", "danger", "แม้กองทุนตึง แต่ต้นทุนล่าสุดยังลง จึงยังไม่ควรเร่งซื้อ", reasons
+
+        if fund_state == "SUPPORTING":
+            reasons.append("มีการอุดหนุนกองทุน")
+            return "ชะลอการซื้อ", "danger", "ต้นทุนลงและยังมีแรงช่วยกดราคา จึงควรรอ", reasons
+
+        if fund_state == "SUPPORTING_HEAVY":
+            reasons.append("มีการอุดหนุนกองทุนในระดับสูง")
+            return "ระวัง/ติดตามใกล้ชิด", "secondary", "ต้นทุนลง แต่กองทุนยังมีบทบาทสูง ควรติดตามนโยบายอย่างใกล้ชิด", reasons
+
+        return "ชะลอการซื้อ", "danger", "ต้นทุนอยู่ฝั่งลง ควรรอมากกว่าซื้อทันที", reasons
+
+    # ---------------------------
+    # CASE 3: MOPS ยังไม่ชัด -> รอ confirm
+    # ---------------------------
+    reasons.append("MOPS ยังไม่ให้สัญญาณชัด")
+
+    if wti_state == "UP" and mm_state in ("LOW", "VERY_LOW") and fund_state in ("TIGHT", "NEUTRAL"):
+        reasons.append("ตลาดโลกขึ้น แต่ MOPS ยังไม่ confirm")
+        return "ระวัง/ติดตามใกล้ชิด", "secondary", "มีสัญญาณต้นน้ำเริ่มตึง แต่ยังควรรอ MOPS confirm", reasons
+
+    if wti_state == "DOWN":
+        reasons.append("ตลาดโลกยังอ่อนตัว")
+        return "รอราคา", "danger", "สัญญาณยังไม่ชัดและตลาดโลกอ่อนตัว จึงมีโอกาสรอจังหวะได้", reasons
+
+    return "ซื้อปกติ", "primary", "ภาพรวมยังไม่ชัดเจน ควรซื้อแบบปกติและติดตามต่อ", reasons
     # ---------------------------
     # CASE 2: MOPS ลง -> ฝั่งรอ
     # ---------------------------
@@ -714,6 +837,7 @@ def fuel_analysis(fuel_key, config, eppo_df, mops_df, nymex_snap, wti_snap, fund
     )
 
     mm_value = safe_float(mm.get("latest"))
+    oilfund_per_litre = safe_float(oilfund.get("latest"))
 
     mops_state = classify_mops_state(mops, settings)
     wti_state = classify_wti_state(wti_snap, nymex_snap, settings)
@@ -725,6 +849,10 @@ def fuel_analysis(fuel_key, config, eppo_df, mops_df, nymex_snap, wti_snap, fund
         wti_state=wti_state,
         mm_state=mm_state,
         fund_state=fund_state,
+        mm_value=mm_value,
+        threshold=threshold,
+        oilfund_per_litre=oilfund_per_litre,
+        settings=settings,
     )
 
     reasons = build_reason_bullets(
@@ -737,8 +865,8 @@ def fuel_analysis(fuel_key, config, eppo_df, mops_df, nymex_snap, wti_snap, fund
         max_items=5
     )
 
-    # score เป็นแค่ชั้นรองเพื่อแสดงระดับความแรง ไม่ใช่ตัวตัดสินหลัก
     confidence = 50.0
+
     if mops_state == "UP":
         confidence += 20
     elif mops_state == "DOWN":
@@ -762,6 +890,14 @@ def fuel_analysis(fuel_key, config, eppo_df, mops_df, nymex_snap, wti_snap, fund
         confidence -= 8
     elif fund_state == "SUPPORTING":
         confidence -= 5
+    elif fund_state == "SUPPORTING_HEAVY":
+        confidence += 4
+
+    if oilfund_per_litre is not None and oilfund_per_litre <= settings["extreme_support_per_litre"]:
+        confidence += 8
+
+    if mm_value is not None and mm_value < 0:
+        confidence += 8
 
     final_score = round(clamp(confidence, 0, 100), 1)
 
