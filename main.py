@@ -31,7 +31,7 @@ FUEL_CONFIG = {
     },
     "DIESEL": {
         "label_th": "ดีเซล",
-        "aliases": ["h-diesel", "diesel", "b7", "b10", "hsd", "ds"],
+        "aliases": ["h-diesel"],
         "margin_default": 1.94,
         "mops_aliases": ["gasoil", "diesel", "10 ppm gasoil", "ulsd", "gasoil 10ppm", "ds"],
     },
@@ -482,19 +482,23 @@ def compute_market_snapshot(df: pd.DataFrame, label: str) -> dict:
     }
 
 
-def filter_by_aliases(df: pd.DataFrame, aliases: list[str]) -> pd.DataFrame:
+def filter_by_aliases(df: pd.DataFrame, aliases: list[str], exact: bool = False) -> pd.DataFrame:
     if df.empty:
         return df
+
     alias_norms = [norm(a) for a in aliases]
     oil_norm = df["Oil Type"].astype(str).map(norm)
-    mask = oil_norm.apply(lambda x: any(a == x or a in x for a in alias_norms))
+
+    if exact:
+        mask = oil_norm.isin(alias_norms)
+    else:
+        mask = oil_norm.apply(lambda x: any(a == x or a in x for a in alias_norms))
+
     return df.loc[mask].copy().sort_values("Date", ascending=False).reset_index(drop=True)
 
 
 def fuel_eppo_snapshot(df: pd.DataFrame, aliases: list[str]) -> dict:
-    sub = filter_by_aliases(df, aliases)
-    if sub.empty:
-        return {"date": None, "latest": {}}
+    sub = filter_by_aliases(df, aliases, exact=True)
 
     def pack(col):
         if col not in sub.columns:
