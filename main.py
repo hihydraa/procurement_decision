@@ -25,7 +25,7 @@ GIDS = {
 FUEL_CONFIG = {
     "GASOHOL95": {
         "label_th": "แก๊สโซฮอล์ 95",
-        "aliases": ["gasohol95 e10", "gasohol 95 e10", "g95", "95"],
+        "aliases": ["GASOHOL95 E10"],
         "margin_default": 3.37,
         "mops_aliases": ["mogas 95", "gasoline 95", "unleaded 95", "mogas95", "g95", "95"],
     },
