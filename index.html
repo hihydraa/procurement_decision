@@ -183,7 +183,7 @@
         <div>
           <h1>Fuel Procurement Decision Dashboard</h1>
           <p>ระบบช่วยตัดสินใจจัดซื้อน้ำมัน โดยผสานข้อมูลจาก NYMEX, WTI, MOPS, EPPO และฐานะกองทุนน้ำมัน เพื่อสรุปเป็น Action ที่ใช้งานได้จริงสำหรับทีมจัดซื้อ</p>
-          <p style="margin-top:10px;">อัปเดตล่าสุด: 30/09/2026 12:07</p>
+          <p style="margin-top:10px;">อัปเดตล่าสุด: 30/09/2026 19:20</p>
         </div>
         
     <div class="snapshot-grid">
@@ -208,23 +208,23 @@
     </div>
     
       
-    <div class="snapshot-card tone-success">
+    <div class="snapshot-card tone-danger">
       <div class="snapshot-top">
         <div class="k">MOPS G95</div>
-        <div class="tone-badge badge-success">ผ่อนคลาย</div>
+        <div class="tone-badge badge-danger">แรงกดดันสูง</div>
       </div>
-      <div class="v">146.37</div>
-      <div class="sub">USD/BBL | Δ1D -1.31 | Δ3D -1.59</div>
+      <div class="v">147.45</div>
+      <div class="sub">USD/BBL | Δ1D +1.08 | Δ3D +0.67</div>
     </div>
     
       
-    <div class="snapshot-card tone-success">
+    <div class="snapshot-card tone-danger">
       <div class="snapshot-top">
         <div class="k">MOPS ดีเซล</div>
-        <div class="tone-badge badge-success">ผ่อนคลาย</div>
+        <div class="tone-badge badge-danger">แรงกดดันสูง</div>
       </div>
-      <div class="v">170.00</div>
-      <div class="sub">USD/BBL | Δ1D -7.23 | Δ3D -8.92</div>
+      <div class="v">173.11</div>
+      <div class="sub">USD/BBL | Δ1D +3.11 | Δ3D -1.24</div>
     </div>
     
       
@@ -278,29 +278,29 @@
     </section>
 
     
-    <section class="fuel-panel" style="border-top: 6px solid #dc3545;">
+    <section class="fuel-panel" style="border-top: 6px solid #ffc107;">
         <div class="fuel-head">
             <div>
                 <div class="eyebrow">คำแนะนำการจัดซื้อ</div>
                 <h2>แก๊สโซฮอล์ 95</h2>
                 <div class="muted">ข้อมูลอ้างอิงล่าสุด: 30/09/2026</div>
             </div>
-            <div class="action-box action-danger">
+            <div class="action-box action-warning">
                 <div class="action-label">Action</div>
-                <div class="action-value">ชะลอการซื้อ</div>
+                <div class="action-value">ทยอยซื้อ</div>
             </div>
         </div>
 
             <div class="summary-box">
             <div class="summary-title">บทสรุปเชิงวิเคราะห์</div>
-            <div class="summary-text">ต้นทุนลงและยังมีแรงช่วยกดราคา จึงควรรอ</div>
+            <div class="summary-text">ต้นทุนขึ้น แต่ยังมีแรงช่วยจากกองทุน ควรทยอยซื้อ</div>
             <div class="muted" style="margin-top:8px;">
-              MOPS: DOWN
+              MOPS: UP
               | ตลาดโลก: DOWN
               | MM: LOW
               | Fund: SUPPORTING
             </div>
-            <ul><li>MOPS อยู่ฝั่งขาลง</li><li>มีการอุดหนุนกองทุน</li><li>MOPS state = DOWN</li><li>WTI/NYMEX state = DOWN</li><li>MM state = LOW</li></ul>
+            <ul><li>MOPS อยู่ฝั่งขาขึ้น</li><li>ค่าการตลาดต่ำกว่าค่ากลาง ทำให้ buffer ต่ำ</li><li>MOPS state = UP</li><li>WTI/NYMEX state = DOWN</li><li>MM state = LOW</li></ul>
         </div>
 
         <div class="metric-grid">
@@ -356,29 +356,29 @@
     </section>
     
 
-    <section class="fuel-panel" style="border-top: 6px solid #dc3545;">
+    <section class="fuel-panel" style="border-top: 6px solid #0d6efd;">
         <div class="fuel-head">
             <div>
                 <div class="eyebrow">คำแนะนำการจัดซื้อ</div>
                 <h2>ดีเซล</h2>
                 <div class="muted">ข้อมูลอ้างอิงล่าสุด: 30/09/2026</div>
             </div>
-            <div class="action-box action-danger">
+            <div class="action-box action-primary">
                 <div class="action-label">Action</div>
-                <div class="action-value">ชะลอการซื้อ</div>
+                <div class="action-value">ซื้อปกติ</div>
             </div>
         </div>
 
             <div class="summary-box">
             <div class="summary-title">บทสรุปเชิงวิเคราะห์</div>
-            <div class="summary-text">ต้นทุนลงและยังมีแรงช่วยกดราคา จึงควรรอ</div>
+            <div class="summary-text">ต้นทุนเริ่มขึ้น แต่ยังไม่ใช่จุดเร่งซื้อเต็มที่</div>
             <div class="muted" style="margin-top:8px;">
-              MOPS: DOWN
+              MOPS: UP
               | ตลาดโลก: DOWN
               | MM: NORMAL
               | Fund: SUPPORTING
             </div>
-            <ul><li>MOPS อยู่ฝั่งขาลง</li><li>มีการอุดหนุนกองทุน</li><li>MOPS state = DOWN</li><li>WTI/NYMEX state = DOWN</li><li>MM state = NORMAL</li></ul>
+            <ul><li>MOPS อยู่ฝั่งขาขึ้น</li><li>ค่าการตลาดยังไม่ตึงมาก</li><li>MOPS state = UP</li><li>WTI/NYMEX state = DOWN</li><li>MM state = NORMAL</li></ul>
         </div>
 
         <div class="metric-grid">
@@ -443,8 +443,8 @@
       <div class="news-list">
         
         <div class="news-item">
-          <div class="news-time">30/09/2026 12:07</div>
-          <div class="news-content">🛢️ Executive Summary (24 ชม. ล่าสุด)<br><br>- WTI Crude ปรับขึ้น +0.50 มาที่ 89.55 USD/BBL สะท้อนแรงหนุนฝั่งน้ำมันดิบ (Bullish)<br>- NYMEX Singapore Gasoil ทรงตัวแทบไม่เปลี่ยนที่ 178.04 (-0.03) สะท้อนตลาดดีเซลภูมิภาคยังไร้ทิศทางชัด (Neutral)<br>- MOPS G95 ร่วง -1.31 มาที่ 146.37 USD/BBL และ MOPS DS ร่วงแรง -7.23 มาที่ 170 USD/BBL กดดันราคาน้ำมันสำเร็จรูปทั้งเบนซินและดีเซล (Bearish)<br>- ค่าการตลาด GASOHOL95 E10 อยู่ที่ 3.35 บาท/ลิตร และ H-DIESEL อยู่ที่ 2.00 บาท/ลิตร ยังอยู่ในระดับที่ผู้ค้าปลีกพอบริหารได้ (Neutral)<br>- ฐานะกองทุนน้ำมันสุทธิ -95,779.86 ล้านบาท เงินสดคงเหลือ 7,156.64 ล้านบาท Runway เพียง 17.65 วัน สถานะ CRITICAL เป็นความเสี่ยงเชิงระบบต่อการชดเชยราคา (Bearish)<br><br>สรุป:<br>👉 ภาพรวมผสมแต่เอียงลบจาก MOPS ร่วงแรงและสถานะกองทุนน้ำมันวิกฤต ขณะที่น้ำมันดิบยังเป็นบวกเล็กน้อย ทีมจัดซื้อควรระวังความเสี่ยงด้านราคาขายปลีกและสภาพคล่องกองทุนเป็นหลัก</div>
+          <div class="news-time">30/09/2026 19:20</div>
+          <div class="news-content">🛢️ Executive Summary (24 ชม. ล่าสุด)<br><br>- WTI Crude ปรับขึ้น +0.50 มาที่ 89.55 ขณะที่ NYMEX Singapore Gasoil ทรงตัวแทบไม่เปลี่ยนที่ 178.04 (-0.03) สะท้อนต้นทุนน้ำมันดิบยังยืนสูง (Bullish)<br>- MOPS DS เพิ่มขึ้นแรง +3.11 มาที่ 173.11 USD/BBL หนุนต้นทุนดีเซลปรับตัวสูงขึ้น (Bullish)<br>- MOPS G95 เพิ่มขึ้น +1.08 มาที่ 147.45 USD/BBL ต้นทุนเบนซินยังขยับขึ้นเช่นกัน (Bullish)<br>- ค่าการตลาด GASOHOL95 E10 อยู่ที่ 3.35 บาท/ลิตร และ H-DIESEL อยู่ที่ 2.00 บาท/ลิตร สะท้อน margin ปลีกยังบาง โดยเฉพาะดีเซล (Bearish)<br>- ฐานะกองทุนน้ำมันสุทธิ -95,779.86 ล้านบาท เงินสดคงเหลือ 7,156.64 ล้านบาท Runway เพียง 17.65 วัน สถานะ CRITICAL เป็นความเสี่ยงเชิงนโยบายและต้นทุนในประเทศ (Bearish)<br><br>สรุป:<br>👉 ต้นทุนน้ำมันดิบและผลิตภัณฑ์สำเร็จรูปยังเป็นขาขึ้น ขณะที่สถานะกองทุนน้ำมันวิกฤตและค่าการตลาดดีเซลต่ำ กดดันให้ราคาขายปลีกในประเทศมีแรงปรับขึ้นและความเสี่ยงเชิงนโยบายสูง</div>
         </div>
         
       </div>
