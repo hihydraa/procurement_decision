@@ -1,6 +1,7 @@
 """
-Generates the daily "Executive Summary" NEWS entry via the Claude API, replacing the manual
-step of pasting numbers into ChatGPT/Claude by hand and copying the reply back into the sheet.
+Generates the daily "Executive Summary" NEWS entry via the DeepSeek API (same provider the
+OIL BOT project already uses), replacing the manual step of pasting numbers into
+ChatGPT/Claude by hand and copying the reply back into the sheet.
 
 Feeds the model the same computed snapshot main.py itself would show (NYMEX/WTI/MOPS deltas,
 EPPO retail changes, Oil Fund status) so the summary is grounded in real numbers already in
@@ -17,7 +18,6 @@ from common import TABS, SHEET_ID, get_token, sheets_get, sheets_append, col_to_
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo(TZ_NAME)
-ANTHROPIC_MODEL = "claude-sonnet-5"
 
 
 def last_n(tok, tab_key, n=4, date_col_idx=0):
@@ -88,16 +88,20 @@ def build_prompt(lines):
 ตอบเป็นข้อความสรุปเท่านั้น ไม่ต้องมีคำอธิบายอื่น"""
 
 
-def call_claude(prompt):
-    api_key = os.environ["ANTHROPIC_API_KEY"]
+def call_deepseek(prompt):
+    # ใช้ DeepSeek ตัวเดียวกับที่ worker.js ของ OIL BOT ใช้อยู่แล้ว (ประหยัดกว่า ไม่ต้องเปิดบัญชีใหม่)
+    api_key = os.environ["DEEPSEEK_API_KEY"]
     r = requests.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-        json={"model": ANTHROPIC_MODEL, "max_tokens": 600, "messages": [{"role": "user", "content": prompt}]},
+        "https://api.deepseek.com/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={
+            "model": "deepseek-chat", "temperature": 0.7, "max_tokens": 800,
+            "messages": [{"role": "user", "content": prompt}],
+        },
         timeout=60,
     )
     r.raise_for_status()
-    return r.json()["content"][0]["text"].strip()
+    return r.json()["choices"][0]["message"]["content"].strip()
 
 
 def main():
@@ -107,7 +111,7 @@ def main():
         print("[NEWS] no data available yet to summarize, skipping")
         return
 
-    summary = call_claude(build_prompt(lines))
+    summary = call_deepseek(build_prompt(lines))
     ts = datetime.now(TZ).strftime("%-m/%-d/%Y %H:%M:%S") if os.name != "nt" else datetime.now(TZ).strftime("%#m/%#d/%Y %H:%M:%S")
     sheets_append(tok, SHEET_ID, f"{TABS['NEWS']}!A1:B1", [[ts, summary]])
     print(f"[NEWS] appended summary at {ts}")

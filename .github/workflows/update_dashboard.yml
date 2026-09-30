@@ -46,11 +46,11 @@ jobs:
         run: python scrape_futures.py
         continue-on-error: true
 
-      - name: Generate daily news summary (Claude API) into the sheet
+      - name: Generate daily news summary (DeepSeek API) into the sheet
         env:
           SA_EMAIL: ${{ secrets.SA_EMAIL }}
           SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: python news.py
         continue-on-error: true
 
