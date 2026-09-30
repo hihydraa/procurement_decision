@@ -47,8 +47,17 @@ EXCEL_EPOCH = datetime(1899, 12, 30)
 # AUTH / SHEETS HELPERS
 # ============================================================
 def get_token(scope=SHEETS_SCOPE):
-    email = os.environ["SA_EMAIL"]
-    private_key = os.environ["SA_PRIVATE_KEY"].replace("\\n", "\n")
+    raw = os.environ["SA_PRIVATE_KEY"].strip()
+    # SA_PRIVATE_KEY อาจเป็น PEM ดิบ หรือ JSON ทั้งไฟล์ของ service account key (ถ้าตั้ง secret
+    # ด้วย `gh secret set ... < key.json` จะได้ JSON ทั้งก้อนมา) รองรับทั้งสองแบบ
+    if raw.startswith("{"):
+        import json as _json
+        key_obj = _json.loads(raw)
+        private_key = key_obj["private_key"]
+        email = os.environ.get("SA_EMAIL") or key_obj["client_email"]
+    else:
+        private_key = raw.replace("\\n", "\n")
+        email = os.environ["SA_EMAIL"]
     now = int(time.time())
     token_payload = {
         "iss": email, "scope": scope, "aud": "https://oauth2.googleapis.com/token",
