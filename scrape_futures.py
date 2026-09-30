@@ -28,7 +28,7 @@ UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like 
 
 
 def scrape_historical_table(page, url):
-    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    resp = page.goto(url, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(3000)
     tables = page.eval_on_selector_all(
         "table",
@@ -39,7 +39,12 @@ def scrape_historical_table(page, url):
     for t in tables:
         if t and t[0] == EXPECTED_HEADER:
             return t[1:]
-    raise RuntimeError(f"{url}: could not find the historical-data table (page layout may have changed)")
+    # เผื่อวินิจฉัย: บันทึก status code + ตัวอย่างเนื้อหาหน้าเว็บที่ได้จริงไว้ในข้อความ error
+    body_snippet = page.evaluate("() => document.body ? document.body.innerText.slice(0, 300) : '(no body)'")
+    raise RuntimeError(
+        f"{url}: no matching table (found {len(tables)} tables). "
+        f"HTTP {resp.status if resp else '?'}. Body starts: {body_snippet!r}"
+    )
 
 
 def parse_num(s):
