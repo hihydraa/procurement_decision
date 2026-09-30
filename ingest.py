@@ -409,22 +409,31 @@ def main():
     today = datetime.now(TZ).date()
 
     # แต่ละแหล่งข้อมูลเป็นอิสระจากกัน — ถ้าแหล่งหนึ่งล้ม (เว็บเปลี่ยนฟอร์แมต, ยังไม่เผยแพร่ ฯลฯ)
-    # ไม่ควรทำให้แหล่งอื่นที่ยังทำงานได้ปกติถูกข้ามไปด้วย
+    # ไม่ควรทำให้แหล่งอื่นที่ยังทำงานได้ปกติถูกข้ามไปด้วย แต่ยังต้องรายงานว่าล้มเหลว
+    # (ไม่ใช่แค่ print แล้วให้ script จบแบบ exit code 0 เหมือนไม่มีอะไรผิดพลาด)
+    failures = []
+
     eppo_result = None
     try:
         eppo_result = ingest_eppo(tok, today)
     except Exception as e:
         print(f"[EPPO] FAILED: {e}")
+        failures.append("EPPO")
 
     try:
         ingest_mops(tok)
     except Exception as e:
         print(f"[MOPS] FAILED: {e}")
+        failures.append("MOPS")
 
     try:
         ingest_oilfund(tok, today, eppo_result)
     except Exception as e:
         print(f"[OILFUND] FAILED: {e}")
+        failures.append("OILFUND")
+
+    if failures:
+        raise SystemExit(f"ingest.py: {', '.join(failures)} failed — see logs above")
 
 
 if __name__ == "__main__":
