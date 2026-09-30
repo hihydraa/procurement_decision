@@ -3,3 +3,4 @@ requests
 openpyxl
 pdfplumber
 PyJWT[crypto]
+playwright
