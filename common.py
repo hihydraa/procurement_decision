@@ -75,6 +75,18 @@ def sheets_append(tok, spreadsheet_id, rng, rows):
     return r.json()
 
 
+def sheets_update(tok, spreadsheet_id, rng, rows):
+    """เขียนทับช่วงที่ระบุตรงๆ (ไม่ใช่เพิ่มแถวใหม่) — ใช้แก้แถวที่เขียนไว้แล้วแต่ค่าไม่ครบ"""
+    r = requests.put(
+        f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{requests.utils.quote(rng)}",
+        params={"valueInputOption": "USER_ENTERED"},
+        headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+        json={"values": rows},
+    )
+    r.raise_for_status()
+    return r.json()
+
+
 def col_to_dicts(rows):
     header = rows[0] if rows else []
     return [dict(zip(header, r + [None] * (len(header) - len(r)))) for r in rows[1:]]

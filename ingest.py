@@ -23,7 +23,7 @@ import pdfplumber
 import requests
 
 from common import (
-    SHEET_ID, OILBOT_SHEET_ID, TABS, get_token, sheets_get, sheets_append,
+    SHEET_ID, OILBOT_SHEET_ID, TABS, get_token, sheets_get, sheets_append, sheets_update,
     col_to_dicts, excel_serial_to_date, fmt_date_us,
 )
 
@@ -317,7 +317,30 @@ def ingest_oilfund(tok, today: date, eppo_result):
     if last_date is None:
         print("[OILFUND] could not parse last row's date, skipping")
         return
-    if last_date >= today:
+
+    if last_date == today:
+        # แถวของวันนี้มีอยู่แล้ว — ถ้า Daily_Subsidy ยังว่าง (รันรอบก่อนหน้านี้ตอน EPPO ของวันนี้
+        # ยังไม่เผยแพร่) แต่ตอนนี้มี eppo_result แล้ว ให้อัปเดตแถวเดิมให้ถูกต้องแทนที่จะปล่อยว่างค้างไว้
+        subsidy_blank = last.get("Daily_Subsidy (ล้านบาท/วัน)") in (None, "")
+        if subsidy_blank and eppo_result and len(existing) >= 2:
+            prev = existing[-2]
+            prev_balance = float(prev["Total_Balance (ล้านบาท)"])
+            prev_cash = float(prev["Cash_Remaining (ล้านบาท)"])
+            settings = load_fund_settings(tok)
+            subsidy, collection, net_impact = eppo_result["subsidy"], eppo_result["collection"], eppo_result["net_impact"]
+            balance = round(prev_balance + net_impact, 2)
+            cash = round(prev_cash - subsidy, 2)
+            runway = round(cash / subsidy, 2) if subsidy else None
+            status = runway_status(runway, settings)
+            row_num = len(existing) + 1  # +1 สำหรับแถวหัวตาราง
+            sheets_update(tok, SHEET_ID, f"{TABS['ENTRY_OILFUND_SUSTAINABILITY']}!B{row_num}:H{row_num}",
+                          [[balance, cash, round(subsidy, 2), round(collection, 2), round(net_impact, 2),
+                            runway if runway is not None else "", status]])
+            print(f"[OILFUND] {today}: filled in Daily_Subsidy/Collection/Runway now that EPPO data is available (was blank)")
+        else:
+            print(f"[OILFUND] already up to date ({last_date})")
+        return
+    if last_date > today:
         print(f"[OILFUND] already up to date ({last_date})")
         return
 
