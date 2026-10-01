@@ -23,7 +23,7 @@ import pdfplumber
 import requests
 
 from common import (
-    SHEET_ID, OILBOT_SHEET_ID, TABS, get_token, sheets_get, sheets_append,
+    SHEET_ID, OILBOT_SHEET_ID, TABS, get_token, sheets_get, sheets_append, sheets_update,
     col_to_dicts, excel_serial_to_date, fmt_date_us,
 )
 
@@ -86,6 +86,44 @@ def load_consumption_ref(tok):
     return ref
 
 
+# คอลัมน์ B..M ของ Entry_Eppo ตามลำดับจริงในชีท (ไม่รวม Date/Avg Consumption/Estimated */Obs Rank
+# ซึ่งคำนวณ/จัดการแยกต่างหากตอนสร้างแถว)
+EPPO_PRICE_COLS = [
+    "oil type", "EX-REFIN.", "EXCISE TAX", "M. TAX", "OIL FUND", "CONSV. FUND",
+    "WHOLESALE (WS)", "VAT (WS)", "WS&VAT", "MARKETING MARGIN", "VAT (MM)", "RETAIL",
+]
+
+
+def carry_forward_eppo(tok, existing_dicts, obs_count, date_str):
+    """ไม่มีไฟล์ EPPO วันนี้ (เช่น วันหยุด/ยังไม่เผยแพร่) — ตามหลักที่ตกลงไว้ ให้ใช้ตัวเลขของ
+    วันก่อนหน้าซ้ำแทนที่จะปล่อยช่องว่าง (ราคายังไม่เปลี่ยนจนกว่าจะมีประกาศใหม่จริง)"""
+    dated = [(excel_serial_to_date(r.get("Date")), r) for r in existing_dicts if r.get("Date") is not None]
+    if not dated:
+        print("[EPPO] no previous rows to carry forward from, skipping")
+        return None
+    latest_date = max(d for d, _ in dated)
+    latest_rows = [r for d, r in dated if d == latest_date]
+
+    new_rows = []
+    day_net_impact = 0.0
+    for r in latest_rows:
+        ot = r.get("oil type")
+        obs_count[ot] = obs_count.get(ot, 0) + 1
+        subsidy = r.get("Estimated Subsidy (mn baht/day)") or 0
+        collection = r.get("Estimated Collection (mn baht/day)") or 0
+        net_impact = round(collection - subsidy, 2)
+        day_net_impact += net_impact
+        row = [date_str] + [r.get(c) for c in EPPO_PRICE_COLS]
+        row += [r.get("Avg Consumption (mn L/day)"), subsidy, collection, net_impact, obs_count[ot]]
+        new_rows.append(row)
+
+    sheets_append(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!A1:R1", new_rows)
+    print(f"[EPPO] carried forward {len(new_rows)} rows from {latest_date} as {date_str}")
+    return {"date_str": date_str, "net_impact": day_net_impact,
+            "subsidy": sum(r.get("Estimated Subsidy (mn baht/day)") or 0 for r in latest_rows),
+            "collection": sum(r.get("Estimated Collection (mn baht/day)") or 0 for r in latest_rows)}
+
+
 def ingest_eppo(tok, today: date):
     existing = sheets_get(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!A1:Q5000")
     existing_dicts = col_to_dicts(existing)
@@ -104,8 +142,8 @@ def ingest_eppo(tok, today: date):
 
     wb = fetch_eppo_workbook(today)
     if wb is None:
-        print(f"[EPPO] {eppo_xlsx_url(today)} not published yet")
-        return None
+        print(f"[EPPO] {eppo_xlsx_url(today)} not published yet — carrying forward yesterday's values")
+        return carry_forward_eppo(tok, existing_dicts, obs_count, date_str)
 
     consumption = load_consumption_ref(tok)
     fuel_rows = parse_eppo_rows(wb, today)
@@ -127,10 +165,10 @@ def ingest_eppo(tok, today: date):
         new_rows.append([
             date_str, f["oil_type"], f["ex_refin"], f["excise"], f["mtax"], f["oilfund"],
             f["consv"], f["wholesale"], f["vat_ws"], f["ws_vat"], f["mm"], f["vat_mm"], f["retail"],
-            avg, round(subsidy, 2), round(collection, 2), obs_count[f["oil_type"]],
+            avg, round(subsidy, 2), round(collection, 2), round(collection - subsidy, 2), obs_count[f["oil_type"]],
         ])
 
-    sheets_append(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!A1:Q1", new_rows)
+    sheets_append(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!A1:R1", new_rows)
     print(f"[EPPO] appended {len(new_rows)} rows for {date_str}, day net impact = {day_net_impact:.2f}")
     return {"date_str": date_str, "net_impact": day_net_impact,
             "subsidy": sum(r[14] for r in new_rows), "collection": sum(r[15] for r in new_rows)}
@@ -139,7 +177,7 @@ def ingest_eppo(tok, today: date):
 # ============================================================
 # MOPS (reused from OIL BOT's own MopsLog)
 # ============================================================
-def ingest_mops(tok):
+def ingest_mops(tok, today: date):
     mops_rows = col_to_dicts(sheets_get(tok, OILBOT_SHEET_ID, "MopsLog!A1:J20000"))
     by_date = {}
     for r in mops_rows:
@@ -151,21 +189,38 @@ def ingest_mops(tok):
     # Date เก็บเป็น serial number ของ Sheets ไม่ใช่ string — ต้องแปลงก่อนเทียบ ไม่งั้นจะไม่มีวันตรงกัน
     seen = {excel_serial_to_date(r.get("Date")) for r in existing if r.get("Date") is not None}
     obs_count = {"95": 0, "DS": 0}
+    # ราคาล่าสุดที่เคยบันทึกไว้ต่อชนิด — ใช้เป็นฐานถ้าวันนี้ไม่มีข้อมูลใหม่เลย (เริ่มจากของเดิมในชีท)
+    last_price = {}
     for r in existing:
         k = r.get("Normalized Key")
         if k in obs_count:
             obs_count[k] += 1
+            last_price[k] = r.get("Price (USD/BBL)")
 
     new_rows = []
+    got_today = False
     for d in sorted(by_date):
-        date_str = fmt_date_us(d)
         if d in seen:
             continue
+        date_str = fmt_date_us(d)
         r = by_date[d]
         obs_count["95"] += 1
         obs_count["DS"] += 1
-        new_rows.append([date_str, "G95", r.get("g95_price"), "", "95", obs_count["95"]])
-        new_rows.append([date_str, "DS", r.get("diesel_price"), "", "DS", obs_count["DS"]])
+        last_price["95"], last_price["DS"] = r.get("g95_price"), r.get("diesel_price")
+        new_rows.append([date_str, "G95", last_price["95"], "", "95", obs_count["95"]])
+        new_rows.append([date_str, "DS", last_price["DS"], "", "DS", obs_count["DS"]])
+        if d == today:
+            got_today = True
+
+    if today not in seen and not got_today and last_price:
+        # OIL BOT ไม่มี MOPS ของวันนี้เลย (เช่น ไม่มีคนโพสต์ในกลุ่ม LINE วันนั้น) — ใช้ราคาล่าสุด
+        # ที่มีซ้ำแทนตามหลักที่ตกลงไว้ แทนที่จะปล่อยช่องว่าง
+        date_str = fmt_date_us(today)
+        for fuel_label, key in (("G95", "95"), ("DS", "DS")):
+            if last_price.get(key) is not None:
+                obs_count[key] += 1
+                new_rows.append([date_str, fuel_label, last_price[key], "", key, obs_count[key]])
+        print(f"[MOPS] no data for {today} — carried forward last known prices")
 
     sheets_append(tok, SHEET_ID, f"{TABS['ENTRY_MOPS']}!A1:F1", new_rows)
     print(f"[MOPS] appended {len(new_rows)} rows ({len(new_rows) // 2} dates)")
@@ -262,7 +317,30 @@ def ingest_oilfund(tok, today: date, eppo_result):
     if last_date is None:
         print("[OILFUND] could not parse last row's date, skipping")
         return
-    if last_date >= today:
+
+    if last_date == today:
+        # แถวของวันนี้มีอยู่แล้ว — ถ้า Daily_Subsidy ยังว่าง (รันรอบก่อนหน้านี้ตอน EPPO ของวันนี้
+        # ยังไม่เผยแพร่) แต่ตอนนี้มี eppo_result แล้ว ให้อัปเดตแถวเดิมให้ถูกต้องแทนที่จะปล่อยว่างค้างไว้
+        subsidy_blank = last.get("Daily_Subsidy (ล้านบาท/วัน)") in (None, "")
+        if subsidy_blank and eppo_result and len(existing) >= 2:
+            prev = existing[-2]
+            prev_balance = float(prev["Total_Balance (ล้านบาท)"])
+            prev_cash = float(prev["Cash_Remaining (ล้านบาท)"])
+            settings = load_fund_settings(tok)
+            subsidy, collection, net_impact = eppo_result["subsidy"], eppo_result["collection"], eppo_result["net_impact"]
+            balance = round(prev_balance + net_impact, 2)
+            cash = round(prev_cash - subsidy, 2)
+            runway = round(cash / subsidy, 2) if subsidy else None
+            status = runway_status(runway, settings)
+            row_num = len(existing) + 1  # +1 สำหรับแถวหัวตาราง
+            sheets_update(tok, SHEET_ID, f"{TABS['ENTRY_OILFUND_SUSTAINABILITY']}!B{row_num}:H{row_num}",
+                          [[balance, cash, round(subsidy, 2), round(collection, 2), round(net_impact, 2),
+                            runway if runway is not None else "", status]])
+            print(f"[OILFUND] {today}: filled in Daily_Subsidy/Collection/Runway now that EPPO data is available (was blank)")
+        else:
+            print(f"[OILFUND] already up to date ({last_date})")
+        return
+    if last_date > today:
         print(f"[OILFUND] already up to date ({last_date})")
         return
 
@@ -346,7 +424,7 @@ def main():
         failures.append("EPPO")
 
     try:
-        ingest_mops(tok)
+        ingest_mops(tok, today)
     except Exception as e:
         print(f"[MOPS] FAILED: {e}")
         failures.append("MOPS")
