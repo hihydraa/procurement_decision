@@ -46,13 +46,20 @@ def main():
         print(f"[WTI] {today} already recorded, skipping")
         return
 
-    price = fetch_wti_price()
     prev_dates = sorted(d for d in seen if d < today)
     prev_price = seen[prev_dates[-1]] if prev_dates else None
-    change_pct = f"{(price - prev_price) / prev_price:+.2%}" if prev_price else ""
 
-    sheets_append(tok, SHEET_ID, f"{TABS['ENTRY_WTI']}!A1:G1", [[fmt_date_us(today), price, "", "", "", "", change_pct]])
-    print(f"[WTI] appended {price} for {today}")
+    try:
+        price = fetch_wti_price()
+        change_pct = f"{(price - prev_price) / prev_price:+.2%}" if prev_price else ""
+        sheets_append(tok, SHEET_ID, f"{TABS['ENTRY_WTI']}!A1:G1", [[fmt_date_us(today), price, "", "", "", "", change_pct]])
+        print(f"[WTI] appended {price} for {today}")
+    except Exception as e:
+        # OilPriceAPI ล้ม (เช่น rate limit, เน็ตมีปัญหา) — ใช้ราคาล่าสุดที่มีซ้ำแทนตามหลักที่ตกลงไว้
+        if prev_price is None:
+            raise
+        print(f"[WTI] fetch failed ({e}) — carrying forward {prev_price} from {prev_dates[-1]}")
+        sheets_append(tok, SHEET_ID, f"{TABS['ENTRY_WTI']}!A1:G1", [[fmt_date_us(today), prev_price, "", "", "", "", "0.00%"]])
 
 
 if __name__ == "__main__":
