@@ -30,6 +30,12 @@ from common import (
 TZ = ZoneInfo("Asia/Bangkok")
 
 
+def _key_str(v):
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return "" if v is None else str(v).strip()
+
+
 # ============================================================
 # EPPO PRICE STRUCTURE
 # ============================================================
@@ -191,11 +197,36 @@ def ingest_mops(tok, today: date):
     obs_count = {"95": 0, "DS": 0}
     # ราคาล่าสุดที่เคยบันทึกไว้ต่อชนิด — ใช้เป็นฐานถ้าวันนี้ไม่มีข้อมูลใหม่เลย (เริ่มจากของเดิมในชีท)
     last_price = {}
-    for r in existing:
-        k = r.get("Normalized Key")
+    row_of = {}  # (date, key) -> (เลขแถวในชีท, ราคา)
+    for i, r in enumerate(existing):
+        # Normalized Key ของ G95 อ่านกลับมาเป็นเลข 95 (หรือข้อความ "95" ในแถวเก่า) ต้องเทียบเป็นสตริงเสมอ
+        # ไม่งั้น `95 in {"95": ..}` เป็น False แล้วไปหยิบราคาจากแถวข้อความเก่าๆ มาเป็น "ราคาล่าสุด"
+        k = _key_str(r.get("Normalized Key"))
         if k in obs_count:
             obs_count[k] += 1
             last_price[k] = r.get("Price (USD/BBL)")
+            d = excel_serial_to_date(r.get("Date"))
+            if d:
+                row_of[(d, k)] = (i + 2, r.get("Price (USD/BBL)"))
+
+    # แถว carry-forward ของวันหนึ่งอาจถูกเขียนไว้ก่อนที่ราคาปิดจริงจะโพสต์ในไลน์ (ปิดตลาดโพสต์เย็น แต่ cron รันตั้งแต่เช้า)
+    # ให้ MopsLog เป็นแหล่งความจริง: วันที่มีใน MopsLog ใช้ค่าจริง วันที่ไม่มีใช้ค่าของวันก่อนหน้า (ตามหลัก carry-forward)
+    # ทำเฉพาะวันตั้งแต่ที่ MopsLog เริ่มมีข้อมูลเป็นต้นไป — ข้อมูลเก่าที่กรอกมือก่อนหน้านั้นไม่แตะ
+    first_log = min(by_date) if by_date else None
+    field_of = {"95": "g95_price", "DS": "diesel_price"}
+    expected = {}
+    for (d, k), (row_no, price) in sorted(row_of.items()):
+        if first_log is None or d < first_log:
+            expected[k] = price
+            continue
+        official = by_date[d].get(field_of[k]) if d in by_date else None
+        exp = official if isinstance(official, (int, float)) else expected.get(k, price)
+        expected[k] = exp
+        if isinstance(price, (int, float)) and abs(exp - price) > 0.005:
+            sheets_update(tok, SHEET_ID, f"{TABS['ENTRY_MOPS']}!C{row_no}", [[exp]])
+            print(f"[MOPS] corrected {d} {k}: {price} -> {exp}")
+    for k, v in expected.items():
+        last_price[k] = v
 
     new_rows = []
     got_today = False
