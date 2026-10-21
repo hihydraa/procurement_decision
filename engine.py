@@ -111,7 +111,8 @@ def live_stats(decision_log: pd.DataFrame, fuel: str, phase: str, action: str, d
     d["outcome_delta"] = pd.to_numeric(d["outcome_delta"], errors="coerce")
     d = d[(d.fuel == fuel) & (d.phase == phase) & (d.action_code == action)].dropna(subset=["outcome_delta"])
     d["asof"] = pd.to_datetime(d["asof"], errors="coerce")
-    d = d[d.asof >= d.asof.max() - pd.Timedelta(days=days)] if len(d) else d
+    # ต้องใช้ d["asof"] ไม่ใช่ d.asof — DataFrame.asof เป็นเมธอดของ pandas ไม่ใช่คอลัมน์
+    d = d[d["asof"] >= d["asof"].max() - pd.Timedelta(days=days)] if len(d) else d
     if len(d) < MIN_LIVE_OUTCOMES:
         return None
     return {"n_days": int(len(d)), "rise_rate": float((d.outcome_delta > M.RISE_THB).mean()),
