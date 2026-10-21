@@ -27,9 +27,9 @@ MARKET_MAX_AGE_DAYS = 3     # ราคาของคลังที่ไม�
 
 def add_ts(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
-    if out.empty:
-        out["ts"] = pd.Series(dtype="datetime64[ns]")
-        return out
+    if out.empty or "msg_date" not in out.columns or "msg_time" not in out.columns:
+        # ว่าง หรือไม่ใช่ตารางฟีดที่คาด (เช่น gviz ส่งชีทอื่นมาแทนแท็บที่ไม่มีอยู่) — ถือว่าไม่มีข้อมูล ไม่ให้ทั้งระบบพัง
+        return pd.DataFrame({"ts": pd.Series(dtype="datetime64[ns]")})
     out["ts"] = pd.to_datetime(out["msg_date"].astype(str) + " " + out["msg_time"].astype(str), errors="coerce")
     return out.dropna(subset=["ts"]).sort_values("ts").reset_index(drop=True)
 

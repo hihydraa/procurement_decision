@@ -138,6 +138,26 @@ class FreshnessTests(unittest.TestCase):
         self.assertEqual(MAIN.eppo_fresh_date(marked), pd.Timestamp("2026-10-06"))
 
 
+class FeedRobustnessTests(unittest.TestCase):
+    def test_wrong_schema_table_is_treated_as_empty(self):
+        """gviz ส่งชีทแรกมาแทนแท็บที่ไม่มีอยู่ (คอลัมน์ Date/Price...) — ต้องไม่ทำให้ระบบพัง"""
+        wrong = pd.DataFrame({"Date": ["2/17/2026"], "Price": [87.75]})
+        t = S.Tables(intraday=wrong, headsup=wrong, mops_close=wrong, fund=wrong)
+        self.assertTrue(t.intraday.empty and t.headsup.empty and t.mops_close.empty and t.fund.empty)
+        d = engine.decide("DIESEL", pd.Timestamp("2026-10-20 15:35"), t, M.load_params(), engine.load_backtest_summary())
+        self.assertEqual(d["action_code"], "NO_DATA")
+
+    def test_load_feed_validates_columns(self):
+        import main as MAIN
+        warnings = []
+        MAIN.load_sheet_by_name = lambda name: pd.DataFrame({"Date": ["x"], "Price": [1]})
+        self.assertTrue(MAIN.load_feed("Entry_Intraday", warnings).empty)
+        self.assertTrue(any("ไม่มีคอลัมน์" in w for w in warnings))
+        good = pd.DataFrame(columns=["msg_date", "msg_time", "provider", "direction", "scope"])
+        MAIN.load_sheet_by_name = lambda name: good
+        self.assertEqual(list(MAIN.load_feed("Entry_HeadsUp", []).columns), list(good.columns))
+
+
 class IngestConversionTests(unittest.TestCase):
     """Sheets เก็บวัน/เวลาที่ worker เขียน (USER_ENTERED) เป็นเลขลำดับ — ingest ต้องแปลงกลับเป็นข้อความที่ signals.py อ่านได้"""
 
