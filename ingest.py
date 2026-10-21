@@ -273,8 +273,37 @@ def ingest_mops(tok, today: date):
 FEED_DAYS_PRICES = 21          # เก็บราคา Jobber ย้อนหลังกี่วัน (ใช้คำนวณผลลัพธ์ของคำแนะนำใน DecisionLog)
 
 
-def _feed_rows(tok, src_tab, columns):
-    """อ่านแท็บจาก OIL BOT แล้วคืนแถว [หัว] + ข้อมูล เฉพาะคอลัมน์ที่ต้องการ (ตามชื่อคอลัมน์ต้นทาง)"""
+def cell_date(v):
+    """Sheets อาจคืนวันที่เป็นเลขลำดับ (เมื่อ worker เขียนแบบ USER_ENTERED แล้ว Sheets แปลง 2026-10-21 เป็นวันที่) หรือข้อความ — รับทั้งสองแบบ -> 'YYYY-MM-DD'"""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return excel_serial_to_date(v).isoformat() if v > 1 else ""
+    s_ = str(v or "").strip()
+    return s_[:10] if re.match(r"^\d{4}-\d{2}-\d{2}", s_) else s_
+
+
+def cell_time(v):
+    """เวลา: เศษส่วนของวัน (0.979 = 23:30) หรือข้อความ HH:MM[:SS] -> 'HH:MM'"""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        frac = float(v) - int(v)
+        mins = int(round(frac * 24 * 60)) % (24 * 60)
+        return f"{mins // 60:02d}:{mins % 60:02d}"
+    s_ = str(v or "").strip()
+    m = re.match(r"^(\d{1,2}):(\d{2})", s_)
+    return f"{int(m.group(1)):02d}:{m.group(2)}" if m else s_
+
+
+def cell_datetime(v):
+    """วันเวลา (เลขลำดับหรือข้อความ) -> 'YYYY-MM-DD HH:MM'"""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return f"{cell_date(v)} {cell_time(v)}"
+    s_ = str(v or "").strip()
+    return s_[:16] if re.match(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}", s_) else s_
+
+
+def _feed_rows(tok, src_tab, columns, conv=None):
+    """อ่านแท็บจาก OIL BOT แล้วคืนแถว [หัว] + ข้อมูล เฉพาะคอลัมน์ที่ต้องการ (ตามชื่อคอลัมน์ต้นทาง)
+    conv = {ชื่อคอลัมน์: ฟังก์ชันแปลงค่า} (วัน/เวลาที่ Sheets เก็บเป็นตัวเลข)"""
+    conv = conv or {}
     values = sheets_get(tok, OILBOT_SHEET_ID, f"{src_tab}!A1:Z100000")
     if not values:
         return [list(columns)]
@@ -282,7 +311,8 @@ def _feed_rows(tok, src_tab, columns):
     idx = [head.index(c) if c in head else None for c in columns]
     out = [list(columns)]
     for r in values[1:]:
-        out.append(["" if i is None or i >= len(r) else r[i] for i in idx])
+        row = ["" if i is None or i >= len(r) else r[i] for i in idx]
+        out.append([conv.get(c, lambda x: x)(v) for c, v in zip(columns, row)])
     return out
 
 
@@ -294,12 +324,12 @@ def _prices_feed(tok):
     cutoff = (datetime.now(TZ) - timedelta(days=FEED_DAYS_PRICES)).strftime("%Y-%m-%d")
     out = [["provider", "warehouse", "fuel", "price", "effective"]]
     for r in rows:
-        d, t = str(r.get("update_date") or ""), str(r.get("update_time") or "")[:5]
+        d, t = cell_date(r.get("update_date")), cell_time(r.get("update_time"))
         price = r.get("price")
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", d) or d < cutoff or not isinstance(price, (int, float)):
             continue
         posted = datetime.strptime(f"{d} {t or '00:00'}", "%Y-%m-%d %H:%M")
-        eff_t = str(r.get("effective_time") or "")[:5]
+        eff_t = cell_time(r.get("effective_time"))
         eff = posted
         if re.match(r"^\d{1,2}:\d{2}$", eff_t):
             cand = datetime.strptime(f"{d} {eff_t.zfill(5)}", "%Y-%m-%d %H:%M")
@@ -311,9 +341,12 @@ def _prices_feed(tok):
 def ingest_feeds(tok):
     """คัดลอกสัญญาณจากชีท OIL BOT มาไว้ในชีทนี้ (main.py อ่านชีทนี้ผ่าน CSV สาธารณะ ไม่มี credential)"""
     plan = [
-        (TABS["FEED_INTRADAY"], lambda: _feed_rows(tok, "IntradayMops", ["msg_date", "msg_time", "kind", "b", "d", "wti", "wti_chg", "brent", "brent_chg"])),
-        (TABS["FEED_HEADSUP"], lambda: _feed_rows(tok, "HeadsUp", ["msg_date", "msg_time", "provider", "direction", "scope", "stated_time", "has_rate", "rates"])),
-        (TABS["FEED_FUND_NOTICE"], lambda: _feed_rows(tok, "FundNotice", ["msg_date", "msg_time", "issue_no", "effective_date", "diesel_old", "diesel_new", "benzene_old", "benzene_new"])),
+        (TABS["FEED_INTRADAY"], lambda: _feed_rows(tok, "IntradayMops", ["msg_date", "msg_time", "kind", "b", "d", "wti", "wti_chg", "brent", "brent_chg"],
+                                                    {"msg_date": cell_date, "msg_time": cell_time})),
+        (TABS["FEED_HEADSUP"], lambda: _feed_rows(tok, "HeadsUp", ["msg_date", "msg_time", "provider", "direction", "scope", "stated_time", "has_rate", "rates"],
+                                                   {"msg_date": cell_date, "msg_time": cell_time, "stated_time": cell_time})),
+        (TABS["FEED_FUND_NOTICE"], lambda: _feed_rows(tok, "FundNotice", ["msg_date", "msg_time", "issue_no", "effective_date", "diesel_old", "diesel_new", "benzene_old", "benzene_new"],
+                                                       {"msg_date": cell_date, "msg_time": cell_time, "effective_date": cell_date})),
         (TABS["FEED_MOPS_CLOSE"], lambda: _mops_close_feed(tok)),
         (TABS["FEED_PRICES"], lambda: _prices_feed(tok)),
     ]
@@ -334,11 +367,10 @@ def _mops_close_feed(tok):
     rows = col_to_dicts(sheets_get(tok, OILBOT_SHEET_ID, "MopsLog!A1:L100000"))
     out = [["msg_date", "msg_time", "mops_date", "g95", "g95_chg", "diesel", "diesel_chg"]]
     for r in rows:
-        ts = str(r.get("timestamp_logged") or "")
+        ts = cell_datetime(r.get("timestamp_logged"))
         if len(ts) < 16:
             continue
-        md = r.get("mops_date")
-        md = excel_serial_to_date(md).isoformat() if isinstance(md, (int, float)) else str(md or "")[:10]
+        md = cell_date(r.get("mops_date"))
         out.append([ts[:10], ts[11:16], md, r.get("g95_price"), r.get("g95_change"), r.get("diesel_price"), r.get("diesel_change")])
     return out
 

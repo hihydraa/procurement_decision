@@ -138,5 +138,31 @@ class FreshnessTests(unittest.TestCase):
         self.assertEqual(MAIN.eppo_fresh_date(marked), pd.Timestamp("2026-10-06"))
 
 
+class IngestConversionTests(unittest.TestCase):
+    """Sheets เก็บวัน/เวลาที่ worker เขียน (USER_ENTERED) เป็นเลขลำดับ — ingest ต้องแปลงกลับเป็นข้อความที่ signals.py อ่านได้"""
+
+    def setUp(self):
+        sys.modules.setdefault("openpyxl", type(sys)("openpyxl"))
+        sys.modules.setdefault("pdfplumber", type(sys)("pdfplumber"))
+        sys.modules.setdefault("jwt", type(sys)("jwt"))
+        import ingest
+        self.I = ingest
+
+    def test_date_time_serials(self):
+        self.assertEqual(self.I.cell_date(46316), "2026-10-21")          # 46316 = 2026-10-21 (เลขลำดับ Sheets)
+        self.assertEqual(self.I.cell_date("2026-10-21 10:00:00"), "2026-10-21")
+        self.assertEqual(self.I.cell_time(0.9791666667), "23:30")
+        self.assertEqual(self.I.cell_time("9:05:00"), "09:05")
+        self.assertEqual(self.I.cell_time("23:30"), "23:30")
+        self.assertEqual(self.I.cell_datetime(46316.4375), "2026-10-21 10:30")
+        self.assertEqual(self.I.cell_datetime("2026-10-21 10:30:05"), "2026-10-21 10:30")
+        self.assertEqual(self.I.cell_date(""), "")
+
+    def test_converted_feed_is_usable_by_signals(self):
+        row = {"msg_date": self.I.cell_date(46316), "msg_time": self.I.cell_time(0.7291666667), "provider": "SFL", "direction": "UP", "scope": "ALL", "stated_time": ""}
+        f = S.build_features(pd.Timestamp("2026-10-21 20:35"), S.Tables(headsup=pd.DataFrame([row])), "B7")
+        self.assertEqual(f["up_n"], 1)                                   # 0.7291666 = 17:30
+
+
 if __name__ == "__main__":
     unittest.main()
