@@ -209,5 +209,52 @@ class BackfillTests(unittest.TestCase):
         self.assertEqual(B.to_date(w[-1][0]).isoformat(), "2026-08-30")
 
 
+class ModelCheckTests(unittest.TestCase):
+    def setUp(self):
+        import check_models
+        self.C = check_models
+
+    def levels(self, f):
+        return [lvl for lvl, _ in f]
+
+    def test_png_is_valid(self):
+        import base64
+        raw = base64.b64decode(self.C.tiny_png_b64())
+        self.assertTrue(raw.startswith(b"\x89PNG\r\n\x1a\n") and raw.endswith(b"IEND\xaeB`\x82"))
+
+    def test_all_good(self):
+        f = self.C.judge(200, ["deepseek-chat", "deepseek-flash"], {"deepseek-chat": (200, {}), "deepseek-flash": (200, {})})
+        self.assertNotIn("FAIL", self.levels(f)); self.assertNotIn("WARN", self.levels(f))
+
+    def test_model_missing_from_list_fails(self):
+        f = self.C.judge(200, ["deepseek-flash"], {"deepseek-chat": (200, {}), "deepseek-flash": (200, {})})
+        self.assertIn("FAIL", self.levels(f))
+        self.assertTrue(any("ไม่อยู่ในรายชื่อ" in m for _, m in f))
+
+    def test_rejected_probe_fails_but_transient_only_warns(self):
+        self.assertIn("FAIL", self.levels(self.C.judge(200, ["a"], {"a": (404, "model not found")})))
+        self.assertIn("FAIL", self.levels(self.C.judge(200, ["a"], {"a": (400, "bad request")})))
+        t = self.C.judge(None, None, {"a": (None, "timeout")})
+        self.assertNotIn("FAIL", self.levels(t)); self.assertIn("WARN", self.levels(t))
+        self.assertNotIn("FAIL", self.levels(self.C.judge(503, None, {"a": (429, "rate limit")})))
+
+    def test_bad_key_fails(self):
+        self.assertIn("FAIL", self.levels(self.C.judge(401, None, {"a": (401, "unauthorized")})))
+
+    def test_main_exit_codes_with_mocked_http(self):
+        import os
+        C = self.C
+        os.environ["DEEPSEEK_API_KEY"] = "k"
+        C.list_models = lambda key: (200, ["deepseek-chat", "deepseek-flash"], {})
+        C.probe_text = lambda key, m: (200, {}); C.probe_vision = lambda key, m: (200, {})
+        self.assertEqual(C.main(), 0)
+        C.probe_vision = lambda key, m: (404, "model not found")
+        self.assertEqual(C.main(), 1)
+        C.list_models = lambda key: (503, None, "down"); C.probe_vision = lambda key, m: (None, "net")
+        self.assertEqual(C.main(), 0)             # ไม่ชี้ขาด -> ไม่ทำให้ workflow ล้ม
+        del os.environ["DEEPSEEK_API_KEY"]
+        self.assertEqual(C.main(), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
