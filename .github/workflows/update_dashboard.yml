@@ -2,7 +2,9 @@ name: Update Oil Price Dashboard
 
 on:
   schedule:
+    # 07:00 / 13:00 / 17:00 / 21:00 ICT เดิม + 15:45 และ 20:45 ICT (ใกล้จุดตัดสินใจ PM 15:30 / EVE 20:30 ที่โมเดลฝึกไว้)
     - cron: '0 0,6,10,14 * * *'
+    - cron: '45 8,13 * * *'
   workflow_dispatch:
 
 permissions:
@@ -53,6 +55,13 @@ jobs:
 
       - name: Build dashboard
         run: python main.py
+
+      - name: Log decisions + fill outcomes (DecisionLog)
+        env:
+          SA_EMAIL: ${{ secrets.SA_EMAIL }}
+          SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
+        run: python log_decisions.py
+        continue-on-error: true
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
