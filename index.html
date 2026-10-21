@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fuel Procurement Decision Dashboard</title>
+  <style>
+    :root {
+      --bg: #f3f6fb;
+      --card: #ffffff;
+      --text: #14213d;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --success: #198754;
+      --warning: #ffc107;
+      --danger: #dc3545;
+      --primary: #0d6efd;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: var(--bg); color: var(--text); }
+    .container { max-width: 1260px; margin: 0 auto; padding: 24px; }
+    .hero { background: linear-gradient(135deg, #0f172a, #1d4ed8); color: #fff; border-radius: 24px; padding: 28px; margin-bottom: 24px; }
+    .hero-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; }
+    .hero h1 { margin: 0 0 8px; font-size: 2rem; }
+    .hero p { margin: 0; opacity: 0.92; line-height: 1.6; }
+
+    .snapshot-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      align-content: start;
+    }
+
+
+    .snapshot-card {
+      border-radius: 18px;
+      padding: 16px;
+      border: 1px solid rgba(255,255,255,0.18);
+      position: relative;
+      overflow: hidden;
+      color: #fff;
+    }
+
+    .snapshot-card::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 5px;
+      opacity: 0.95;
+    }
+
+    .snapshot-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .snapshot-card .k {
+      font-size: .78rem;
+      opacity: .92;
+      font-weight: 700;
+    }
+
+    .snapshot-card .v {
+      font-size: 1.7rem;
+      font-weight: 800;
+      margin-top: 10px;
+      line-height: 1.1;
+    }
+
+    .snapshot-card .sub {
+      margin-top: 8px;
+      line-height: 1.5;
+      font-size: .95rem;
+      opacity: .96;
+      white-space: pre-line;
+    }
+
+    .tone-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: .72rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .tone-danger { background: linear-gradient(180deg, rgba(220,53,69,.28), rgba(220,53,69,.18)); }
+    .tone-danger::before { background: #ff6b6b; }
+
+    .tone-warning { background: linear-gradient(180deg, rgba(255,193,7,.26), rgba(255,193,7,.16)); }
+    .tone-warning::before { background: #ffd43b; }
+
+    .tone-success { background: linear-gradient(180deg, rgba(25,135,84,.28), rgba(25,135,84,.18)); }
+    .tone-success::before { background: #51cf66; }
+
+    .tone-neutral { background: rgba(255,255,255,0.12); }
+    .tone-neutral::before { background: rgba(255,255,255,0.45); }
+
+    .badge-danger { background: rgba(220,53,69,.22); color: #ffd7dc; border: 1px solid rgba(255,255,255,.16); }
+    .badge-warning { background: rgba(255,193,7,.22); color: #fff3bf; border: 1px solid rgba(255,255,255,.16); }
+    .badge-success { background: rgba(25,135,84,.22); color: #d3f9d8; border: 1px solid rgba(255,255,255,.16); }
+    .badge-neutral { background: rgba(255,255,255,.14); color: #eef2ff; border: 1px solid rgba(255,255,255,.16); }
+
+    .top-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+    .top-card { background: var(--card); border-radius: 20px; padding: 18px; box-shadow: 0 10px 24px rgba(15,23,42,.06); }
+    .top-card .label { font-size: .8rem; color: var(--muted); text-transform: uppercase; }
+    .top-card .value { font-size: 1.6rem; font-weight: 800; margin-top: 8px; }
+
+    .fuel-panel, .news-panel { background: var(--card); border-radius: 22px; padding: 24px; box-shadow: 0 10px 24px rgba(15,23,42,.06); margin-bottom: 24px; }
+    .fuel-panel { border-top: 6px solid var(--primary); }
+    .fuel-head, .news-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+    .fuel-head h2, .news-head h2 { margin: 4px 0 4px; }
+    .eyebrow { font-size: .78rem; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+    .muted { color: var(--muted); }
+
+    .action-box { min-width: 180px; border-radius: 18px; padding: 14px 16px; color: #fff; }
+    .action-success { background: var(--success); }
+    .action-warning { background: #d39e00; color: #1f2937; }
+    .action-danger { background: var(--danger); }
+    .action-primary { background: var(--primary); }
+    .action-secondary { background: #6c757d; }
+    .action-label { font-size: .78rem; opacity: .9; text-transform: uppercase; }
+    .action-value { font-size: 1.4rem; font-weight: 800; margin-top: 4px; }
+
+    .summary-box { background: #f8fafc; border: 1px solid var(--line); border-radius: 18px; padding: 16px; margin: 18px 0; }
+    .summary-title { font-weight: 800; margin-bottom: 8px; }
+    .summary-box ul { margin: 10px 0 0 18px; padding: 0; line-height: 1.6; }
+    .summary-text { line-height: 1.6; }
+
+    .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .metric-card { background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 16px; min-height: 130px; }
+    .metric-card.primary { background: #eef5ff; }
+    .metric-card.success { background: #eefaf3; }
+    .metric-card.danger { background: #fff1f2; }
+    .metric-title { font-size: .8rem; color: var(--muted); text-transform: uppercase; min-height: 32px; }
+    .metric-value { font-size: 1.4rem; font-weight: 800; margin-top: 10px; }
+    .metric-unit { color: var(--muted); font-size: .85rem; margin-top: 4px; }
+    .metric-badge { margin-top: 12px; }
+
+    .badge { display: inline-block; padding: 6px 10px; border-radius: 999px; color: #fff; font-size: .8rem; }
+    .text-bg-success { background: var(--success); }
+    .text-bg-danger { background: var(--danger); }
+    .text-bg-secondary { background: #6c757d; }
+
+    .warning-box { background: #fff7ed; border: 1px solid #fdba74; border-radius: 18px; padding: 16px; margin-bottom: 20px; }
+    .footer { color: var(--muted); text-align: center; padding: 16px 0 28px; }
+
+    .news-list { display: grid; gap: 14px; margin-top: 10px; }
+    .news-item { border: 1px solid var(--line); border-radius: 18px; padding: 16px; background: #fbfdff; }
+    .news-time { font-size: .9rem; font-weight: 700; color: var(--primary); margin-bottom: 10px; }
+    .news-content { line-height: 1.7; white-space: normal; word-break: break-word; }
+    .news-empty { color: var(--muted); padding-top: 10px; }
+
+    @media (max-width: 1100px) {
+      .metric-grid { grid-template-columns: repeat(2, 1fr); }
+      .top-grid { grid-template-columns: repeat(2, 1fr); }
+      .hero-grid { grid-template-columns: 1fr; }
+      .snapshot-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 680px) {
+      .metric-grid { grid-template-columns: 1fr; }
+      .top-grid { grid-template-columns: 1fr; }
+      .snapshot-grid { grid-template-columns: 1fr; }
+      .container { padding: 16px; }
+      .hero { padding: 20px; border-radius: 20px; }
+      .hero h1 { font-size: 1.5rem; }
+      .fuel-panel, .news-panel { padding: 18px; border-radius: 18px; }
+      .action-box { width: 100%; min-width: auto; }
+      .metric-card { min-height: auto; }
+      .news-content { font-size: .95rem; }
+    }
+    .acc-table { width:100%; border-collapse:collapse; font-size:.9rem; }
+    .acc-table th, .acc-table td { padding:6px 8px; border-bottom:1px solid #e5e7eb; text-align:right; white-space:nowrap; }
+    .acc-table th:nth-child(-n+3), .acc-table td:nth-child(-n+3) { text-align:left; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <section class="hero">
+      <div class="hero-grid">
+        <div>
+          <h1>Fuel Procurement Decision Dashboard</h1>
+          <p>ระบบช่วยตัดสินใจจัดซื้อน้ำมัน โดยผสานสัญญาณจากกลุ่ม Jobber (Trend Mops, ประกาศ "มีปรับขึ้น/ลง", ประกาศกองทุน), MOPS ปิด และข้อมูลตลาด เพื่อประเมินโอกาสที่ราคาจะขึ้น/ลงข้ามคืน แล้วสรุปเป็น Action สำหรับทีมจัดซื้อ</p>
+          <p style="margin-top:10px;">อัปเดตล่าสุด: 21/10/2026 17:41</p>
+        </div>
+        
+    <div class="snapshot-grid">
+      
+    <div class="snapshot-card tone-warning">
+      <div class="snapshot-top">
+        <div class="k">NYMEX</div>
+        <div class="tone-badge badge-warning">แกว่งตัว</div>
+      </div>
+      <div class="v">177.54</div>
+      <div class="sub">Δ1D 0.00 | Δ3D -0.50</div>
+    </div>
+    
+      
+    <div class="snapshot-card tone-success">
+      <div class="snapshot-top">
+        <div class="k">WTI</div>
+        <div class="tone-badge badge-success">ผ่อนคลาย</div>
+      </div>
+      <div class="v">97.52</div>
+      <div class="sub">Δ1D -0.81 | Δ3D -1.48</div>
+    </div>
+    
+      
+    <div class="snapshot-card tone-danger">
+      <div class="snapshot-top">
+        <div class="k">MOPS G95</div>
+        <div class="tone-badge badge-danger">แรงกดดันสูง</div>
+      </div>
+      <div class="v">136.26</div>
+      <div class="sub">USD/BBL | Δ1D 0.00 | Δ3D +6.84</div>
+    </div>
+    
+      
+    <div class="snapshot-card tone-danger">
+      <div class="snapshot-top">
+        <div class="k">MOPS ดีเซล</div>
+        <div class="tone-badge badge-danger">แรงกดดันสูง</div>
+      </div>
+      <div class="v">178.34</div>
+      <div class="sub">USD/BBL | Δ1D 0.00 | Δ3D +9.62</div>
+    </div>
+    
+      
+    <div class="snapshot-card tone-danger">
+      <div class="snapshot-top">
+        <div class="k">ฐานะกองทุนน้ำมันสุทธิ</div>
+        <div class="tone-badge badge-danger">ติดลบหนัก</div>
+      </div>
+      <div class="v">-103,390</div>
+      <div class="sub">ล้านบาท | วันที่ 21/10/2026</div>
+    </div>
+    
+      
+    <div class="snapshot-card tone-danger">
+      <div class="snapshot-top">
+        <div class="k">กองทุนน้ำมันจะพยุงราคาได้อีก</div>
+        <div class="tone-badge badge-danger">ตึงมาก</div>
+      </div>
+      <div class="v">-1.3</div>
+      <div class="sub">วัน | เงินอุดหนุน 345 ล้านบาท/วัน</div>
+    </div>
+    
+    </div>
+    
+      </div>
+    </section>
+
+    <div class='warning-box'><strong>Data warnings</strong><ul><li>ข้อมูล EPPO (ราคาหน้าโรงกลั่น/กองทุน/ค่าการตลาด) ที่เป็นค่าจริงล่าสุดคือ 06/10/2026 — วันหลังจากนั้นเป็นค่าลากมา การ์ดด้านล่างอาจไม่ตรงปัจจุบัน</li><li>NYMEX ล่าสุด 01/10/2026 (เก่า 20 วัน)</li></ul></div>
+
+    <section class="top-grid">
+      <div class="top-card">
+        <div class="label">เงินสดคงเหลือ</div>
+        <div class="value">-454</div>
+        <div class="muted">ล้านบาท</div>
+      </div>
+      <div class="top-card">
+        <div class="label">เงินอุดหนุนต่อวัน</div>
+        <div class="value">345</div>
+        <div class="muted">ล้านบาท/วัน</div>
+      </div>
+      <div class="top-card">
+        <div class="label">เงินไหลเข้าต่อวัน</div>
+        <div class="value">0</div>
+        <div class="muted">ล้านบาท/วัน</div>
+      </div>
+      <div class="top-card">
+        <div class="label">ผลกระทบสุทธิต่อวัน</div>
+        <div class="value">-345</div>
+        <div class="muted">ล้านบาท/วัน</div>
+      </div>
+    </section>
+
+    
+    <section class="fuel-panel" style="border-top: 6px solid #ffc107;">
+        <div class="fuel-head">
+            <div>
+                <div class="eyebrow">คำแนะนำการจัดซื้อ</div>
+                <h2>แก๊สโซฮอล์ 95</h2>
+                <div class="muted">ข้อมูลอ้างอิงล่าสุด: 21/10/2026</div>
+            </div>
+            <div class="action-box action-warning">
+                <div class="action-label">Action</div>
+                <div class="action-value">ทยอยซื้อ</div>
+            </div>
+        </div>
+
+            <div class="summary-box">
+            <div class="summary-title">บทสรุปเชิงวิเคราะห์</div>
+            <div class="summary-text">โอกาสราคาขึ้น 21% สูงกว่าปกติเล็กน้อย — ทยอยสั่งซื้อวันนี้บางส่วน</div>
+            <div class="muted" style="margin-top:8px;">ช่วงตัดสินใจ: บ่าย (ก่อน MOPS ปิด) | โอกาสราคาขึ้นข้ามคืน 21% | โอกาสราคาลง 5% | ณ 21/10 17:41</div>
+            <ul><li>2 ราย ประกาศ 'มีปรับขึ้น' วันนี้ → เสี่ยงราคาขึ้น</li><li>MOPS ปิดล่าสุด +3.04 USD/bbl → เสี่ยงราคาขึ้น</li><li>ยังไม่มี Trend Mops ของวันนี้ (ปกติโพสต์ ~11:30 และ ~15:00) — ความมั่นใจต่ำกว่าปกติ</li></ul>
+            <div class="muted">หลักฐาน (backtest, 324 วัน): เมื่อระบบแนะนำแบบนี้ ราคาขึ้นจริง 31% ลงจริง 17% ขยับเฉลี่ย +0.22 บาท/ลิตร</div>
+        </div>
+
+        <div class="metric-grid">
+            
+    <div class="metric-card primary">
+        <div class="metric-title">ค่าการตลาด</div>
+        <div class="metric-value">3.35</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"><span class="badge text-bg-secondary">Δ 0.00</span></div>
+    </div>
+    
+            
+    <div class="metric-card default">
+        <div class="metric-title">จุดเฝ้าระวัง</div>
+        <div class="metric-value">3.37</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"></div>
+    </div>
+    
+            
+    <div class="metric-card default">
+        <div class="metric-title">ราคาหน้าโรงกลั่น</div>
+        <div class="metric-value">32.0937</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"><span class="badge text-bg-secondary">Δ 0.00</span></div>
+    </div>
+    
+            
+    <div class="metric-card danger">
+        <div class="metric-title">เงินกองทุนน้ำมัน</div>
+        <div class="metric-value">-4.89</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"><span class="badge text-bg-secondary">Δ 0.00</span></div>
+    </div>
+    
+            
+    <div class="metric-card success">
+        <div class="metric-title">ราคาขายปลีก</div>
+        <div class="metric-value">40.69</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"><span class="badge text-bg-secondary">Δ 0.00</span></div>
+    </div>
+    
+            
+    <div class="metric-card default">
+        <div class="metric-title">ราคาขายส่ง</div>
+        <div class="metric-value">34.68</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"><span class="badge text-bg-secondary">Δ 0.00</span></div>
+    </div>
+    
+        </div>
+    </section>
+    
+
+    <section class="fuel-panel" style="border-top: 6px solid #0d6efd;">
+        <div class="fuel-head">
+            <div>
+                <div class="eyebrow">คำแนะนำการจัดซื้อ</div>
+                <h2>ดีเซล</h2>
+                <div class="muted">ข้อมูลอ้างอิงล่าสุด: 21/10/2026</div>
+            </div>
+            <div class="action-box action-primary">
+                <div class="action-label">Action</div>
+                <div class="action-value">ซื้อปกติ</div>
+            </div>
+        </div>
+
+            <div class="summary-box">
+            <div class="summary-title">บทสรุปเชิงวิเคราะห์</div>
+            <div class="summary-text">ไม่มีสัญญาณชัดเจน (ขึ้น 11% / ลง 20%) — ซื้อตามแผนปกติ</div>
+            <div class="muted" style="margin-top:8px;">ช่วงตัดสินใจ: บ่าย (ก่อน MOPS ปิด) | โอกาสราคาขึ้นข้ามคืน 11% | โอกาสราคาลง 20% | ณ 21/10 17:41</div>
+            <ul><li>MOPS ปิดล่าสุด +8.55 USD/bbl → เสี่ยงราคาขึ้น</li><li>2 ราย ประกาศ 'มีปรับขึ้น' วันนี้ → เสี่ยงราคาขึ้น</li><li>ยังไม่มี Trend Mops ของวันนี้ (ปกติโพสต์ ~11:30 และ ~15:00) — ความมั่นใจต่ำกว่าปกติ</li></ul>
+            <div class="muted">หลักฐาน (backtest, 324 วัน): เมื่อระบบแนะนำแบบนี้ ราคาขึ้นจริง 25% ลงจริง 23% ขยับเฉลี่ย +0.11 บาท/ลิตร</div>
+        </div>
+
+        <div class="metric-grid">
+            
+    <div class="metric-card primary">
+        <div class="metric-title">ค่าการตลาด</div>
+        <div class="metric-value">2.00</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"><span class="badge text-bg-secondary">Δ 0.00</span></div>
+    </div>
+    
+            
+    <div class="metric-card default">
+        <div class="metric-title">จุดเฝ้าระวัง</div>
+        <div class="metric-value">1.94</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"></div>
+    </div>
+    
+            
+    <div class="metric-card default">
+        <div class="metric-title">ราคาหน้าโรงกลั่น</div>
+        <div class="metric-value">36.4313</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"><span class="badge text-bg-secondary">Δ 0.00</span></div>
+    </div>
+    
+            
+    <div class="metric-card danger">
+        <div class="metric-title">เงินกองทุนน้ำมัน</div>
+        <div class="metric-value">-2.66</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"><span class="badge text-bg-secondary">Δ 0.00</span></div>
+    </div>
+    
+            
+    <div class="metric-card success">
+        <div class="metric-title">ราคาขายปลีก</div>
+        <div class="metric-value">42.19</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"><span class="badge text-bg-secondary">Δ 0.00</span></div>
+    </div>
+    
+            
+    <div class="metric-card default">
+        <div class="metric-title">ราคาขายส่ง</div>
+        <div class="metric-value">37.43</div>
+        <div class="metric-unit">บาท/ลิตร</div>
+        <div class="metric-badge"><span class="badge text-bg-secondary">Δ 0.00</span></div>
+    </div>
+    
+        </div>
+    </section>
+    
+
+    
+    <section class="news-panel">
+      <div class="news-head"><div class="eyebrow">ACCURACY</div><h2>ความแม่นยำของคำแนะนำ</h2></div>
+      <div class="muted" style="margin-bottom:8px;">ราคาต่ำสุดของตลาดพรุ่งนี้ 15:30 เทียบวันนี้ 15:30 — ขึ้น/ลง หมายถึงขยับเกิน 0.20 บาท/ลิตร
+        (backtest เมื่อ 2026-10-21 ช่วงทดสอบ 324 วันที่ไม่เคยใช้จูนเกณฑ์)</div>
+      <div style="overflow-x:auto"><table class="acc-table">
+        <thead><tr><th>ชนิด</th><th>ช่วง</th><th>คำแนะนำ</th><th>สัดส่วนวัน</th><th>ราคาขึ้นจริง / ลงจริง (backtest)</th><th>ขยับเฉลี่ย</th><th>ขึ้น / ลง (ใช้งานจริง)</th></tr></thead>
+        <tbody><tr><td>ดีเซล</td><td>บ่าย 15:30</td><td>เร่งซื้อ</td><td>18%</td><td>49% / 16%</td><td>+0.22</td><td>-</td></tr><tr><td>ดีเซล</td><td>บ่าย 15:30</td><td>ทยอยซื้อ</td><td>44%</td><td>31% / 26%</td><td>-0.01</td><td>-</td></tr><tr><td>ดีเซล</td><td>บ่าย 15:30</td><td>ซื้อปกติ</td><td>14%</td><td>25% / 23%</td><td>+0.11</td><td>-</td></tr><tr><td>ดีเซล</td><td>บ่าย 15:30</td><td>ชะลอ</td><td>25%</td><td>17% / 48%</td><td>-0.20</td><td>-</td></tr><tr><td>ดีเซล</td><td>ค่ำ 20:30</td><td>เร่งซื้อ</td><td>34%</td><td>54% / 12%</td><td>+0.35</td><td>-</td></tr><tr><td>ดีเซล</td><td>ค่ำ 20:30</td><td>ทยอยซื้อ</td><td>19%</td><td>25% / 23%</td><td>-0.02</td><td>-</td></tr><tr><td>ดีเซล</td><td>ค่ำ 20:30</td><td>ซื้อปกติ</td><td>13%</td><td>24% / 17%</td><td>+0.04</td><td>-</td></tr><tr><td>ดีเซล</td><td>ค่ำ 20:30</td><td>ชะลอ</td><td>35%</td><td>12% / 54%</td><td>-0.36</td><td>-</td></tr><tr><td>แก๊สโซฮอล์ 95</td><td>บ่าย 15:30</td><td>เร่งซื้อ</td><td>9%</td><td>39% / 18%</td><td>+0.13</td><td>-</td></tr><tr><td>แก๊สโซฮอล์ 95</td><td>บ่าย 15:30</td><td>ทยอยซื้อ</td><td>11%</td><td>31% / 17%</td><td>+0.22</td><td>-</td></tr><tr><td>แก๊สโซฮอล์ 95</td><td>บ่าย 15:30</td><td>ซื้อปกติ</td><td>53%</td><td>20% / 18%</td><td>+0.00</td><td>-</td></tr><tr><td>แก๊สโซฮอล์ 95</td><td>บ่าย 15:30</td><td>ชะลอ</td><td>28%</td><td>18% / 32%</td><td>-0.10</td><td>-</td></tr><tr><td>แก๊สโซฮอล์ 95</td><td>ค่ำ 20:30</td><td>เร่งซื้อ</td><td>15%</td><td>46% / 8%</td><td>+0.29</td><td>-</td></tr><tr><td>แก๊สโซฮอล์ 95</td><td>ค่ำ 20:30</td><td>ทยอยซื้อ</td><td>22%</td><td>35% / 10%</td><td>+0.13</td><td>-</td></tr><tr><td>แก๊สโซฮอล์ 95</td><td>ค่ำ 20:30</td><td>ซื้อปกติ</td><td>30%</td><td>12% / 19%</td><td>-0.03</td><td>-</td></tr><tr><td>แก๊สโซฮอล์ 95</td><td>ค่ำ 20:30</td><td>ชะลอ</td><td>33%</td><td>12% / 39%</td><td>-0.16</td><td>-</td></tr></tbody></table></div>
+    </section>
+    
+
+    
+    <section class="news-panel">
+      <div class="news-head">
+        <div class="eyebrow">NEWS</div>
+        <h2>ข่าวและประเด็นสำคัญ</h2>
+      </div>
+      <div class="news-list">
+        
+        <div class="news-item">
+          <div class="news-time">21/10/2026 17:41</div>
+          <div class="news-content">🛢️ Executive Summary (24 ชม. ล่าสุด)<br><br>- WTI Crude ปรับลง -0.81 มาที่ 97.52 USD/BBL สะท้อนแรงกดดันฝั่งอุปสงค์/ราคาน้ำมันดิบที่อ่อนตัวลง (Bearish)<br>- NYMEX Singapore Gasoil ทรงตัวที่ 177.54 (+0.00) และ MOPS G95 ที่ 136.26 USD/BBL (+0.00) สะท้อนตลาดผลิตภัณฑ์กลางน้ำยังไม่มีความเคลื่อนไหวใหม่ (Neutral)<br>- MOPS DS อยู่ที่ 178.34 USD/BBL (+0.00) สูงกว่า G95 อย่างมีนัยสำคัญ สะท้อนส่วนต่างดีเซลยังคงสูง (Neutral)<br>- ค่าการตลาด GASOHOL95 E10 อยู่ที่ 3.35 บาท/ลิตร และ H-DIESEL 2.00 บาท/ลิตร บ่งชี้ผู้ค้าปลีกยังมี margin จำกัด โดยเฉพาะดีเซล (Neutral)<br>- ฐานะกองทุนน้ำมันสุทธิ -103,390.47 ล้านบาท เงินสดคงเหลือ -453.94 ล้านบาท Runway -1.32 วัน สถานะ CRITICAL เป็นความเสี่ยงเชิงระบบที่ต้องเฝ้าระวังทันที (Bearish)<br><br>สรุป:<br>👉 ภาพรวมราคาน้ำมันดิบอ่อนตัวลงเล็กน้อย ขณะที่ผลิตภัณฑ์กลางน้ำทรงตัว แต่ความเสี่ยงหลักคือสถานะกองทุนน้ำมันที่อยู่ในระดับ CRITICAL ต่อเนื่อง</div>
+        </div>
+        
+      </div>
+    </section>
+    
+
+    <div class="footer">Fuel Procurement Decision Dashboard Vol.1</div>
+  </div>
+</body>
+</html>
