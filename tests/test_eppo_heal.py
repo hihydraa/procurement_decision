@@ -77,6 +77,29 @@ class HealTests(unittest.TestCase):
         ingest.ingest_eppo("t", date(2026, 10, 20))
         self.assertEqual(self.writes, [])
 
+    def test_legacy_unlabeled_copy_of_previous_day_is_healed(self):
+        ingest.fetch_eppo_workbook = lambda d: object() if d == date(2026, 10, 20) else None
+        s = self.sheet()
+        for r in s[1:]:
+            r[18] = ""                                             # แถวเก่าไม่มีป้าย Source
+        ingest.sheets_get = lambda tok, sid, rng: s                # 20 ต.ค. เหมือน 19 ต.ค. ทุกชนิด = ค่าลากมา
+        ingest.ingest_eppo("t", date(2026, 10, 20))
+        self.assertEqual(len(self.writes), 1)
+        self.assertTrue(self.writes[0][0].endswith("!A4:S5"))
+
+    def test_legacy_rows_with_changed_values_are_kept(self):
+        calls = []
+        ingest.fetch_eppo_workbook = lambda d: calls.append(d)
+        s = self.sheet()
+        for r in s[1:]:
+            r[18] = ""
+        for r in s[3:]:
+            r[2] = 25                                              # EX-REFIN. ต่างจากวันก่อน = ค่าจริง
+        ingest.sheets_get = lambda tok, sid, rng: s
+        ingest.ingest_eppo("t", date(2026, 10, 20))
+        self.assertEqual(self.writes, [])
+        self.assertNotIn(date(2026, 10, 20), calls)
+
 
 if __name__ == "__main__":
     unittest.main()

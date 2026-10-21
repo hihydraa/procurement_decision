@@ -176,9 +176,21 @@ def heal_carried_eppo(tok, existing, existing_dicts, today, consumption=None):
         d = excel_serial_to_date(r.get("Date"))
         if d is not None:
             by_date.setdefault(d, []).append((i + 2, r))     # แถวที่ 1 = หัวคอลัมน์ ; existing_dicts เริ่มที่แถว 2
+    def sig(rows):
+        return sorted((str(r.get("oil type")), r.get("EX-REFIN."), r.get("OIL FUND")) for _, r in rows)
+
+    def is_provisional(d, rows):
+        labels = {str(r.get("Source") or "").strip().upper() for _, r in rows}
+        if labels == {"CARRIED"}:
+            return True
+        if "FRESH" in labels or "CARRIED" in labels:
+            return False
+        # แถวเก่าที่ยังไม่มีคอลัมน์ Source: ค่า ExRef/กองทุนเหมือนวันก่อนหน้าทุกชนิด = ลากค่ามา (วิธีเดียวกับที่ dashboard ใช้ตัดสิน)
+        prev = max((p for p in by_date if p < d), default=None)
+        return prev is not None and sig(rows) == sig(by_date[prev])
+
     todo = sorted((d for d, rows in by_date.items()
-                   if today - timedelta(days=EPPO_HEAL_DAYS) <= d <= today
-                   and all(str(r.get("Source") or "").strip().upper() == "CARRIED" for _, r in rows)), reverse=True)
+                   if today - timedelta(days=EPPO_HEAL_DAYS) <= d <= today and is_provisional(d, rows)), reverse=True)
     healed = 0
     for d in todo:
         wb = fetch_eppo_workbook(d)
@@ -222,7 +234,7 @@ def ingest_eppo(tok, today: date):
 
     date_str = fmt_date_us(today)
     if today in seen_dates:
-        print(f"[EPPO] {date_str} already recorded ({'real file' if any(str(r.get('Source') or '').upper() != 'CARRIED' for r in today_rows) else 'still carried'}), skipping")
+        print(f"[EPPO] {date_str} already recorded ({'carried values, real file not available yet' if any(str(r.get('Source') or '').upper() == 'CARRIED' for r in today_rows) else 'present'}), skipping")
         return None
 
     wb = fetch_eppo_workbook(today)
