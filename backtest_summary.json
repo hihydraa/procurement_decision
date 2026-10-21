@@ -1,0 +1,251 @@
+{
+ "generated": "2026-10-21",
+ "target": "ราคาต่ำสุดของตลาด 15:30 พรุ่งนี้ เทียบ 15:30 วันนี้ (บาท/ลิตร)",
+ "rise_threshold_thb": 0.2,
+ "results": {
+  "B7_PM": {
+   "n_train_days": 797,
+   "n_oos_days": 647,
+   "base_rise": 0.24574961360123648,
+   "base_fall": 0.24420401854714066,
+   "auc_rise": 0.6770929992782762,
+   "auc_fall": 0.6939180968652119,
+   "brier_rise": 0.17522056337924874,
+   "brier_rise_baseline": 0.18535674101607946,
+   "thresholds": {
+    "urgent": 0.3,
+    "gradual": 0.15,
+    "wait_fall": 0.2,
+    "wait_max_rise": 0.15
+   },
+   "holdout_policy": {
+    "label": "นโยบายใหม่ (ช่วงที่ไม่เคยใช้จูน)",
+    "n_days": 324,
+    "total_gain_thb_per_litre": 27.485000000000007,
+    "avg_gain_per_day": 0.08483024691358027,
+    "actions": {
+     "URGENT": {
+      "n": 57,
+      "share": 0.17592592592592593,
+      "rise_rate": 0.49122807017543857,
+      "fall_rate": 0.15789473684210525,
+      "avg_next_minus_today": 0.21578947368421048
+     },
+     "GRADUAL": {
+      "n": 142,
+      "share": 0.4382716049382716,
+      "rise_rate": 0.30985915492957744,
+      "fall_rate": 0.2605633802816901,
+      "avg_next_minus_today": -0.0141549295774647
+     },
+     "NORMAL": {
+      "n": 44,
+      "share": 0.13580246913580246,
+      "rise_rate": 0.25,
+      "fall_rate": 0.22727272727272727,
+      "avg_next_minus_today": 0.10818181818181821
+     },
+     "WAIT": {
+      "n": 81,
+      "share": 0.25,
+      "rise_rate": 0.1728395061728395,
+      "fall_rate": 0.48148148148148145,
+      "avg_next_minus_today": -0.1998765432098766
+     }
+    }
+   },
+   "holdout_old_rule": {
+    "label": "rule เดิม (MOPS state)",
+    "n_days": 324,
+    "total_gain_thb_per_litre": -0.13499999999999268,
+    "avg_gain_per_day": -0.0004166666666666441
+   },
+   "holdout_always_buy_today": {
+    "total_gain_thb_per_litre": 0.0
+   }
+  },
+  "B7_EVE": {
+   "n_train_days": 797,
+   "n_oos_days": 647,
+   "base_rise": 0.24574961360123648,
+   "base_fall": 0.24420401854714066,
+   "auc_rise": 0.7581773894215899,
+   "auc_fall": 0.7829786958660143,
+   "brier_rise": 0.1556420797547137,
+   "brier_rise_baseline": 0.18535674101607946,
+   "thresholds": {
+    "urgent": 0.3,
+    "gradual": 0.15,
+    "wait_fall": 0.25,
+    "wait_max_rise": 0.15
+   },
+   "holdout_policy": {
+    "label": "นโยบายใหม่ (ช่วงที่ไม่เคยใช้จูน)",
+    "n_days": 324,
+    "total_gain_thb_per_litre": 77.90000000000003,
+    "avg_gain_per_day": 0.2404320987654322,
+    "actions": {
+     "URGENT": {
+      "n": 110,
+      "share": 0.3395061728395062,
+      "rise_rate": 0.5363636363636364,
+      "fall_rate": 0.11818181818181818,
+      "avg_next_minus_today": 0.35245454545454563
+     },
+     "GRADUAL": {
+      "n": 61,
+      "share": 0.1882716049382716,
+      "rise_rate": 0.2459016393442623,
+      "fall_rate": 0.22950819672131148,
+      "avg_next_minus_today": -0.02491803278688495
+     },
+     "NORMAL": {
+      "n": 41,
+      "share": 0.12654320987654322,
+      "rise_rate": 0.24390243902439024,
+      "fall_rate": 0.17073170731707318,
+      "avg_next_minus_today": 0.036585365853658104
+     },
+     "WAIT": {
+      "n": 112,
+      "share": 0.345679012345679,
+      "rise_rate": 0.11607142857142858,
+      "fall_rate": 0.5446428571428571,
+      "avg_next_minus_today": -0.35616071428571444
+     }
+    }
+   },
+   "holdout_old_rule": {
+    "label": "rule เดิม (MOPS state)",
+    "n_days": 324,
+    "total_gain_thb_per_litre": 58.425000000000004,
+    "avg_gain_per_day": 0.18032407407407408
+   },
+   "holdout_always_buy_today": {
+    "total_gain_thb_per_litre": 0.0
+   }
+  },
+  "G95_PM": {
+   "n_train_days": 797,
+   "n_oos_days": 647,
+   "base_rise": 0.15301391035548687,
+   "base_fall": 0.16846986089644514,
+   "auc_rise": 0.6851083831010838,
+   "auc_fall": 0.6176034241669793,
+   "brier_rise": 0.12718276087893576,
+   "brier_rise_baseline": 0.1296006535932099,
+   "thresholds": {
+    "urgent": 0.3,
+    "gradual": 0.15,
+    "wait_fall": 0.15,
+    "wait_max_rise": 0.1
+   },
+   "holdout_policy": {
+    "label": "นโยบายใหม่ (ช่วงที่ไม่เคยใช้จูน)",
+    "n_days": 324,
+    "total_gain_thb_per_litre": 16.565000000000026,
+    "avg_gain_per_day": 0.051126543209876626,
+    "actions": {
+     "URGENT": {
+      "n": 28,
+      "share": 0.08641975308641975,
+      "rise_rate": 0.39285714285714285,
+      "fall_rate": 0.17857142857142858,
+      "avg_next_minus_today": 0.12999999999999975
+     },
+     "GRADUAL": {
+      "n": 35,
+      "share": 0.10802469135802469,
+      "rise_rate": 0.3142857142857143,
+      "fall_rate": 0.17142857142857143,
+      "avg_next_minus_today": 0.2191428571428573
+     },
+     "NORMAL": {
+      "n": 171,
+      "share": 0.5277777777777778,
+      "rise_rate": 0.19883040935672514,
+      "fall_rate": 0.18128654970760233,
+      "avg_next_minus_today": 0.0013450292397662713
+     },
+     "WAIT": {
+      "n": 90,
+      "share": 0.2777777777777778,
+      "rise_rate": 0.17777777777777778,
+      "fall_rate": 0.32222222222222224,
+      "avg_next_minus_today": -0.10100000000000031
+     }
+    }
+   },
+   "holdout_old_rule": {
+    "label": "rule เดิม (MOPS state)",
+    "n_days": 324,
+    "total_gain_thb_per_litre": 4.300000000000024,
+    "avg_gain_per_day": 0.013271604938271678
+   },
+   "holdout_always_buy_today": {
+    "total_gain_thb_per_litre": 0.0
+   }
+  },
+  "G95_EVE": {
+   "n_train_days": 797,
+   "n_oos_days": 647,
+   "base_rise": 0.15301391035548687,
+   "base_fall": 0.16846986089644514,
+   "auc_rise": 0.7313186610631867,
+   "auc_fall": 0.6981429692029604,
+   "brier_rise": 0.11569175310718734,
+   "brier_rise_baseline": 0.1296006535932099,
+   "thresholds": {
+    "urgent": 0.3,
+    "gradual": 0.15,
+    "wait_fall": 0.15,
+    "wait_max_rise": 0.15
+   },
+   "holdout_policy": {
+    "label": "นโยบายใหม่ (ช่วงที่ไม่เคยใช้จูน)",
+    "n_days": 324,
+    "total_gain_thb_per_litre": 35.460000000000015,
+    "avg_gain_per_day": 0.1094444444444445,
+    "actions": {
+     "URGENT": {
+      "n": 48,
+      "share": 0.14814814814814814,
+      "rise_rate": 0.4583333333333333,
+      "fall_rate": 0.08333333333333333,
+      "avg_next_minus_today": 0.28562499999999996
+     },
+     "GRADUAL": {
+      "n": 72,
+      "share": 0.2222222222222222,
+      "rise_rate": 0.3472222222222222,
+      "fall_rate": 0.09722222222222222,
+      "avg_next_minus_today": 0.12527777777777788
+     },
+     "NORMAL": {
+      "n": 96,
+      "share": 0.2962962962962963,
+      "rise_rate": 0.125,
+      "fall_rate": 0.1875,
+      "avg_next_minus_today": -0.03166666666666651
+     },
+     "WAIT": {
+      "n": 108,
+      "share": 0.3333333333333333,
+      "rise_rate": 0.12037037037037036,
+      "fall_rate": 0.3888888888888889,
+      "avg_next_minus_today": -0.1596296296296298
+     }
+    }
+   },
+   "holdout_old_rule": {
+    "label": "rule เดิม (MOPS state)",
+    "n_days": 324,
+    "total_gain_thb_per_litre": 37.42000000000003,
+    "avg_gain_per_day": 0.11549382716049392
+   },
+   "holdout_always_buy_today": {
+    "total_gain_thb_per_litre": 0.0
+   }
+  }
+ }
+}

@@ -1,2 +1,4 @@
 __pycache__/
 *.pyc
+decision_snapshot.json
+index.html

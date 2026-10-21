@@ -23,7 +23,7 @@ import pdfplumber
 import requests
 
 from common import (
-    SHEET_ID, OILBOT_SHEET_ID, TABS, get_token, sheets_get, sheets_append, sheets_update,
+    SHEET_ID, OILBOT_SHEET_ID, TABS, get_token, sheets_get, sheets_append, sheets_update, sheets_replace_tab,
     col_to_dicts, excel_serial_to_date, fmt_date_us,
 )
 
@@ -100,6 +100,14 @@ EPPO_PRICE_COLS = [
 ]
 
 
+def ensure_eppo_source_header(tok):
+    """คอลัมน์ S 'Source' บอกว่าแถวนี้มาจากไฟล์ EPPO จริง (FRESH) หรือลากค่าเดิมมา (CARRIED) —
+    main.py ใช้ตรวจว่าค่า ExRef/กองทุนใน dashboard เก่าแค่ไหน (เดิมแยกไม่ออก จึงตัดสินใจจากค่าค้างโดยไม่รู้ตัว)"""
+    head = sheets_get(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!S1:S1")
+    if not head or not head[0] or head[0][0] != "Source":
+        sheets_update(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!S1", [["Source"]])
+
+
 def carry_forward_eppo(tok, existing_dicts, obs_count, date_str):
     """ไม่มีไฟล์ EPPO วันนี้ (เช่น วันหยุด/ยังไม่เผยแพร่) — ตามหลักที่ตกลงไว้ ให้ใช้ตัวเลขของ
     วันก่อนหน้าซ้ำแทนที่จะปล่อยช่องว่าง (ราคายังไม่เปลี่ยนจนกว่าจะมีประกาศใหม่จริง)"""
@@ -120,10 +128,11 @@ def carry_forward_eppo(tok, existing_dicts, obs_count, date_str):
         net_impact = round(collection - subsidy, 2)
         day_net_impact += net_impact
         row = [date_str] + [r.get(c) for c in EPPO_PRICE_COLS]
-        row += [r.get("Avg Consumption (mn L/day)"), subsidy, collection, net_impact, obs_count[ot]]
+        row += [r.get("Avg Consumption (mn L/day)"), subsidy, collection, net_impact, obs_count[ot], "CARRIED"]
         new_rows.append(row)
 
-    sheets_append(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!A1:R1", new_rows)
+    ensure_eppo_source_header(tok)
+    sheets_append(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!A1:S1", new_rows)
     print(f"[EPPO] carried forward {len(new_rows)} rows from {latest_date} as {date_str}")
     return {"date_str": date_str, "net_impact": day_net_impact,
             "subsidy": sum(r.get("Estimated Subsidy (mn baht/day)") or 0 for r in latest_rows),
@@ -171,10 +180,11 @@ def ingest_eppo(tok, today: date):
         new_rows.append([
             date_str, f["oil_type"], f["ex_refin"], f["excise"], f["mtax"], f["oilfund"],
             f["consv"], f["wholesale"], f["vat_ws"], f["ws_vat"], f["mm"], f["vat_mm"], f["retail"],
-            avg, round(subsidy, 2), round(collection, 2), round(collection - subsidy, 2), obs_count[f["oil_type"]],
+            avg, round(subsidy, 2), round(collection, 2), round(collection - subsidy, 2), obs_count[f["oil_type"]], "FRESH",
         ])
 
-    sheets_append(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!A1:R1", new_rows)
+    ensure_eppo_source_header(tok)
+    sheets_append(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!A1:S1", new_rows)
     print(f"[EPPO] appended {len(new_rows)} rows for {date_str}, day net impact = {day_net_impact:.2f}")
     return {"date_str": date_str, "net_impact": day_net_impact,
             "subsidy": sum(r[14] for r in new_rows), "collection": sum(r[15] for r in new_rows)}
@@ -255,6 +265,82 @@ def ingest_mops(tok, today: date):
 
     sheets_append(tok, SHEET_ID, f"{TABS['ENTRY_MOPS']}!A1:F1", new_rows)
     print(f"[MOPS] appended {len(new_rows)} rows ({len(new_rows) // 2} dates)")
+
+
+# ============================================================
+# ฟีดสัญญาณตลาดจาก OIL BOT (Trend Mops, ประกาศ "มีปรับขึ้น/ลง", ประกาศกองทุน, MOPS ปิด, ราคา Jobber)
+# ============================================================
+FEED_DAYS_PRICES = 21          # เก็บราคา Jobber ย้อนหลังกี่วัน (ใช้คำนวณผลลัพธ์ของคำแนะนำใน DecisionLog)
+
+
+def _feed_rows(tok, src_tab, columns):
+    """อ่านแท็บจาก OIL BOT แล้วคืนแถว [หัว] + ข้อมูล เฉพาะคอลัมน์ที่ต้องการ (ตามชื่อคอลัมน์ต้นทาง)"""
+    values = sheets_get(tok, OILBOT_SHEET_ID, f"{src_tab}!A1:Z100000")
+    if not values:
+        return [list(columns)]
+    head = [str(h).strip() for h in values[0]]
+    idx = [head.index(c) if c in head else None for c in columns]
+    out = [list(columns)]
+    for r in values[1:]:
+        out.append(["" if i is None or i >= len(r) else r[i] for i in idx])
+    return out
+
+
+def _prices_feed(tok):
+    """PriceLog -> Entry_Prices (provider, warehouse, fuel, price, effective) เฉพาะ FEED_DAYS_PRICES วันล่าสุด
+    effective = วัน/เวลาที่ราคามีผล: ใช้ effective_time ถ้าระบุ (เช่น ปรับขึ้น 23:59 / เที่ยงคืน) โดยถ้าเวลาที่มีผลน้อยกว่าเวลาโพสต์เกิน 2 ชม.
+    ถือว่าเป็นของวันถัดไป ไม่งั้นใช้เวลาที่โพสต์"""
+    rows = col_to_dicts(sheets_get(tok, OILBOT_SHEET_ID, "PriceLog!A1:Q200000"))
+    cutoff = (datetime.now(TZ) - timedelta(days=FEED_DAYS_PRICES)).strftime("%Y-%m-%d")
+    out = [["provider", "warehouse", "fuel", "price", "effective"]]
+    for r in rows:
+        d, t = str(r.get("update_date") or ""), str(r.get("update_time") or "")[:5]
+        price = r.get("price")
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", d) or d < cutoff or not isinstance(price, (int, float)):
+            continue
+        posted = datetime.strptime(f"{d} {t or '00:00'}", "%Y-%m-%d %H:%M")
+        eff_t = str(r.get("effective_time") or "")[:5]
+        eff = posted
+        if re.match(r"^\d{1,2}:\d{2}$", eff_t):
+            cand = datetime.strptime(f"{d} {eff_t.zfill(5)}", "%Y-%m-%d %H:%M")
+            eff = cand + timedelta(days=1) if cand < posted - timedelta(hours=2) else cand
+        out.append([r.get("provider"), r.get("warehouse_name"), r.get("fuel_type"), price, eff.strftime("%Y-%m-%d %H:%M")])
+    return out
+
+
+def ingest_feeds(tok):
+    """คัดลอกสัญญาณจากชีท OIL BOT มาไว้ในชีทนี้ (main.py อ่านชีทนี้ผ่าน CSV สาธารณะ ไม่มี credential)"""
+    plan = [
+        (TABS["FEED_INTRADAY"], lambda: _feed_rows(tok, "IntradayMops", ["msg_date", "msg_time", "kind", "b", "d", "wti", "wti_chg", "brent", "brent_chg"])),
+        (TABS["FEED_HEADSUP"], lambda: _feed_rows(tok, "HeadsUp", ["msg_date", "msg_time", "provider", "direction", "scope", "stated_time", "has_rate", "rates"])),
+        (TABS["FEED_FUND_NOTICE"], lambda: _feed_rows(tok, "FundNotice", ["msg_date", "msg_time", "issue_no", "effective_date", "diesel_old", "diesel_new", "benzene_old", "benzene_new"])),
+        (TABS["FEED_MOPS_CLOSE"], lambda: _mops_close_feed(tok)),
+        (TABS["FEED_PRICES"], lambda: _prices_feed(tok)),
+    ]
+    failed = []
+    for title, build in plan:
+        try:
+            rows = build()
+            sheets_replace_tab(tok, SHEET_ID, title, rows)
+            print(f"[FEED] {title}: {len(rows) - 1} rows")
+        except Exception as e:           # แท็บต้นทางอาจยังไม่ถูกสร้าง (worker สร้างเองตอนมีข้อความแรก) — ข้ามแล้วไปต่อ
+            print(f"[FEED] {title} skipped: {e}")
+            failed.append(title)
+    return failed
+
+
+def _mops_close_feed(tok):
+    """MopsLog (OIL BOT) -> สคีมา mops_close: msg_date, msg_time, mops_date, g95, g95_chg, diesel, diesel_chg"""
+    rows = col_to_dicts(sheets_get(tok, OILBOT_SHEET_ID, "MopsLog!A1:L100000"))
+    out = [["msg_date", "msg_time", "mops_date", "g95", "g95_chg", "diesel", "diesel_chg"]]
+    for r in rows:
+        ts = str(r.get("timestamp_logged") or "")
+        if len(ts) < 16:
+            continue
+        md = r.get("mops_date")
+        md = excel_serial_to_date(md).isoformat() if isinstance(md, (int, float)) else str(md or "")[:10]
+        out.append([ts[:10], ts[11:16], md, r.get("g95_price"), r.get("g95_change"), r.get("diesel_price"), r.get("diesel_change")])
+    return out
 
 
 # ============================================================
@@ -465,6 +551,12 @@ def main():
     except Exception as e:
         print(f"[OILFUND] FAILED: {e}")
         failures.append("OILFUND")
+
+    try:
+        ingest_feeds(tok)
+    except Exception as e:
+        print(f"[FEED] FAILED: {e}")
+        failures.append("FEED")
 
     if failures:
         raise SystemExit(f"ingest.py: {', '.join(failures)} failed — see logs above")

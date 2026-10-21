@@ -20,6 +20,13 @@ TABS = {
     "NATIONAL_CONSUMPTION_REF": "National Consumption Ref",
     "ENTRY_OILFUND_SUSTAINABILITY": "Entry_OilFund_Sustainability",
     "NEWS": "NEWS",
+    # ฟีดสัญญาณตลาดที่คัดลอกมาจาก OIL BOT (ingest.py: ingest_feeds) และบันทึกผลคำแนะนำ (log_decisions.py)
+    "FEED_INTRADAY": "Entry_Intraday",
+    "FEED_HEADSUP": "Entry_HeadsUp",
+    "FEED_FUND_NOTICE": "Entry_FundNotice",
+    "FEED_MOPS_CLOSE": "Entry_MopsClose",
+    "FEED_PRICES": "Entry_Prices",
+    "DECISION_LOG": "DecisionLog",
 }
 
 TZ_NAME = "Asia/Bangkok"
@@ -101,3 +108,34 @@ def excel_serial_to_date(v):
 def fmt_date_us(d):
     """เช่น 9/30/2026 — รูปแบบเดียวกับที่ใช้เขียนคอลัมน์ Date ในแท็บ Entry_* ทั้งหมด"""
     return d.strftime("%-m/%-d/%Y") if os.name != "nt" else d.strftime("%#m/%#d/%Y")
+
+
+def ensure_tab(tok, spreadsheet_id, title):
+    """สร้างแท็บถ้ายังไม่มี (idempotent)"""
+    meta = requests.get(
+        f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}",
+        params={"fields": "sheets.properties.title"}, headers={"Authorization": f"Bearer {tok}"})
+    meta.raise_for_status()
+    if any(sh["properties"]["title"] == title for sh in meta.json().get("sheets", [])):
+        return False
+    r = requests.post(
+        f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate",
+        headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+        json={"requests": [{"addSheet": {"properties": {"title": title}}}]})
+    r.raise_for_status()
+    return True
+
+
+def sheets_clear(tok, spreadsheet_id, rng):
+    r = requests.post(
+        f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{requests.utils.quote(rng)}:clear",
+        headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}, json={})
+    r.raise_for_status()
+
+
+def sheets_replace_tab(tok, spreadsheet_id, title, rows):
+    """เขียนทับทั้งแท็บ (แถวแรก = หัวคอลัมน์) — ใช้กับแท็บฟีดที่คัดลอกมาทั้งชุดทุกรอบ ไม่ต้องจัดการแถวซ้ำ"""
+    ensure_tab(tok, spreadsheet_id, title)
+    sheets_clear(tok, spreadsheet_id, f"{title}!A1:Z100000")
+    if rows:
+        sheets_update(tok, spreadsheet_id, f"{title}!A1", rows)
