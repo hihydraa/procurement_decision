@@ -63,9 +63,17 @@ jobs:
         run: python log_decisions.py
         continue-on-error: true
 
+      - name: Prepare publish directory (index.html only)
+        # เผยแพร่เฉพาะหน้าเว็บ ไม่ใช่ทั้งรีโป: (1) .gitignore ของรีโปมี index.html ซึ่งทำให้ git add --all ในขั้น deploy ข้ามไฟล์นี้ ->
+        # gh-pages ไม่มี index.html -> หน้า 404 (เกิดแล้วเมื่อ 21 ต.ค. 2026) (2) ไม่เผยแพร่โค้ด/พารามิเตอร์โมเดล/ไฟล์คำแนะนำล่าสุดโดยไม่จำเป็น
+        run: |
+          test -s index.html || { echo "index.html is missing or empty - refusing to deploy"; exit 1; }
+          mkdir -p public
+          cp index.html public/index.html
+
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
+          publish_dir: ./public
           publish_branch: gh-pages
