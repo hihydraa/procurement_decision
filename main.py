@@ -1079,13 +1079,27 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
 # ============================================================
 # MAIN
 # ============================================================
+FEED_REQUIRED = {
+    "Entry_Intraday": ["msg_date", "msg_time", "kind", "b", "d"],
+    "Entry_HeadsUp": ["msg_date", "msg_time", "provider", "direction", "scope"],
+    "Entry_MopsClose": ["msg_date", "msg_time", "g95_chg", "diesel_chg"],
+    "Entry_FundNotice": ["msg_date", "msg_time", "effective_date", "diesel_old", "diesel_new"],
+}
+
+
 def load_feed(name: str, warnings: list) -> pd.DataFrame:
-    """โหลดแท็บฟีดสัญญาณ ถ้าอ่านไม่ได้ให้คืนตารางว่าง + แจ้งเตือน (engine จะตอบ 'ข้อมูลไม่พอ' แทนการเดา)"""
+    """โหลดแท็บฟีดสัญญาณ ถ้าอ่านไม่ได้/คอลัมน์ไม่ครบให้คืนตารางว่าง + แจ้งเตือน (engine จะตอบ 'ข้อมูลไม่พอ' แทนการเดา)
+    หมายเหตุ: gviz ถ้าชื่อแท็บไม่มีอยู่จะส่ง 'ชีทแรก' มาแทนโดยไม่แจ้ง error จึงต้องตรวจคอลัมน์เสมอ"""
     try:
-        return load_sheet_by_name(name)
+        df = load_sheet_by_name(name)
     except Exception as e:
         warnings.append(f"โหลดแท็บฟีด {name} ไม่สำเร็จ: {e}")
         return pd.DataFrame()
+    missing = [c for c in FEED_REQUIRED.get(name, []) if c not in df.columns]
+    if missing:
+        warnings.append(f"แท็บฟีด {name} ไม่มีคอลัมน์ {', '.join(missing)} (แท็บยังไม่ถูกสร้างหรือยังไม่มีข้อมูลจาก worker) — ถือว่าฟีดนี้ว่าง")
+        return pd.DataFrame()
+    return df
 
 
 def now_bangkok() -> pd.Timestamp:

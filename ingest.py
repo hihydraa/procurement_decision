@@ -340,25 +340,31 @@ def _prices_feed(tok):
 
 def ingest_feeds(tok):
     """คัดลอกสัญญาณจากชีท OIL BOT มาไว้ในชีทนี้ (main.py อ่านชีทนี้ผ่าน CSV สาธารณะ ไม่มี credential)"""
+    I_COLS = ["msg_date", "msg_time", "kind", "b", "d", "wti", "wti_chg", "brent", "brent_chg"]
+    H_COLS = ["msg_date", "msg_time", "provider", "direction", "scope", "stated_time", "has_rate", "rates"]
+    F_COLS = ["msg_date", "msg_time", "issue_no", "effective_date", "diesel_old", "diesel_new", "benzene_old", "benzene_new"]
+    M_COLS = ["msg_date", "msg_time", "mops_date", "g95", "g95_chg", "diesel", "diesel_chg"]
+    P_COLS = ["provider", "warehouse", "fuel", "price", "effective"]
     plan = [
-        (TABS["FEED_INTRADAY"], lambda: _feed_rows(tok, "IntradayMops", ["msg_date", "msg_time", "kind", "b", "d", "wti", "wti_chg", "brent", "brent_chg"],
-                                                    {"msg_date": cell_date, "msg_time": cell_time})),
-        (TABS["FEED_HEADSUP"], lambda: _feed_rows(tok, "HeadsUp", ["msg_date", "msg_time", "provider", "direction", "scope", "stated_time", "has_rate", "rates"],
-                                                   {"msg_date": cell_date, "msg_time": cell_time, "stated_time": cell_time})),
-        (TABS["FEED_FUND_NOTICE"], lambda: _feed_rows(tok, "FundNotice", ["msg_date", "msg_time", "issue_no", "effective_date", "diesel_old", "diesel_new", "benzene_old", "benzene_new"],
-                                                       {"msg_date": cell_date, "msg_time": cell_time, "effective_date": cell_date})),
-        (TABS["FEED_MOPS_CLOSE"], lambda: _mops_close_feed(tok)),
-        (TABS["FEED_PRICES"], lambda: _prices_feed(tok)),
+        (TABS["FEED_INTRADAY"], I_COLS, lambda: _feed_rows(tok, "IntradayMops", I_COLS, {"msg_date": cell_date, "msg_time": cell_time})),
+        (TABS["FEED_HEADSUP"], H_COLS, lambda: _feed_rows(tok, "HeadsUp", H_COLS, {"msg_date": cell_date, "msg_time": cell_time, "stated_time": cell_time})),
+        (TABS["FEED_FUND_NOTICE"], F_COLS, lambda: _feed_rows(tok, "FundNotice", F_COLS, {"msg_date": cell_date, "msg_time": cell_time, "effective_date": cell_date})),
+        (TABS["FEED_MOPS_CLOSE"], M_COLS, lambda: _mops_close_feed(tok)),
+        (TABS["FEED_PRICES"], P_COLS, lambda: _prices_feed(tok)),
     ]
     failed = []
-    for title, build in plan:
+    for title, cols, build in plan:
         try:
             rows = build()
             sheets_replace_tab(tok, SHEET_ID, title, rows)
             print(f"[FEED] {title}: {len(rows) - 1} rows")
-        except Exception as e:           # แท็บต้นทางอาจยังไม่ถูกสร้าง (worker สร้างเองตอนมีข้อความแรก) — ข้ามแล้วไปต่อ
+        except Exception as e:           # แท็บต้นทางอาจยังไม่ถูกสร้าง (worker สร้างเองตอนมีข้อความชนิดนั้นเป็นครั้งแรก)
             print(f"[FEED] {title} skipped: {e}")
             failed.append(title)
+            try:                         # ให้แท็บปลายทางมีอยู่พร้อมหัวคอลัมน์เสมอ — main.py จะเห็นเป็นฟีดว่าง ไม่ใช่แท็บที่หายไป
+                sheets_replace_tab(tok, SHEET_ID, title, [cols])
+            except Exception as e2:
+                print(f"[FEED] {title} could not create header-only tab: {e2}")
     return failed
 
 
