@@ -15,6 +15,7 @@ Dashboard ช่วยตัดสินใจซื้อน้ำมัน (�
 | `fit_model.py` | ฝึกและวัด walk-forward → `model_params.json`, `backtest_summary.json` |
 | `ingest.py` | คัดลอกฟีดจากชีท OIL BOT (`Entry_Intraday`, `Entry_HeadsUp`, `Entry_FundNotice`, `Entry_MopsClose`, `Entry_Prices`) + EPPO/MOPS/กองทุนเดิม (EPPO มีคอลัมน์ `Source` = FRESH/CARRIED) |
 | `log_decisions.py` | บันทึกคำแนะนำจริงลงแท็บ `DecisionLog` แล้วเติมผลลัพธ์เมื่อรู้ราคาวันถัดไป |
+| `check_models.py` | ตรวจรายสัปดาห์ (workflow `check_deepseek_models.yml`) ว่าโมเดล DeepSeek ที่ worker/news.py ใช้ยังอยู่ในรายชื่อและเรียกได้จริง (ข้อความ + รูป) ล้มให้เห็นชัดเมื่อโมเดลหาย |
 | `main.py` | สร้าง `index.html` (+ `decision_snapshot.json`) ; ตรวจความสดของข้อมูลแล้วแสดงคำเตือน |
 
 ## ฝึกโมเดลใหม่
@@ -30,4 +31,5 @@ python3 tests/smoke_offline.py <data_dir> <eppo_raw.json> "2026-10-20 20:35"   #
 
 ## Secrets
 
-`SA_EMAIL`, `SA_PRIVATE_KEY` (ชีท), `OILPRICEAPI_KEY` (WTI), `DEEPSEEK_API_KEY` (NEWS)
+`SA_EMAIL`, `SA_PRIVATE_KEY` (ชีท), `OILPRICEAPI_KEY` (WTI), `DEEPSEEK_API_KEY` (NEWS + ตรวจโมเดล)
+ตัวแปร repository (ไม่บังคับ): `DEEPSEEK_MODEL`, `DEEPSEEK_VISION_MODEL` — ตั้งให้ตรงกับที่ตั้งทับใน Cloudflare (ว่าง = deepseek-chat / deepseek-flash)
