@@ -256,5 +256,16 @@ class ModelCheckTests(unittest.TestCase):
         self.assertEqual(C.main(), 1)
 
 
+class LiveStatsTests(unittest.TestCase):
+    def test_live_stats_with_outcomes(self):
+        n = engine.MIN_LIVE_OUTCOMES + 2
+        log = pd.DataFrame({"asof": pd.date_range("2026-09-01 15:30", periods=n, freq="D").astype(str),
+                            "fuel": "B7", "phase": "PM", "action_code": "NORMAL",
+                            "outcome_delta": [0.3 if i % 2 else -0.1 for i in range(n)]})
+        r = engine.live_stats(log, "B7", "PM", "NORMAL")
+        self.assertEqual(r["source"], "live")
+        self.assertEqual(r["n_days"], n)
+
+
 if __name__ == "__main__":
     unittest.main()
