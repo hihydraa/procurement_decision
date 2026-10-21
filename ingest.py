@@ -45,8 +45,13 @@ def eppo_xlsx_url(d: date) -> str:
 
 def fetch_eppo_workbook(d: date):
     url = eppo_xlsx_url(d)
-    r = requests.get(url, timeout=30)
+    try:
+        r = requests.get(url, timeout=30)
+    except requests.RequestException as e:
+        print(f"[EPPO] {d}: request failed ({type(e).__name__})")
+        return None
     if r.status_code != 200:
+        print(f"[EPPO] {d}: HTTP {r.status_code} {url}")
         return None
     return openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
 
@@ -139,8 +144,69 @@ def carry_forward_eppo(tok, existing_dicts, obs_count, date_str):
             "collection": sum(r.get("Estimated Collection (mn baht/day)") or 0 for r in latest_rows)}
 
 
+EPPO_HEAL_DAYS = 60     # ย้อนตรวจแถว CARRIED ที่ยังไม่ถูกแทนด้วยไฟล์จริงกี่วัน
+
+
+def build_eppo_rows(fuel_rows, date_str, consumption, rank_of):
+    """แปลงแถวจากไฟล์ EPPO เป็นแถวของ Entry_Eppo (คอลัมน์ A..S, Source = FRESH) ; rank_of(oil_type) คืนค่า Obs Rank"""
+    out, day_net = [], 0.0
+    for f in fuel_rows:
+        avg = consumption.get(f["oil_type"])
+        oilfund = f["oilfund"] if isinstance(f["oilfund"], (int, float)) else None
+        if avg and oilfund is not None:
+            net = oilfund * avg
+            subsidy, collection = max(0.0, -net), max(0.0, net)
+            day_net += net
+        else:
+            subsidy = collection = 0.0
+            avg = avg or ""
+        out.append([
+            date_str, f["oil_type"], f["ex_refin"], f["excise"], f["mtax"], f["oilfund"],
+            f["consv"], f["wholesale"], f["vat_ws"], f["ws_vat"], f["mm"], f["vat_mm"], f["retail"],
+            avg, round(subsidy, 2), round(collection, 2), round(collection - subsidy, 2), rank_of(f["oil_type"]), "FRESH",
+        ])
+    return out, day_net
+
+
+def heal_carried_eppo(tok, existing, existing_dicts, today, consumption=None):
+    """แถว CARRIED เกิดตอนไฟล์ยังไม่ออก ; เมื่อไฟล์จริงออกทีหลัง ต้องแทนที่ (เดิมข้ามเพราะถือว่า 'บันทึกแล้ว'
+    ทำให้ค่าค้างอยู่ตลอด) — แทนที่เฉพาะเมื่อจำนวนแถวเท่าเดิม เพื่อไม่ทำแถวอื่นเลื่อน"""
+    by_date = {}
+    for i, r in enumerate(existing_dicts):
+        d = excel_serial_to_date(r.get("Date"))
+        if d is not None:
+            by_date.setdefault(d, []).append((i + 2, r))     # แถวที่ 1 = หัวคอลัมน์ ; existing_dicts เริ่มที่แถว 2
+    todo = sorted((d for d, rows in by_date.items()
+                   if today - timedelta(days=EPPO_HEAL_DAYS) <= d <= today
+                   and all(str(r.get("Source") or "").strip().upper() == "CARRIED" for _, r in rows)), reverse=True)
+    healed = 0
+    for d in todo:
+        wb = fetch_eppo_workbook(d)
+        if wb is None:
+            continue
+        rows = by_date[d]
+        fuel_rows = parse_eppo_rows(wb, d)
+        if len(fuel_rows) != len(rows):
+            print(f"[EPPO] {d}: file has {len(fuel_rows)} fuels but sheet has {len(rows)} carried rows — not replacing")
+            continue
+        consumption = consumption if consumption is not None else load_consumption_ref(tok)
+        new_rows, _ = build_eppo_rows(fuel_rows, fmt_date_us(d), consumption, lambda ot: None)
+        first, last = rows[0][0], rows[-1][0]
+        if last - first + 1 != len(rows):
+            print(f"[EPPO] {d}: carried rows are not contiguous — not replacing")
+            continue
+        for nr, (_, old) in zip(new_rows, rows):
+            nr[17] = old.get("Obs Rank")
+        sheets_update(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!A{first}:S{last}", new_rows)
+        for _, r in rows:
+            r["Source"] = "FRESH"
+        healed += 1
+        print(f"[EPPO] replaced carried rows of {d} with the real file ({len(rows)} rows)")
+    return healed
+
+
 def ingest_eppo(tok, today: date):
-    existing = sheets_get(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!A1:Q5000")
+    existing = sheets_get(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!A1:S5000")
     existing_dicts = col_to_dicts(existing)
     # Date เก็บเป็น serial number ของ Sheets ไม่ใช่ string — ต้องแปลงก่อนเทียบ ไม่งั้นจะไม่มีวันตรงกัน
     seen_dates = {excel_serial_to_date(r.get("Date")) for r in existing_dicts if r.get("Date") is not None}
@@ -150,9 +216,13 @@ def ingest_eppo(tok, today: date):
         if ot:
             obs_count[ot] = obs_count.get(ot, 0) + 1
 
+    # แถวที่ลากค่าเก่ามา (CARRIED) ไม่นับว่าบันทึกแล้ว — ลองแทนที่ด้วยไฟล์จริงทุกรอบ
+    heal_carried_eppo(tok, existing, existing_dicts, today)
+    today_rows = [r for r in existing_dicts if excel_serial_to_date(r.get("Date")) == today]
+
     date_str = fmt_date_us(today)
     if today in seen_dates:
-        print(f"[EPPO] {date_str} already recorded, skipping")
+        print(f"[EPPO] {date_str} already recorded ({'real file' if any(str(r.get('Source') or '').upper() != 'CARRIED' for r in today_rows) else 'still carried'}), skipping")
         return None
 
     wb = fetch_eppo_workbook(today)
@@ -163,26 +233,11 @@ def ingest_eppo(tok, today: date):
     consumption = load_consumption_ref(tok)
     fuel_rows = parse_eppo_rows(wb, today)
 
-    new_rows = []
-    day_net_impact = 0.0
-    for f in fuel_rows:
-        avg = consumption.get(f["oil_type"])
-        oilfund = f["oilfund"] if isinstance(f["oilfund"], (int, float)) else None
-        if avg and oilfund is not None:
-            net = oilfund * avg
-            subsidy = max(0.0, -net)
-            collection = max(0.0, net)
-            day_net_impact += net
-        else:
-            subsidy = collection = 0.0
-            avg = avg or ""
-        obs_count[f["oil_type"]] = obs_count.get(f["oil_type"], 0) + 1
-        new_rows.append([
-            date_str, f["oil_type"], f["ex_refin"], f["excise"], f["mtax"], f["oilfund"],
-            f["consv"], f["wholesale"], f["vat_ws"], f["ws_vat"], f["mm"], f["vat_mm"], f["retail"],
-            avg, round(subsidy, 2), round(collection, 2), round(collection - subsidy, 2), obs_count[f["oil_type"]], "FRESH",
-        ])
+    def rank_of(ot):
+        obs_count[ot] = obs_count.get(ot, 0) + 1
+        return obs_count[ot]
 
+    new_rows, day_net_impact = build_eppo_rows(fuel_rows, date_str, consumption, rank_of)
     ensure_eppo_source_header(tok)
     sheets_append(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!A1:S1", new_rows)
     print(f"[EPPO] appended {len(new_rows)} rows for {date_str}, day net impact = {day_net_impact:.2f}")
