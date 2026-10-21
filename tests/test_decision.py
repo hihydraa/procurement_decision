@@ -164,5 +164,30 @@ class IngestConversionTests(unittest.TestCase):
         self.assertEqual(f["up_n"], 1)                                   # 0.7291666 = 17:30
 
 
+class BackfillTests(unittest.TestCase):
+    def test_plan_inserts_places_rows_by_date_and_is_idempotent(self):
+        import datetime as dt
+        import backfill as B
+        d = lambda y, m, day: dt.date(y, m, day)
+        existing = [d(2026, 7, 7), d(2026, 7, 7), d(2026, 7, 8), d(2026, 7, 8), d(2026, 9, 23), d(2026, 9, 23)]   # 2 แถวต่อวัน (G95/DS)
+        new = [[f"7/{x}/2026", "G95", 1.0] for x in (9, 10)] + [[f"7/{x}/2026", "DS", 2.0] for x in (9, 10)]
+        plan = B.plan_inserts(existing, new)
+        self.assertEqual([(p, len(r)) for p, r in plan], [(4, 4)])                 # แทรกหลังแถวที่ 4 (ก่อน 23 ก.ย.)
+        self.assertEqual(B.plan_inserts(existing + [d(2026, 7, 9)] * 2 + [d(2026, 7, 10)] * 2, new), [])   # รันซ้ำ: ไม่มีอะไรต้องแทรก
+        self.assertEqual(B.to_date(46316), d(2026, 10, 21))
+        self.assertEqual(B.to_date("7/9/2026"), d(2026, 7, 9))
+
+    def test_backfill_files_match_sheet_schema(self):
+        import backfill as B
+        m = B.read_csv("entry_mops_gap.csv", 6)
+        self.assertEqual(len(m), 152)
+        self.assertEqual({r[1] for r in m}, {"G95", "DS"})
+        self.assertTrue(all(r[2] > 50 for r in m))
+        w = B.read_csv("entry_wti_gap.csv", 7)
+        self.assertEqual(len(w), 53)
+        self.assertEqual(B.to_date(w[0][0]).isoformat(), "2026-07-09")
+        self.assertEqual(B.to_date(w[-1][0]).isoformat(), "2026-08-30")
+
+
 if __name__ == "__main__":
     unittest.main()

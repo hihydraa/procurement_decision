@@ -1,0 +1,24 @@
+name: Backfill sheet gaps (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "เขียนลงชีทจริง (ไม่ติ๊ก = ทดลองรัน แสดงแผนอย่างเดียว)"
+        type: boolean
+        default: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Backfill Entry_MOPS / Entry_WTI gaps
+        env:
+          SA_EMAIL: ${{ secrets.SA_EMAIL }}
+          SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
+        run: python backfill.py ${{ inputs.apply && '--apply' || '' }}
