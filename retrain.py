@@ -27,6 +27,8 @@ import model as M
 import signals as S
 from common import SHEET_ID
 
+MIN_NEW_DAYS = 14  # ข้อมูลใหม่น้อยกว่านี้ ผลต่างของโมเดลเป็นแค่สัญญาณรบกวน ไม่เปิด PR
+
 TABLES = {"prices": "Entry_Prices", "trend": "Entry_Intraday", "headsup": "Entry_HeadsUp", "mops": "Entry_MopsClose", "fund": "Entry_FundNotice"}
 FILES = {k: f"{k}.csv" for k in TABLES}
 REQUIRED = {"prices": ["provider", "warehouse", "fuel", "price", "effective"], "trend": ["msg_date", "msg_time", "kind", "b", "d"],
@@ -195,6 +197,13 @@ def alert_overview(summary) -> list:
 
 
 # ------------------------------------------------------------------ ตัวรัน
+def new_days(old_through, new_through) -> int:
+    """จำนวนวันที่ข้อมูลใหม่กว่าโมเดลเดิม (ไม่ทราบวันเดิม = นับว่ามากพอ)"""
+    if old_through is None:
+        return 10 ** 6
+    return (pd.Timestamp(new_through) - pd.Timestamp(old_through)).days
+
+
 def run(data_dir: str, out_dir: str, use_sheet: bool = True, fetch=fetch_tab) -> dict:
     os.makedirs(out_dir, exist_ok=True)
     train_dir = os.path.join(out_dir, "train")
@@ -215,7 +224,8 @@ def run(data_dir: str, out_dir: str, use_sheet: bool = True, fetch=fetch_tab) ->
     old_through = (old_params or {}).get("data_through")
     g = gate(old_summary or {}, new_summary, new_params)
     accepted = [i for i, x in g.items() if x["ok"]]
-    has_new_data = old_through is None or new_params["data_through"] > old_through
+    gap = new_days(old_through, new_params["data_through"])
+    has_new_data = gap >= MIN_NEW_DAYS
     if not has_new_data:
         accepted = []
     n_ok, n_bad = sum(1 for x in g.values() if x["ok"]), sum(1 for x in g.values() if not x["ok"])
@@ -224,7 +234,7 @@ def run(data_dir: str, out_dir: str, use_sheet: bool = True, fetch=fetch_tab) ->
         merged_p, merged_s = (new_params, new_summary) if old_params is None else merge_models(old_params, old_summary, new_params, new_summary, accepted)
         FM.write_json(os.path.join(out_dir, "model_params.json"), merged_p)
         FM.write_json(os.path.join(out_dir, "backtest_summary.json"), merged_s)
-    verdict = ("ไม่มีข้อมูลใหม่กว่าโมเดลเดิม ไม่เปลี่ยนโมเดล" if not has_new_data else
+    verdict = (f"ข้อมูลใหม่กว่าโมเดลเดิมแค่ {gap} วัน (ต้อง ≥ {MIN_NEW_DAYS} วัน) ไม่เปลี่ยนโมเดล" if not has_new_data else
                f"เสนอโมเดลใหม่ {len(accepted)} จาก {len(g)} โมเดล (ที่เหลือคงเดิม) — ต้องให้คนอนุมัติ" if changed else "ไม่มีโมเดลใดผ่านประตู คงโมเดลเดิมทั้งหมด")
     info = {"when": datetime.now().strftime("%Y-%m-%d %H:%M"), "data_through": new_params["data_through"], "old_data_through": old_through, "added": added,
             "trend_scale": scale, "gate": g, "n_ok": n_ok, "n_bad": n_bad, "accepted": accepted, "changed": changed, "verdict": verdict,
