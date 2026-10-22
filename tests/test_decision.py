@@ -404,6 +404,10 @@ class DispatchLogTests(unittest.TestCase):
         self.assertIn("เร่งส่ง", many)
         self.assertIn("+0.500", many)
         self.assertIn("เริ่มบันทึกคำแนะนำจริงแล้ว", self.MAIN.build_dispatch_live(pd.DataFrame(), 10))
+        ready = self.MAIN.build_dispatch_live(pd.DataFrame(), 10, engine.load_backtest_summary())
+        self.assertIn("ความพร้อมแจ้งเตือน", ready)
+        self.assertIn("ยังไม่พร้อม", ready)
+        self.assertIn("ยังไม่ส่งข้อความใด ๆ", ready)
 
 
 class SheetSerialTests(unittest.TestCase):

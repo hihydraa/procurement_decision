@@ -699,7 +699,22 @@ def _dispatch_card(label_th, d):
     </div>"""
 
 
-def build_dispatch_live(log: pd.DataFrame, lead: int) -> str:
+def build_alert_readiness(log: pd.DataFrame, summary, lead: int) -> str:
+    """ความพร้อมแจ้งเตือนต่อชนิด/ช่วง (เกณฑ์ใน engine.alert_status) — แสดงเฉพาะสถานะ ไม่มีการส่งข้อความใด ๆ"""
+    names = {"D15": "บ่าย 15:30", "D20": "ค่ำ 20:30"}
+    items = []
+    for fk in FUEL_CONFIG:
+        fuel = engine.FUEL_KEY[fk]
+        for win, label in names.items():
+            s = engine.alert_status(log, summary, fuel, win, lead)
+            ok = [{"URGENT": "เร่ง", "WAIT": "ชะลอ"}[c] for c, v in s["eligible"].items() if v]
+            state = ("พร้อมแจ้งเตือน: " + "/".join(ok)) if ok else ("ยังไม่พร้อม: " + (s["reasons"][0] if s["reasons"] else "-"))
+            items.append(f"<li>{html_escape(FUEL_CONFIG[fk]['label_th'])} ช่วง{label} — {html_escape(state)}</li>")
+    return ("<div class='muted' style='margin-top:8px'><strong>ความพร้อมแจ้งเตือน</strong> (ตอนนี้ยังไม่ส่งข้อความใด ๆ เข้ากลุ่ม ; "
+            f"ต้องมีผลจริง ≥ {engine.ALERT_MIN_DAYS} วันและผ่านเกณฑ์ความแม่นยำก่อน)<ul>{''.join(items)}</ul></div>")
+
+
+def build_dispatch_live(log: pd.DataFrame, lead: int, summary=None) -> str:
     """ผลทดสอบเดินหน้าของแผนส่งรถ (นับจากวันที่เริ่มบันทึก) — ยังไม่ครบ MIN_DISPATCH_LIVE วันจะบอกว่ากำลังสะสม ไม่สรุปว่าแม่น"""
     names = {"URGENT": "เร่งส่ง", "GRADUAL": "ทยอยส่ง", "NORMAL": "ส่งปกติ", "WAIT": "ชะลอ"}
     rows, any_data = [], False
@@ -722,7 +737,8 @@ def build_dispatch_live(log: pd.DataFrame, lead: int) -> str:
     return f"""<div class='dispatch-live'><h3>ผลทดสอบจริง (เริ่มนับตั้งแต่เริ่มบันทึก, ระยะเดินทาง {lead} ชม.)</h3>{note}
       <div style='overflow-x:auto'><table class='acc-table'><thead><tr><th>ชนิด</th><th>จำนวนวันที่มีผล</th><th>คำแนะนำ → ผลจริง</th>
       <th>กำไรเฉลี่ย บาท/ลิตร/วัน</th><th>กำไรรวม บาท/ลิตร</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div>
-      <div class='muted'>กำไร = ถ้าเร่งส่งแล้วราคาที่เวลาถึงถูกกว่าถ้ารอ 1 วัน หรือชะลอแล้วราคาถูกลง ; ส่งปกติ = 0 (เทียบกับทำตามแผนเดิมทุกวัน)</div></div>"""
+      <div class='muted'>กำไร = ถ้าเร่งส่งแล้วราคาที่เวลาถึงถูกกว่าถ้ารอ 1 วัน หรือชะลอแล้วราคาถูกลง ; ส่งปกติ = 0 (เทียบกับทำตามแผนเดิมทุกวัน)</div>
+      {build_alert_readiness(log, summary, lead)}</div>"""
 
 
 def build_dispatch_section(by_lead: dict, default_lead: int, asof, live_html: str = "") -> str:
@@ -1357,9 +1373,9 @@ def main():
             dispatch_log = pd.DataFrame()
     except Exception:
         dispatch_log = pd.DataFrame()
-    write_dispatch_snapshot(by_lead)
+    write_dispatch_snapshot(by_lead, version=M.model_version(params))
     default_lead = disp_cfg.get("default_lead_hours", 10)
-    dispatch_html = build_dispatch_section(by_lead, default_lead, asof, build_dispatch_live(dispatch_log, default_lead) if by_lead else "")
+    dispatch_html = build_dispatch_section(by_lead, default_lead, asof, build_dispatch_live(dispatch_log, default_lead, summary) if by_lead else "")
 
     html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund, dispatch_html)
     write_text("index.html", html)
@@ -1367,7 +1383,7 @@ def main():
     print("Dashboard created successfully")
 
 
-def write_dispatch_snapshot(by_lead: dict, path: str = "dispatch_snapshot.json") -> None:
+def write_dispatch_snapshot(by_lead: dict, path: str = "dispatch_snapshot.json", version: str = "") -> None:
     """คำแนะนำแผนส่งรถรอบนี้ (ทุกระยะเดินทาง) ให้ log_dispatch.py บันทึกลง DispatchLog"""
     clean = lambda v: None if v is None or (isinstance(v, float) and np.isnan(v)) else round(float(v), 4)
     snap = []
@@ -1378,7 +1394,7 @@ def write_dispatch_snapshot(by_lead: dict, path: str = "dispatch_snapshot.json")
             snap.append({"asof": d["asof"].strftime("%Y-%m-%d %H:%M"), "window": d["window"], "fuel": d["fuel"], "lead": int(lead),
                          "action_code": d["action_code"], "raw_action_code": d.get("raw_action_code"),
                          "grade": (d.get("quality") or {}).get("grade"), "p_rise": clean(d["p_rise"]), "p_fall": clean(d["p_fall"]),
-                         "arrive": d["arrive"].strftime("%Y-%m-%d %H:%M")})
+                         "arrive": d["arrive"].strftime("%Y-%m-%d %H:%M"), "model_version": version})
     write_text(path, json.dumps(snap, ensure_ascii=False, indent=1))
 
 

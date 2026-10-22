@@ -158,22 +158,8 @@ def old_rule_policy(df):
             "avg_gain_per_day": float(u.mean())}
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("data_dir")
-    ap.add_argument("--out", default=M.PARAMS_PATH)
-    ap.add_argument("--summary", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "backtest_summary.json"))
-    ap.add_argument("--dispatch-only", action="store_true",
-                    help="ฝึกเฉพาะโมเดลแผนส่งรถ (ช่วงเวลาออกรถ x ระยะเดินทาง) แล้วรวมเข้าไฟล์เดิม ไม่แตะโมเดลเดิม")
-    a = ap.parse_args()
-
-    prices, tables = load(a.data_dir)
-    book = S.PriceBook(prices)
-    if a.dispatch_only:
-        return fit_dispatch(a, book, tables)
-    params = {"features": M.FEATURES, "trained_at": datetime.now().strftime("%Y-%m-%d"), "models": {}, "thresholds": {}}
-    summary = {"generated": datetime.now().strftime("%Y-%m-%d"), "target": "ราคาต่ำสุดของตลาด 15:30 พรุ่งนี้ เทียบ 15:30 วันนี้ (บาท/ลิตร)",
-               "rise_threshold_thb": M.RISE_THB, "results": {}}
+def fit_legacy(book, tables, params, summary):
+    """โมเดลเดิม PM 15:30 / EVE 20:30 (เป้าหมาย: ราคา 15:30 พรุ่งนี้ − 15:30 วันนี้)"""
     for fuel in S.FUELS:
         for phase, hour in PHASES.items():
             key = f"{fuel}_{phase}"
@@ -182,22 +168,13 @@ def main():
             summary["results"][key] = res
             params["models"][key] = models
             params["thresholds"][key] = final_th
-            ok_n = res["n_oos_days"]
-            print(f"[{key}] oos={ok_n} AUC rise={res['auc_rise']:.2f} fall={res['auc_fall']:.2f} | "
+            print(f"[{key}] oos={res['n_oos_days']} AUC rise={res['auc_rise']:.2f} fall={res['auc_fall']:.2f} | "
                   f"holdout gain new={res['holdout_policy']['total_gain_thb_per_litre']:+.1f} old={res['holdout_old_rule']['total_gain_thb_per_litre']:+.1f} "
                   f"(บาท/ลิตรรวมทุกวัน, n={res['holdout_policy']['n_days']})")
-    with open(a.out, "w", encoding="utf-8") as fh:
-        json.dump(params, fh, ensure_ascii=False, indent=1)
-    with open(a.summary, "w", encoding="utf-8") as fh:
-        json.dump(summary, fh, ensure_ascii=False, indent=1, default=float)
-    print("wrote", a.out, a.summary)
 
 
-def fit_dispatch(a, book, tables):
-    with open(a.out, encoding="utf-8") as fh:
-        params = json.load(fh)
-    with open(a.summary, encoding="utf-8") as fh:
-        summary = json.load(fh)
+def fit_dispatch_into(book, tables, params, summary):
+    """โมเดลแผนส่งรถ: ชนิด x ช่วงเวลาออกรถ x ระยะเดินทาง"""
     days = pd.date_range(tables.headsup.ts.min().normalize() + pd.Timedelta(days=10), tables.headsup.ts.max().normalize() - pd.Timedelta(days=1))
     params["dispatch"] = {"default_lead_hours": DEFAULT_LEAD, "leads": list(DISPATCH_LEADS), "windows": DISPATCH_WINDOWS,
                           "hour_profile": {f: hour_profile(book, f, days) for f in S.FUELS}, "trained_at": datetime.now().strftime("%Y-%m-%d")}
@@ -213,10 +190,44 @@ def fit_dispatch(a, book, tables):
                 params["thresholds"][key] = th
                 print(f"[{key}] n={len(df)} oos={res['n_oos_days']} AUC rise={res['auc_rise']:.2f} fall={res['auc_fall']:.2f} "
                       f"holdout gain={res['holdout_policy']['total_gain_thb_per_litre']:+.1f} (n={res['holdout_policy']['n_days']})")
-    with open(a.out, "w", encoding="utf-8") as fh:
-        json.dump(params, fh, ensure_ascii=False, indent=1)
-    with open(a.summary, "w", encoding="utf-8") as fh:
-        json.dump(summary, fh, ensure_ascii=False, indent=1, default=float)
+
+
+def fit_everything(book, tables):
+    """ฝึกทุกโมเดล (เดิม + แผนส่งรถ) จากข้อมูลชุดเดียว คืน (params, summary)"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    params = {"features": M.FEATURES, "trained_at": today, "data_through": tables.headsup.ts.max().strftime("%Y-%m-%d"), "models": {}, "thresholds": {}}
+    summary = {"generated": today, "target": "ราคาต่ำสุดของตลาด 15:30 พรุ่งนี้ เทียบ 15:30 วันนี้ (บาท/ลิตร)", "rise_threshold_thb": M.RISE_THB, "results": {}}
+    fit_legacy(book, tables, params, summary)
+    fit_dispatch_into(book, tables, params, summary)
+    return params, summary
+
+
+def write_json(path, obj):
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(obj, fh, ensure_ascii=False, indent=1, default=float)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("data_dir")
+    ap.add_argument("--out", default=M.PARAMS_PATH)
+    ap.add_argument("--summary", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "backtest_summary.json"))
+    ap.add_argument("--dispatch-only", action="store_true",
+                    help="ฝึกเฉพาะโมเดลแผนส่งรถ (ช่วงเวลาออกรถ x ระยะเดินทาง) แล้วรวมเข้าไฟล์เดิม ไม่แตะโมเดลเดิม")
+    a = ap.parse_args()
+
+    prices, tables = load(a.data_dir)
+    book = S.PriceBook(prices)
+    if a.dispatch_only:
+        with open(a.out, encoding="utf-8") as fh:
+            params = json.load(fh)
+        with open(a.summary, encoding="utf-8") as fh:
+            summary = json.load(fh)
+        fit_dispatch_into(book, tables, params, summary)
+    else:
+        params, summary = fit_everything(book, tables)
+    write_json(a.out, params)
+    write_json(a.summary, summary)
     print("wrote", a.out, a.summary)
 
 

@@ -319,4 +319,51 @@ def dispatch_live_stats(log: pd.DataFrame, fuel: str, lead: int, window: str = N
                            "fall_rate": float((g.outcome_delta < -M.RISE_THB).mean()), "avg": float(g.outcome_delta.mean())}
     total = float(sum(M.utility(c, g) for c, g in zip(done.action_code, done.outcome_delta)))
     return {"n": int(len(done)), "pending": pending, "by_action": by_action, "total_gain": total,
-            "avg_gain_per_day": total / len(done) if len(done) else None}
+            "avg_gain_per_day": total / len(done) if len(done) else None,
+            "base_rise": float((done.outcome_delta > M.RISE_THB).mean()) if len(done) else None,
+            "base_fall": float((done.outcome_delta < -M.RISE_THB).mean()) if len(done) else None}
+
+
+# เกณฑ์ก่อนอนุญาตให้ "แจ้งเตือน" (ผู้ใช้อนุมัติแล้ว): ต้องผ่านทั้งหมดต่อ ชนิด/ช่วง/ระยะเดินทาง
+ALERT_MIN_DAYS = 40            # วันที่มีผลจริงขั้นต่ำ
+ALERT_MIN_LIFT = 0.15          # อัตราถูกจริงของ "เร่ง/ชะลอ" ต้องสูงกว่าอัตราปกติอย่างน้อยเท่านี้ (15 จุดเปอร์เซ็นต์)
+ALERT_MIN_ACTION_N = 8         # ต้องมีคำแนะนำชนิดนั้นอย่างน้อยเท่านี้ครั้ง ถึงจะประเมินชนิดนั้นได้
+ALERT_MIN_GAIN = 0.05          # กำไรเฉลี่ย บาท/ลิตร/วัน
+ALERT_BACKTEST_KEEP = 2 / 3    # ผลจริงต้องไม่แย่กว่า backtest เกินหนึ่งในสาม
+
+
+def alert_status(log: pd.DataFrame, summary, fuel: str, window: str, lead: int) -> dict:
+    """ช่วง (fuel, window, lead) นี้ผ่านเกณฑ์แจ้งเตือนหรือยัง — คืน {eligible:{URGENT:bool,WAIT:bool}, n, reasons[]}
+    ไม่ส่งข้อความใด ๆ เป็นแค่ตัวตัดสินว่า 'อนุญาตหรือยัง' ให้ขั้นแจ้งเตือนใช้ภายหลัง"""
+    out = {"fuel": fuel, "window": window, "lead": lead, "n": 0, "eligible": {"URGENT": False, "WAIT": False}, "reasons": []}
+    st = dispatch_live_stats(log, fuel, lead, window)
+    if not st:
+        out["reasons"].append("ยังไม่มีบันทึกคำแนะนำจริง")
+        return out
+    out["n"] = st["n"]
+    if st["n"] < ALERT_MIN_DAYS:
+        out["reasons"].append(f"มีผลจริง {st['n']}/{ALERT_MIN_DAYS} วัน")
+        return out
+    avg = st["avg_gain_per_day"]
+    if avg is None or avg < ALERT_MIN_GAIN:
+        out["reasons"].append(f"กำไรเฉลี่ยจริง {avg if avg is None else round(avg, 3)} ต่ำกว่า {ALERT_MIN_GAIN} บาท/ลิตร/วัน")
+        return out
+    try:
+        bt = summary["dispatch_results"][f"{fuel}_{window}_L{lead}"]["holdout_policy"]
+        bt_avg = bt["total_gain_thb_per_litre"] / bt["n_days"]
+    except (KeyError, TypeError, ZeroDivisionError):
+        bt_avg = None
+    if bt_avg is not None and bt_avg > 0 and avg < bt_avg * ALERT_BACKTEST_KEEP:
+        out["reasons"].append(f"กำไรจริง {avg:.3f} แย่กว่า backtest ({bt_avg:.3f}) เกินหนึ่งในสาม")
+        return out
+    for code, rate_key, base_key, label in (("URGENT", "rise_rate", "base_rise", "เร่ง"), ("WAIT", "fall_rate", "base_fall", "ชะลอ")):
+        a = st["by_action"].get(code)
+        if not a or a["n"] < ALERT_MIN_ACTION_N:
+            out["reasons"].append(f"คำแนะนำ{label}มีน้อยกว่า {ALERT_MIN_ACTION_N} ครั้ง ยังประเมินไม่ได้")
+            continue
+        lift = a[rate_key] - st[base_key]
+        if lift >= ALERT_MIN_LIFT:
+            out["eligible"][code] = True
+        else:
+            out["reasons"].append(f"{label}: ถูกจริง {a[rate_key]:.0%} สูงกว่าปกติ {st[base_key]:.0%} แค่ {lift * 100:.0f} จุด (ต้อง ≥ {ALERT_MIN_LIFT * 100:.0f})")
+    return out

@@ -19,7 +19,7 @@ from common import SHEET_ID, TABS, TZ_NAME, ensure_tab, get_token, sheets_get, s
 from zoneinfo import ZoneInfo
 
 COLUMNS = ["asof", "date", "window", "fuel", "lead", "action_code", "raw_action_code", "grade", "p_rise", "p_fall", "arrive",
-           "price_arrive", "price_next", "outcome_delta", "outcome_filled_at"]
+           "price_arrive", "price_next", "outcome_delta", "outcome_filled_at", "model_version"]
 OUTCOME_FROM = COLUMNS.index("price_arrive")      # คอลัมน์ L..O
 
 
@@ -77,13 +77,16 @@ def main():
     if ensure_tab(tok, SHEET_ID, tab):
         sheets_update(tok, SHEET_ID, f"{tab}!A1", [COLUMNS])
         print(f"[DISPATCH] created tab {tab}")
-    values = sheets_get(tok, SHEET_ID, f"{tab}!A1:O50000")
+    values = sheets_get(tok, SHEET_ID, f"{tab}!A1:P50000")
     head = values[0] if values else COLUMNS
+    if head != COLUMNS:                                               # แท็บที่สร้างก่อนมีคอลัมน์ model_version: เติมหัวคอลัมน์ใหม่ (แถวเก่าเว้นว่าง = ไม่ทราบเวอร์ชัน)
+        sheets_update(tok, SHEET_ID, f"{tab}!A1", [COLUMNS])
+        head = COLUMNS
     rows = [dict(zip(head, r + [""] * (len(head) - len(r)))) for r in values[1:]]
 
     add = new_rows(rows, snapshot)
     if add:
-        sheets_append(tok, SHEET_ID, f"{tab}!A1:O1", [[r.get(c, "") for c in COLUMNS] for r in add])
+        sheets_append(tok, SHEET_ID, f"{tab}!A1:P1", [[r.get(c, "") for c in COLUMNS] for r in add])
         rows += add
     print(f"[DISPATCH] snapshot rows: +{len(add)} new")
 
