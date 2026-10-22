@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 import signals as S
-from common import SHEET_ID, TABS, TZ_NAME, ensure_tab, get_token, sheets_get, sheets_append, sheets_update
+from common import SHEET_ID, TABS, TZ_NAME, ensure_tab, get_token, sheets_get, sheets_append, sheets_update, to_ts
 from zoneinfo import ZoneInfo
 
 COLUMNS = ["asof", "date", "fuel", "phase", "action_code", "action", "p_rise", "p_fall", "trend", "up_n", "dn_n",
@@ -45,9 +45,28 @@ def compute_outcome(book: S.PriceBook, fuel: str, date: pd.Timestamp, now: pd.Ti
     return float(a), float(b), round(float(b - a), 2)
 
 
+def _day(v) -> str:
+    """วันที่เป็นข้อความ YYYY-MM-DD (ชีทคืนเลข serial เมื่ออ่านแบบ UNFORMATTED จึงเทียบกับข้อความตรง ๆ ไม่ได้ — เดิมทำให้ทุกรอบเพิ่มแถวซ้ำ)"""
+    t = to_ts(v)
+    return str(v) if pd.isna(t) else t.strftime("%Y-%m-%d")
+
+
+def _stamp(v) -> str:
+    t = to_ts(v)
+    return str(v) if pd.isna(t) else t.strftime("%Y-%m-%d %H:%M")
+
+
+def premature(row: dict) -> bool:
+    """มีผลลัพธ์แล้วแต่เติมก่อนถึง 15:30 วันถัดไป (+30 นาที) = ผลผิดจากบั๊กอ่านเวลาเป็นปี 1970 → ต้องล้างแล้วคำนวณใหม่"""
+    if str(row.get("outcome_delta", "")) == "":
+        return False
+    day, filled = to_ts(row.get("date")), to_ts(row.get("outcome_filled_at"))
+    return pd.isna(day) or pd.isna(filled) or filled < canonical_time(day) + pd.Timedelta(days=1, minutes=30)
+
+
 def merge_snapshot(rows: list, snapshot: list) -> tuple:
     """รวม snapshot ใหม่เข้ากับแถวเดิม: คืน (แถวที่ต้องเพิ่ม, {เลขแถว(0-based): แถวใหม่ที่ต้องเขียนทับ})"""
-    index = {(r.get("date"), r.get("fuel"), r.get("phase")): i for i, r in enumerate(rows)}
+    index = {(_day(r.get("date")), r.get("fuel"), r.get("phase")): i for i, r in enumerate(rows)}
     appends, updates = [], {}
     for s in snapshot:
         asof = pd.Timestamp(s["asof"])
@@ -60,7 +79,7 @@ def merge_snapshot(rows: list, snapshot: list) -> tuple:
         k = (row["date"], row["fuel"], row["phase"])
         if k in index:
             old = rows[index[k]]
-            if str(old.get("outcome_delta", "")) == "" and str(row["asof"]) >= str(old.get("asof", "")):
+            if str(old.get("outcome_delta", "")) == "" and str(row["asof"]) >= _stamp(old.get("asof", "")):
                 updates[index[k]] = row
         else:
             appends.append(row)
@@ -94,18 +113,28 @@ def main():
     prices = pd.DataFrame(sheets_get(tok, SHEET_ID, f"{TABS['FEED_PRICES']}!A1:E200000"))
     if len(prices) > 1:
         prices.columns = prices.iloc[0]
-        book = S.PriceBook(prices.iloc[1:].reset_index(drop=True))
-        filled = 0
+        prices = prices.iloc[1:].reset_index(drop=True)
+        prices["effective"] = prices["effective"].map(to_ts)           # serial → วันเวลาจริง (ดู common.to_ts)
+        book = S.PriceBook(prices)
+        filled = reset = 0
         for i, r in enumerate(rows):
+            if premature(r):
+                for c in ("price_asof", "price_next", "outcome_delta", "outcome_filled_at"):
+                    r[c] = ""
+                sheets_update(tok, SHEET_ID, f"{tab}!N{i + 2}:Q{i + 2}", [["", "", "", ""]])
+                reset += 1
             if str(r.get("outcome_delta", "")) != "" or not r.get("date"):
                 continue
-            res = compute_outcome(book, r["fuel"], pd.Timestamp(r["date"]), now)
+            day = to_ts(r["date"])
+            if pd.isna(day):
+                continue
+            res = compute_outcome(book, r["fuel"], day, now)
             if res:
                 r["price_asof"], r["price_next"], r["outcome_delta"] = res
                 r["outcome_filled_at"] = now.strftime("%Y-%m-%d %H:%M")
                 sheets_update(tok, SHEET_ID, f"{tab}!N{i + 2}:Q{i + 2}", [[r["price_asof"], r["price_next"], r["outcome_delta"], r["outcome_filled_at"]]])
                 filled += 1
-        print(f"[LOG] outcomes filled: {filled}")
+        print(f"[LOG] outcomes filled: {filled}, reset (filled too early): {reset}")
     else:
         print("[LOG] no price feed yet — outcomes not filled")
 

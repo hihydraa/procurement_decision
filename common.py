@@ -106,6 +106,22 @@ def excel_serial_to_date(v):
     return None
 
 
+def to_ts(v):
+    """แปลงค่าจากชีทเป็น pandas.Timestamp (ไม่มี tz) — อ่านด้วย UNFORMATTED_VALUE วันที่/เวลาจะเป็นเลข serial ของ Sheets
+    (เช่น 46317.5) ซึ่ง pd.Timestamp/to_datetime ตีเป็นนาโนวินาทีนับจากปี 1970 ทำให้ทุกเวลาเพี้ยนไปปี 1970 ; ข้อความวันที่ (เช่น '2026-10-22 15:45') แปลงตามปกติ ; ว่าง/แปลงไม่ได้ → NaT"""
+    import pandas as pd
+    if isinstance(v, bool) or v is None or v == "":
+        return pd.NaT
+    if isinstance(v, (int, float)):
+        return pd.Timestamp(EXCEL_EPOCH + timedelta(days=float(v)))
+    s = str(v).strip()
+    try:
+        return pd.Timestamp(EXCEL_EPOCH + timedelta(days=float(s)))
+    except ValueError:
+        pass
+    return pd.to_datetime(s, errors="coerce")
+
+
 def fmt_date_us(d):
     """เช่น 9/30/2026 — รูปแบบเดียวกับที่ใช้เขียนคอลัมน์ Date ในแท็บ Entry_* ทั้งหมด"""
     return d.strftime("%-m/%-d/%Y") if os.name != "nt" else d.strftime("%#m/%#d/%Y")
