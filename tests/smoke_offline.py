@@ -35,7 +35,7 @@ fund_sus = pd.DataFrame([["2026-10-19", "-102700.11", "236.42", "345.18", "0.00"
                         columns=["Date", "Total_Balance (ล้านบาท)", "Cash_Remaining (ล้านบาท)", "Daily_Subsidy (ล้านบาท/วัน)",
                                  "Daily_Collection (ล้านบาท/วัน)", "Net_Fund_Impact (ล้านบาท/วัน)", "Runway_Days", "Status"])
 by_gid = {
-    MAIN.GIDS["ENTRY_NYMEX"]: mk("nymex"), MAIN.GIDS["ENTRY_WTI"]: mk("brent"), MAIN.GIDS["ENTRY_MOPS"]: entry_mops,
+    MAIN.GIDS["ENTRY_WTI"]: mk("brent"), MAIN.GIDS["ENTRY_MOPS"]: entry_mops,
     MAIN.GIDS["ENTRY_EPPO"]: eppo, MAIN.GIDS["ENTRY_OILFUND_SUSTAINABILITY"]: fund_sus,
     MAIN.GIDS["SETTING"]: pd.DataFrame({"Date": ["3/17/2026"], "Exchange Rate": ["32.3347"]}),
     MAIN.GIDS["NEWS"]: pd.DataFrame({"Timestamp": [], "Context": []}),
