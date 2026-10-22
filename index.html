@@ -212,7 +212,7 @@
         <div>
           <h1>Fuel Procurement Decision Dashboard</h1>
           <p>ระบบช่วยตัดสินใจจัดซื้อน้ำมัน โดยผสานสัญญาณจากกลุ่ม Jobber (Trend Mops, ประกาศ "มีปรับขึ้น/ลง", ประกาศกองทุน), MOPS ปิด และข้อมูลตลาด เพื่อประเมินโอกาสที่ราคาจะขึ้น/ลงข้ามคืน แล้วสรุปเป็น Action สำหรับทีมจัดซื้อ</p>
-          <p style="margin-top:10px;">อัปเดตล่าสุด: 23/10/2026 01:26</p>
+          <p style="margin-top:10px;">อัปเดตล่าสุด: 23/10/2026 01:41</p>
         </div>
         
     <div class="snapshot-grid">
@@ -278,7 +278,7 @@
     <section class="dispatch">
       <h2>สรุปสำหรับทีมจัดซื้อ: ส่งรถตอนนี้ดีไหม?</h2>
       <p class="muted">ราคาที่ซื้อได้จริงคือราคา ณ เวลารถถึงคลัง (เวลาออก + ระยะเดินทาง) ไม่ใช่ราคาตอนนี้ — ระบบจึงประเมินราคาที่เวลาถึง
-      เทียบกับถ้าออกรถช้าไปอีก 1 วัน &nbsp;|&nbsp; ประเมิน ณ 23/10 01:26</p>
+      เทียบกับถ้าออกรถช้าไปอีก 1 วัน &nbsp;|&nbsp; ประเมิน ณ 23/10 01:40</p>
       <div class="lead-pick">ระยะเดินทางสาขา → คลัง: <label class='lead-opt'><input type='radio' name='lead' value='8' onchange="document.querySelectorAll('.lead-panel').forEach(p=>p.hidden=p.dataset.lead!==this.value)"> 8 ชม.</label><label class='lead-opt'><input type='radio' name='lead' value='10' checked onchange="document.querySelectorAll('.lead-panel').forEach(p=>p.hidden=p.dataset.lead!==this.value)"> 10 ชม.</label><label class='lead-opt'><input type='radio' name='lead' value='12' onchange="document.querySelectorAll('.lead-panel').forEach(p=>p.hidden=p.dataset.lead!==this.value)"> 12 ชม.</label></div>
       <div class='lead-panel' data-lead='8' hidden><div class='dispatch-grid'><div class="dispatch-card">
       <div class="dispatch-head"><span class="dispatch-fuel">แก๊สโซฮอล์ 95</span><span class="badge text-bg-secondary">ข้อมูลไม่พอ</span></div>
@@ -366,7 +366,7 @@
             <div class="summary-box">
             <div class="summary-title">บทสรุปเชิงวิเคราะห์</div>
             <div class="summary-text">โอกาสราคาขึ้น 20% สูงกว่าปกติเล็กน้อย — ทยอยสั่งซื้อวันนี้บางส่วน</div>
-            <div class="muted" style="margin-top:8px;">ช่วงตัดสินใจ: บ่าย (ก่อน MOPS ปิด) | โอกาสราคาขึ้นข้ามคืน 20% | โอกาสราคาลง 16% | ณ 23/10 01:26</div>
+            <div class="muted" style="margin-top:8px;">ช่วงตัดสินใจ: บ่าย (ก่อน MOPS ปิด) | โอกาสราคาขึ้นข้ามคืน 20% | โอกาสราคาลง 16% | ณ 23/10 01:40</div>
             <ul><li>MOPS ปิดล่าสุด +0.67 USD/bbl → เสี่ยงราคาขึ้น</li><li>ยังไม่มี Trend Mops ของวันนี้ (ปกติโพสต์ ~11:30 และ ~15:00) — ความมั่นใจต่ำกว่าปกติ</li></ul>
             <div class="muted">หลักฐาน (backtest, 324 วัน): เมื่อระบบแนะนำแบบนี้ ราคาขึ้นจริง 31% ลงจริง 17% ขยับเฉลี่ย +0.22 บาท/ลิตร</div>
         </div>
@@ -440,7 +440,7 @@
             <div class="summary-box">
             <div class="summary-title">บทสรุปเชิงวิเคราะห์</div>
             <div class="summary-text">โอกาสราคาขึ้นภายในคืนนี้ 33% (ปกติ 25%) — ควรสั่งซื้อวันนี้</div>
-            <div class="muted" style="margin-top:8px;">ช่วงตัดสินใจ: บ่าย (ก่อน MOPS ปิด) | โอกาสราคาขึ้นข้ามคืน 33% | โอกาสราคาลง 10% | ณ 23/10 01:26</div>
+            <div class="muted" style="margin-top:8px;">ช่วงตัดสินใจ: บ่าย (ก่อน MOPS ปิด) | โอกาสราคาขึ้นข้ามคืน 33% | โอกาสราคาลง 10% | ณ 23/10 01:40</div>
             <ul><li>MOPS ปิดล่าสุด -3.04 USD/bbl → โน้มราคาลง</li><li>ยังไม่มี Trend Mops ของวันนี้ (ปกติโพสต์ ~11:30 และ ~15:00) — ความมั่นใจต่ำกว่าปกติ</li></ul>
             <div class="muted">หลักฐาน (backtest, 324 วัน): เมื่อระบบแนะนำแบบนี้ ราคาขึ้นจริง 49% ลงจริง 16% ขยับเฉลี่ย +0.22 บาท/ลิตร</div>
         </div>
@@ -518,8 +518,8 @@
       <div class="news-list">
         
         <div class="news-item">
-          <div class="news-time">23/10/2026 01:26</div>
-          <div class="news-content">🛢️ Executive Summary (24 ชม. ล่าสุด)<br><br>- WTI Crude ปรับขึ้น +2.61 มาที่ 99.55 USD/BBL สะท้อนแรงหนุนฝั่งอุปทานตึงตัว (Bullish)<br>- NYMEX Singapore Gasoil ทรงตัวที่ 177.54 (+0.00) และ MOPS DS 176.75 (+0.00) สะท้อนตลาดดีเซลregional ยังไม่ขยับ (Neutral)<br>- MOPS G95 ทรงตัวที่ 134.47 USD/BBL (+0.00) ขณะที่ค่าการตลาด GASOHOL95 E10 อยู่ที่ 3.35 บาท/ลิตร ยังมีช่องว่างให้ผู้ค้าบริหารราคาได้ (Neutral)<br>- ฐานะกองทุนน้ำมันสุทธิ -103,932.34 ล้านบาท เงินสดคงเหลือ -995.81 ล้านบาท Runway -4.03 วัน สถานะ CRITICAL กดดันเสถียรภาพราคาขายปลีกในประเทศ (Bearish)<br><br>สรุป:<br>👉 ภาพรวม Neutral ถึง Bearish — ราคาน้ำมันดิบปรับขึ้นแต่ผลิตภัณฑ์สำเร็จรูปทรงตัว ขณะที่สถานะกองทุนน้ำมันอยู่ในระดับวิกฤต ต้องติดตามความเสี่ยงด้านเสถียรภาพราคาปลีกอย่างใกล้ชิด</div>
+          <div class="news-time">23/10/2026 01:40</div>
+          <div class="news-content">🛢️ Executive Summary (24 ชม. ล่าสุด)<br><br>- WTI Crude ปรับขึ้น +2.61 มาที่ 99.55 USD/BBL สะท้อนแรงหนุนฝั่งอุปสงค์/ราคาน้ำมันดิบ (Bullish)<br>- NYMEX Singapore Gasoil ทรงตัวที่ 177.54 (+0.00) และ MOPS DS 176.75 (+0.00) สะท้อนตลาดดีเซลภูมิภาคยังไม่ขยับ (Neutral)<br>- MOPS G95 อยู่ที่ 134.47 USD/BBL (+0.00) ขณะที่ราคาปลีก GASOHOL95 E10 42.04 บาท/ลิตร มีค่าการตลาด 3.35 บาท/ลิตร (Neutral)<br>- ราคาปลีก H-DIESEL 43.54 บาท/ลิตร ค่าการตลาด 2.00 บาท/ลิตร ยังอยู่ในระดับบาง (Neutral)<br>- ฐานะกองทุนน้ำมันสุทธิ -103,932.34 ล้านบาท เงินสดคงเหลือ -995.81 ล้านบาท Runway -4.03 วัน สถานะ CRITICAL (Bearish)<br><br>สรุป:<br>👉 ราคาน้ำมันดิบปรับขึ้นเป็นบวก แต่ผลิตภัณฑ์สำเร็จรูปทรงตัว ขณะที่สถานะกองทุนน้ำมันวิกฤต (CRITICAL) เป็นความเสี่ยงหลักที่ต้องเฝ้าระวัง</div>
         </div>
         
       </div>
