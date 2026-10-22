@@ -3,3 +3,4 @@ __pycache__/
 decision_snapshot.json
 index.html
 public/
+dispatch_snapshot.json

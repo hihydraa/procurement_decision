@@ -63,6 +63,13 @@ jobs:
         run: python log_decisions.py
         continue-on-error: true
 
+      - name: Log dispatch plan + fill outcomes (DispatchLog, forward test)
+        env:
+          SA_EMAIL: ${{ secrets.SA_EMAIL }}
+          SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
+        run: python log_dispatch.py
+        continue-on-error: true
+
       - name: Prepare publish directory (index.html only)
         # เผยแพร่เฉพาะหน้าเว็บ ไม่ใช่ทั้งรีโป: (1) .gitignore ของรีโปมี index.html ซึ่งทำให้ git add --all ในขั้น deploy ข้ามไฟล์นี้ ->
         # gh-pages ไม่มี index.html -> หน้า 404 (เกิดแล้วเมื่อ 21 ต.ค. 2026) (2) ไม่เผยแพร่โค้ด/พารามิเตอร์โมเดล/ไฟล์คำแนะนำล่าสุดโดยไม่จำเป็น

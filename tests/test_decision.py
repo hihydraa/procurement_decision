@@ -345,5 +345,66 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(self.MAIN.build_dispatch_section({}, 10, asof), "")
 
 
+class DispatchLogTests(unittest.TestCase):
+    import log_dispatch as LDP
+    import main as MAIN
+
+    def snap(self, asof, fuel="B7", lead=10, code="URGENT"):
+        a = pd.Timestamp(asof)
+        return {"asof": a.strftime("%Y-%m-%d %H:%M"), "window": "D20", "fuel": fuel, "lead": lead, "action_code": code,
+                "raw_action_code": code, "grade": "ดี", "p_rise": 0.6, "p_fall": 0.05,
+                "arrive": (a + pd.Timedelta(hours=lead)).strftime("%Y-%m-%d %H:%M")}
+
+    def test_new_rows_skips_no_data_and_duplicates(self):
+        s = [self.snap("2026-10-22 20:50"), self.snap("2026-10-22 20:50", code="NO_DATA"), self.snap("2026-10-22 20:50", lead=8)]
+        rows = self.LDP.new_rows([], s)
+        self.assertEqual(len(rows), 2)
+        again = self.LDP.new_rows(rows, s)
+        self.assertEqual(again, [])
+        self.assertEqual(rows[0]["date"], "2026-10-22")
+        self.assertEqual(rows[0]["outcome_delta"], "")
+
+    def test_outcome_waits_for_arrival_plus_24h(self):
+        pr = pd.DataFrame({"provider": "A", "warehouse": "w", "fuel": "B7",
+                           "price": [30.0, 31.0], "effective": ["2026-10-22 00:00", "2026-10-23 06:00"]})
+        book = S.PriceBook(pr)
+        arrive = pd.Timestamp("2026-10-22 06:50")
+        self.assertIsNone(self.LDP.compute_outcome(book, "B7", arrive, pd.Timestamp("2026-10-23 06:00")))
+        res = self.LDP.compute_outcome(book, "B7", arrive, pd.Timestamp("2026-10-23 07:30"))
+        self.assertEqual(res, (30.0, 31.0, 1.0))
+
+    def log_df(self, n):
+        rows = []
+        for i in range(n):
+            d = pd.Timestamp("2026-10-01 20:50") + pd.Timedelta(days=i)
+            r = self.snap(d, code="URGENT" if i % 2 == 0 else "WAIT")
+            r["date"] = d.strftime("%Y-%m-%d")
+            r["outcome_delta"] = 0.5 if i % 2 == 0 else -0.5      # ถูกทั้งหมด: เร่งแล้วขึ้น , ชะลอแล้วลง
+            rows.append(r)
+        return pd.DataFrame(rows)
+
+    def test_live_stats_counts_first_row_per_window_and_utility(self):
+        df = self.log_df(24)
+        dup = df.iloc[[0]].copy()
+        dup["asof"] = "2026-10-01 22:50"                          # รอบที่สองของวัน/ช่วงเดียวกัน ต้องไม่นับ
+        dup["outcome_delta"] = -9.0
+        st = engine.dispatch_live_stats(pd.concat([df, dup], ignore_index=True), "B7", 10)
+        self.assertEqual(st["n"], 24)
+        self.assertAlmostEqual(st["total_gain"], 24 * 0.5)
+        self.assertEqual(st["by_action"]["URGENT"]["rise_rate"], 1.0)
+
+    def test_live_stats_none_without_data_or_columns(self):
+        self.assertIsNone(engine.dispatch_live_stats(pd.DataFrame(), "B7", 10))
+        self.assertIsNone(engine.dispatch_live_stats(pd.DataFrame({"x": [1]}), "B7", 10))
+
+    def test_live_html_accumulating_vs_summarised(self):
+        few = self.MAIN.build_dispatch_live(self.log_df(5), 10)
+        self.assertIn("กำลังสะสมผล", few)
+        many = self.MAIN.build_dispatch_live(self.log_df(24), 10)
+        self.assertIn("เร่งส่ง", many)
+        self.assertIn("+0.500", many)
+        self.assertIn("เริ่มบันทึกคำแนะนำจริงแล้ว", self.MAIN.build_dispatch_live(pd.DataFrame(), 10))
+
+
 if __name__ == "__main__":
     unittest.main()
