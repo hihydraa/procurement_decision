@@ -17,7 +17,6 @@ import signals as S
 # ============================================================
 SHEET_ID = "1JNrYTJtmgpOGjdfhIdJKz15i8Jxp-u8r1UFAXuQRs8s"
 GIDS = {
-    "ENTRY_NYMEX": "72275920",
     "ENTRY_WTI": "833844178",
     "ENTRY_MOPS": "732137330",
     "ENTRY_INVENTORY": "1430708402",  # reserved for next phase
@@ -529,7 +528,7 @@ def build_reason_bullets(signals: list[str], max_items=4) -> list[str]:
     return uniq[:max_items]
 
 
-def fuel_analysis(fuel_key, config, eppo_df, mops_df, nymex_snap, wti_snap, fund_snap, settings, decision):
+def fuel_analysis(fuel_key, config, eppo_df, mops_df, wti_snap, fund_snap, settings, decision):
     """สรุปต่อชนิดน้ำมัน: ตัวเลขอ้างอิง (EPPO/MOPS) สำหรับการ์ด + คำแนะนำจาก engine.decide (โมเดลที่ฝึกจากข้อมูลย้อนหลัง)"""
     eppo = fuel_eppo_snapshot(eppo_df, config["aliases"])
     mops = fuel_mops_snapshot(mops_df, config["mops_aliases"] + config["aliases"])
@@ -543,7 +542,7 @@ def fuel_analysis(fuel_key, config, eppo_df, mops_df, nymex_snap, wti_snap, fund
     return {
         "fuel_key": fuel_key,
         "label_th": config["label_th"],
-        "date": eppo.get("date") or mops.get("date") or nymex_snap.get("date"),
+        "date": eppo.get("date") or mops.get("date"),
         "threshold": threshold,
         "final_score": None if decision["p_rise"] is None else round(decision["p_rise"] * 100, 1),
         "action": decision["action"],
@@ -585,7 +584,7 @@ def eppo_fresh_date(eppo_df: pd.DataFrame):
     return max(dates) if dates else None
 
 
-def freshness_warnings(today, df_eppo, df_mops, df_nymex, df_wti, df_oilfund) -> list[str]:
+def freshness_warnings(today, df_eppo, df_mops, df_wti, df_oilfund) -> list[str]:
     out = []
 
     def age(d):
@@ -596,7 +595,7 @@ def freshness_warnings(today, df_eppo, df_mops, df_nymex, df_wti, df_oilfund) ->
     if a is None or a >= STALE_DAYS:
         when = fresh.strftime("%d/%m/%Y") if fresh is not None and not pd.isna(fresh) else "ไม่ทราบ"
         out.append(f"ข้อมูล EPPO (ราคาหน้าโรงกลั่น/กองทุน/ค่าการตลาด) ที่เป็นค่าจริงล่าสุดคือ {when} — วันหลังจากนั้นเป็นค่าลากมา การ์ดด้านล่างอาจไม่ตรงปัจจุบัน")
-    for label, df in (("MOPS", df_mops), ("NYMEX", df_nymex), ("WTI", df_wti), ("ฐานะกองทุน (Oil Fund Sustainability)", df_oilfund)):
+    for label, df in (("MOPS", df_mops), ("WTI", df_wti), ("ฐานะกองทุน (Oil Fund Sustainability)", df_oilfund)):
         if df is None or df.empty or "Date" not in df.columns:
             continue
         d = pd.to_datetime(df["Date"], errors="coerce").max()
@@ -771,7 +770,7 @@ def build_news_section(news_df: pd.DataFrame, max_items: int = 1) -> str:
 
 
 
-def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str], accuracy_html: str = "") -> str:
+def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str], accuracy_html: str = "") -> str:
     updated_at = datetime.now(TZ).strftime("%d/%m/%Y %H:%M")
     sections = "\n".join(build_fuel_section(r) for r in results)
     news_html = build_news_section(news_df)
@@ -785,7 +784,6 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
     g95_mops = g95_result.get("mops", {})
     ds_mops = ds_result.get("mops", {})
 
-    nymex_tone = classify_market_tone(nymex_snap.get("chg_1d"), nymex_snap.get("chg_3d"))
     wti_tone = classify_market_tone(wti_snap.get("chg_1d"), wti_snap.get("chg_3d"))
     g95_mops_tone = classify_market_tone(g95_mops.get("chg_1d"), g95_mops.get("chg_3d"))
     ds_mops_tone = classify_market_tone(ds_mops.get("chg_1d"), ds_mops.get("chg_3d"))
@@ -794,13 +792,6 @@ def build_html(results: list[dict], nymex_snap: dict, wti_snap: dict, fund_snap:
 
     snapshot_html = f"""
     <div class="snapshot-grid">
-      {snapshot_card(
-          "NYMEX",
-          fmt_num(nymex_snap.get('latest'), 2),
-          f"Δ1D {fmt_change(nymex_snap.get('chg_1d'), 2)} | Δ3D {fmt_change(nymex_snap.get('chg_3d'), 2)}",
-          nymex_tone["tone"],
-          nymex_tone["label"]
-      )}
       {snapshot_card(
           "WTI",
           fmt_num(wti_snap.get('latest'), 2),
@@ -1112,7 +1103,6 @@ def main():
     warnings = []
 
     try:
-        df_nymex = prep_market_sheet(load_sheet(GIDS["ENTRY_NYMEX"]))
         df_wti = prep_market_sheet(load_sheet(GIDS["ENTRY_WTI"]))
         df_mops = prep_mops_sheet(load_sheet(GIDS["ENTRY_MOPS"]))
         df_eppo = prep_eppo_sheet(load_sheet(GIDS["ENTRY_EPPO"]))
@@ -1141,9 +1131,8 @@ def main():
         warnings.append("ไม่มีข้อมูลใน Entry_Eppo")
     if df_mops.empty:
         warnings.append("ไม่มีข้อมูลใน Entry_MOPS")
-    warnings += freshness_warnings(asof.date(), df_eppo, df_mops, df_nymex, df_wti, df_oilfund)
+    warnings += freshness_warnings(asof.date(), df_eppo, df_mops, df_wti, df_oilfund)
 
-    nymex_snap = compute_market_snapshot(df_nymex, "NYMEX")
     wti_snap = compute_market_snapshot(df_wti, "WTI")
     fund_snap = oilfund_snapshot(df_oilfund)
 
@@ -1171,7 +1160,6 @@ def main():
             config=config,
             eppo_df=df_eppo,
             mops_df=df_mops,
-            nymex_snap=nymex_snap,
             wti_snap=wti_snap,
             fund_snap=fund_snap,
             settings=settings,
@@ -1181,7 +1169,7 @@ def main():
             warnings.append(f"ไม่พบข้อมูลล่าสุดของ {config['label_th']} ใน EPPO/MOPS")
         results.append(result)
 
-    html = build_html(results, nymex_snap, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log))
+    html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log))
     write_text("index.html", html)
     write_decision_snapshot(results)
     print("Dashboard created successfully")
