@@ -406,5 +406,67 @@ class DispatchLogTests(unittest.TestCase):
         self.assertIn("เริ่มบันทึกคำแนะนำจริงแล้ว", self.MAIN.build_dispatch_live(pd.DataFrame(), 10))
 
 
+class SheetSerialTests(unittest.TestCase):
+    """อ่านชีทด้วย UNFORMATTED_VALUE วันเวลาเป็นเลข serial — เคยถูกตีเป็นปี 1970 ทำให้ผลลัพธ์ทุกแถวถูกเติมทันทีเป็น 0"""
+    import common as COMMON
+    import log_decisions as LDEC
+    import log_dispatch as LDIS
+
+    @staticmethod
+    def serial(ts):
+        return (pd.Timestamp(ts) - pd.Timestamp("1899-12-30")).total_seconds() / 86400
+
+    def test_to_ts(self):
+        t = self.COMMON.to_ts(self.serial("2026-10-22 15:45"))
+        self.assertEqual(t.strftime("%Y-%m-%d %H:%M"), "2026-10-22 15:45")
+        self.assertEqual(self.COMMON.to_ts(str(self.serial("2026-10-22 15:45"))).strftime("%H:%M"), "15:45")   # เลขที่มาเป็นข้อความ
+        self.assertEqual(self.COMMON.to_ts("2026-10-22 15:45").strftime("%H:%M"), "15:45")
+        self.assertTrue(pd.isna(self.COMMON.to_ts("")))
+        self.assertTrue(pd.isna(self.COMMON.to_ts(None)))
+
+    def test_price_outcome_with_serial_effective_is_not_garbage(self):
+        eff = [self.serial("2026-10-22 00:00"), self.serial("2026-10-23 06:00")]
+        prices = pd.DataFrame({"provider": "A", "warehouse": "w", "fuel": "B7", "price": [30.0, 31.0], "effective": eff})
+        prices["effective"] = prices["effective"].map(self.COMMON.to_ts)
+        book = S.PriceBook(prices)
+        res = self.LDIS.compute_outcome(book, "B7", self.COMMON.to_ts(self.serial("2026-10-22 06:50")), pd.Timestamp("2026-10-23 07:30"))
+        self.assertEqual(res, (30.0, 31.0, 1.0))                 # เดิมได้ (30,30,0) เพราะทั้งคู่ถูกมองเป็นปี 1970
+
+    def test_premature_dispatch_rows_are_detected(self):
+        bad = {"arrive": self.serial("2026-10-22 21:04"), "outcome_delta": 0, "outcome_filled_at": self.serial("2026-10-22 15:45")}
+        ok = {"arrive": self.serial("2026-10-22 21:04"), "outcome_delta": 0.3, "outcome_filled_at": self.serial("2026-10-23 22:00")}
+        empty = {"arrive": self.serial("2026-10-22 21:04"), "outcome_delta": "", "outcome_filled_at": ""}
+        self.assertTrue(self.LDIS.premature(bad))
+        self.assertFalse(self.LDIS.premature(ok))
+        self.assertFalse(self.LDIS.premature(empty))
+
+    def test_premature_decision_rows_are_detected(self):
+        bad = {"date": self.serial("2026-10-21"), "outcome_delta": 0, "outcome_filled_at": self.serial("2026-10-21 17:41")}
+        ok = {"date": self.serial("2026-10-21"), "outcome_delta": -0.4, "outcome_filled_at": self.serial("2026-10-22 16:30")}
+        self.assertTrue(self.LDEC.premature(bad))
+        self.assertFalse(self.LDEC.premature(ok))
+
+    def test_merge_snapshot_does_not_duplicate_when_sheet_returns_serials(self):
+        existing = [{"asof": self.serial("2026-10-21 17:14"), "date": self.serial("2026-10-21"), "fuel": "B7", "phase": "PM", "outcome_delta": ""}]
+        snap = [{"asof": "2026-10-21 17:41", "fuel": "B7", "phase": "PM", "action_code": "WAIT", "action": "x", "p_rise": 0.1, "p_fall": 0.3}]
+        appends, updates = self.LDEC.merge_snapshot(existing, snap)
+        self.assertEqual(appends, [])                             # เดิมเพิ่มแถวซ้ำทุกรอบ
+        self.assertEqual(list(updates), [0])                       # รอบหลังทับรอบก่อน
+
+    def test_dispatch_dedupe_key_survives_serials(self):
+        existing = [{"asof": self.serial("2026-10-22 13:04"), "fuel": "B7", "lead": 10}]
+        snap = [{"asof": "2026-10-22 13:04", "fuel": "B7", "lead": 10, "action_code": "WAIT", "arrive": "2026-10-22 23:04"}]
+        self.assertEqual(self.LDIS.new_rows(existing, snap), [])
+
+    def test_live_stats_counts_one_row_per_day(self):
+        n = engine.MIN_LIVE_OUTCOMES + 2
+        base = pd.DataFrame({"asof": pd.date_range("2026-09-01 15:30", periods=n, freq="D").astype(str), "fuel": "B7", "phase": "PM",
+                             "action_code": "NORMAL", "outcome_delta": [0.3] * n})
+        base["date"] = base["asof"].str[:10]
+        dup = base.iloc[[0]].copy(); dup["asof"] = base["asof"].iloc[0].replace("15:30", "17:30"); dup["outcome_delta"] = 9.0
+        st = engine.live_stats(pd.concat([base, dup], ignore_index=True), "B7", "PM", "NORMAL")
+        self.assertEqual(st["n_days"], n)                         # แถวซ้ำของวันเดียวกันไม่นับสองครั้ง
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -15,7 +15,7 @@ from datetime import datetime
 import pandas as pd
 
 import signals as S
-from common import SHEET_ID, TABS, TZ_NAME, ensure_tab, get_token, sheets_get, sheets_append, sheets_update
+from common import SHEET_ID, TABS, TZ_NAME, ensure_tab, get_token, sheets_get, sheets_append, sheets_update, to_ts
 from zoneinfo import ZoneInfo
 
 COLUMNS = ["asof", "date", "window", "fuel", "lead", "action_code", "raw_action_code", "grade", "p_rise", "p_fall", "arrive",
@@ -23,14 +23,28 @@ COLUMNS = ["asof", "date", "window", "fuel", "lead", "action_code", "raw_action_
 OUTCOME_FROM = COLUMNS.index("price_arrive")      # คอลัมน์ L..O
 
 
+def _asof_key(v) -> str:
+    """เวลารอบเป็นข้อความ YYYY-MM-DD HH:MM เสมอ (ชีทคืนเป็นเลข serial เมื่ออ่านแบบ UNFORMATTED จึงต้องแปลงก่อนเทียบ)"""
+    t = to_ts(v)
+    return str(v) if pd.isna(t) else t.strftime("%Y-%m-%d %H:%M")
+
+
+def premature(row: dict) -> bool:
+    """แถวที่มีผลลัพธ์แล้วแต่ถูกเติมก่อนเวลา (เวลาถึง+24 ชม.) = ผลผิดจากบั๊กอ่านวันที่เป็นปี 1970 → ต้องล้างแล้วคำนวณใหม่"""
+    if str(row.get("outcome_delta", "")) == "":
+        return False
+    arrive, filled = to_ts(row.get("arrive")), to_ts(row.get("outcome_filled_at"))
+    return pd.isna(arrive) or pd.isna(filled) or filled < arrive + pd.Timedelta(days=1)
+
+
 def new_rows(existing: list, snapshot: list) -> list:
     """แถวใหม่ที่ยังไม่เคยบันทึก (คีย์ = asof + ชนิด + ระยะเดินทาง) ; ข้ามรอบที่ไม่มีคำแนะนำ"""
-    seen = {(str(r.get("asof")), str(r.get("fuel")), str(r.get("lead"))) for r in existing}
+    seen = {(_asof_key(r.get("asof")), str(r.get("fuel")), str(r.get("lead"))) for r in existing}
     out = []
     for s in snapshot:
         if s.get("action_code") in (None, "NO_DATA"):
             continue
-        k = (str(s["asof"]), str(s["fuel"]), str(s["lead"]))
+        k = (_asof_key(s["asof"]), str(s["fuel"]), str(s["lead"]))
         if k in seen:
             continue
         seen.add(k)
@@ -78,19 +92,29 @@ def main():
         print("[DISPATCH] no price feed yet — outcomes not filled")
         return
     prices.columns = prices.iloc[0]
-    book = S.PriceBook(prices.iloc[1:].reset_index(drop=True))
-    filled = 0
+    prices = prices.iloc[1:].reset_index(drop=True)
+    prices["effective"] = prices["effective"].map(to_ts)           # serial → วันเวลาจริง (ดู common.to_ts)
+    book = S.PriceBook(prices)
+    filled = reset = 0
     for i, r in enumerate(rows):
+        if premature(r):
+            for c in COLUMNS[OUTCOME_FROM:]:
+                r[c] = ""
+            sheets_update(tok, SHEET_ID, f"{tab}!L{i + 2}:O{i + 2}", [["", "", "", ""]])
+            reset += 1
         if str(r.get("outcome_delta", "")) != "" or not r.get("arrive"):
             continue
-        res = compute_outcome(book, r["fuel"], r["arrive"], now)
+        arrive_ts = to_ts(r["arrive"])
+        if pd.isna(arrive_ts):
+            continue
+        res = compute_outcome(book, r["fuel"], arrive_ts, now)
         if res:
             r["price_arrive"], r["price_next"], r["outcome_delta"] = res
             r["outcome_filled_at"] = now.strftime("%Y-%m-%d %H:%M")
             sheets_update(tok, SHEET_ID, f"{tab}!L{i + 2}:O{i + 2}",
                           [[r["price_arrive"], r["price_next"], r["outcome_delta"], r["outcome_filled_at"]]])
             filled += 1
-    print(f"[DISPATCH] outcomes filled: {filled}")
+    print(f"[DISPATCH] outcomes filled: {filled}, reset (filled too early): {reset}")
 
 
 if __name__ == "__main__":
