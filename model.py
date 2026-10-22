@@ -4,6 +4,7 @@
 ออกแบบให้อธิบายได้: โลจิสติกส์เล็ก ๆ ที่มีไม่กี่ฟีเจอร์ (ดู FEATURES) สัมประสิทธิ์เก็บใน model_params.json
 ที่ fit_model.py สร้างจากข้อมูลย้อนหลังและวัดแบบ walk-forward — ไม่ใช้ไลบรารีเพิ่ม (numpy ล้วน)
 """
+import hashlib
 import json
 import os
 
@@ -52,6 +53,14 @@ def fit_logistic(X: np.ndarray, y: np.ndarray, l2: float = 2.0, iters: int = 60)
 def predict_proba(m: dict, X: np.ndarray) -> np.ndarray:
     Z = (np.atleast_2d(X) - np.array(m["mu"])) / np.array(m["sd"])
     return 1.0 / (1.0 + np.exp(-np.clip(Z @ np.array(m["w"]) + m["b"], -30, 30)))
+
+
+def model_version(params) -> str:
+    """รหัสเวอร์ชันโมเดล = วันที่ฝึก + แฮชสัมประสิทธิ์ (เปลี่ยนเมื่อโมเดลเปลี่ยนจริง) — บันทึกคู่กับคำแนะนำเพื่อไม่ให้ผลทดสอบปนข้ามเวอร์ชัน"""
+    if not params:
+        return ""
+    h = hashlib.sha1(json.dumps(params.get("models", {}), sort_keys=True).encode("utf-8")).hexdigest()[:7]
+    return f"{params.get('trained_at', '?')}-{h}"
 
 
 def load_params(path: str = PARAMS_PATH):
