@@ -194,5 +194,14 @@ class ModelVersionTests(unittest.TestCase):
         self.assertEqual(M.model_version(None), "")
 
 
+class MinNewDaysTest(unittest.TestCase):
+    def test_gap(self):
+        import retrain
+        self.assertEqual(retrain.new_days("2026-10-21", "2026-10-23"), 2)
+        self.assertLess(retrain.new_days("2026-10-21", "2026-10-23"), retrain.MIN_NEW_DAYS)
+        self.assertGreaterEqual(retrain.new_days("2026-10-21", "2026-11-05"), retrain.MIN_NEW_DAYS)
+        self.assertGreaterEqual(retrain.new_days(None, "2026-10-23"), retrain.MIN_NEW_DAYS)
+
+
 if __name__ == "__main__":
     unittest.main()
