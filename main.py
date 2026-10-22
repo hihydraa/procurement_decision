@@ -47,7 +47,7 @@ FUEL_CONFIG = {
 # ชื่อแท็บฟีดสัญญาณ (ตรงกับ common.TABS — ไม่ import common เพราะ common ต้องใช้ jwt/credential ซึ่ง main.py ไม่ต้องการ)
 TABS_FEED = {
     "intraday": "Entry_Intraday", "headsup": "Entry_HeadsUp", "fund": "Entry_FundNotice",
-    "mops_close": "Entry_MopsClose", "decision_log": "DecisionLog",
+    "mops_close": "Entry_MopsClose", "decision_log": "DecisionLog", "dispatch_log": "DispatchLog",
 }
 
 DASHBOARD_TITLE = "Fuel Procurement Decision Dashboard"
@@ -699,7 +699,33 @@ def _dispatch_card(label_th, d):
     </div>"""
 
 
-def build_dispatch_section(by_lead: dict, default_lead: int, asof) -> str:
+def build_dispatch_live(log: pd.DataFrame, lead: int) -> str:
+    """ผลทดสอบเดินหน้าของแผนส่งรถ (นับจากวันที่เริ่มบันทึก) — ยังไม่ครบ MIN_DISPATCH_LIVE วันจะบอกว่ากำลังสะสม ไม่สรุปว่าแม่น"""
+    names = {"URGENT": "เร่งส่ง", "GRADUAL": "ทยอยส่ง", "NORMAL": "ส่งปกติ", "WAIT": "ชะลอ"}
+    rows, any_data = [], False
+    for fk in FUEL_CONFIG:
+        fuel = engine.FUEL_KEY[fk]
+        st = engine.dispatch_live_stats(log, fuel, lead)
+        if not st:
+            rows.append(f"<tr><td>{html_escape(FUEL_CONFIG[fk]['label_th'])}</td><td colspan='4'>ยังไม่มีบันทึก</td></tr>")
+            continue
+        any_data = True
+        if st["n"] < engine.MIN_DISPATCH_LIVE:
+            rows.append(f"<tr><td>{html_escape(FUEL_CONFIG[fk]['label_th'])}</td><td colspan='4'>กำลังสะสมผล: มีผลลัพธ์แล้ว {st['n']} วัน "
+                        f"(รอผลอีก {st['pending']}) ต้องครบ {engine.MIN_DISPATCH_LIVE} วันก่อนสรุป</td></tr>")
+            continue
+        acts = " ".join(f"{names[c]} {a['n']} ครั้ง (แพงขึ้นจริง {a['rise_rate']:.0%}/ถูกลงจริง {a['fall_rate']:.0%})"
+                        for c, a in st["by_action"].items() if c in names)
+        rows.append(f"<tr><td>{html_escape(FUEL_CONFIG[fk]['label_th'])}</td><td>{st['n']} วัน</td><td>{html_escape(acts)}</td>"
+                    f"<td>{st['avg_gain_per_day']:+.3f}</td><td>{st['total_gain']:+.1f}</td></tr>")
+    note = "" if any_data else "<div class='muted'>เริ่มบันทึกคำแนะนำจริงแล้ว ผลลัพธ์แรกจะออกหลังเวลาถึง+24 ชม. ของคำแนะนำแรก</div>"
+    return f"""<div class='dispatch-live'><h3>ผลทดสอบจริง (เริ่มนับตั้งแต่เริ่มบันทึก, ระยะเดินทาง {lead} ชม.)</h3>{note}
+      <div style='overflow-x:auto'><table class='acc-table'><thead><tr><th>ชนิด</th><th>จำนวนวันที่มีผล</th><th>คำแนะนำ → ผลจริง</th>
+      <th>กำไรเฉลี่ย บาท/ลิตร/วัน</th><th>กำไรรวม บาท/ลิตร</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div>
+      <div class='muted'>กำไร = ถ้าเร่งส่งแล้วราคาที่เวลาถึงถูกกว่าถ้ารอ 1 วัน หรือชะลอแล้วราคาถูกลง ; ส่งปกติ = 0 (เทียบกับทำตามแผนเดิมทุกวัน)</div></div>"""
+
+
+def build_dispatch_section(by_lead: dict, default_lead: int, asof, live_html: str = "") -> str:
     """สรุปสำหรับพนักงานจัดซื้อ: ส่งรถตอนนี้หรือรอ — เลือกระยะเดินทางได้ (ค่าตั้งต้น default_lead ชม.)
     by_lead = {lead: {fuel_key: decision}}"""
     if not by_lead:
@@ -719,8 +745,9 @@ def build_dispatch_section(by_lead: dict, default_lead: int, asof) -> str:
       เทียบกับถ้าออกรถช้าไปอีก 1 วัน &nbsp;|&nbsp; ประเมิน ณ {asof.strftime('%d/%m %H:%M')}</p>
       <div class="lead-pick">ระยะเดินทางสาขา → คลัง: {radios}</div>
       {panels}
+      {live_html}
       <p class="muted">ข้อควรรู้: ความแม่นยำสูงสุดช่วงหลังประกาศกองทุนและ MOPS ปิดตลาด (~20:00) ; ช่วงเช้า–บ่ายสัญญาณน้อย ระบบจะบอกตรง ๆ ว่าไม่มีสัญญาณ
-      ยังไม่ได้ยืนยันผลจากคำแนะนำจริง (ตัวเลขย้อนหลังมาจากการทดสอบกับข้อมูลในอดีต) ห้ามใช้แทนการตัดสินใจของผู้จัดการ</p>
+      ตัวเลขย้อนหลังมาจากการทดสอบกับข้อมูลในอดีต ส่วน "ผลทดสอบจริง" ด้านบนนับจากคำแนะนำที่ออกจริงตั้งแต่เริ่มบันทึก ห้ามใช้แทนการตัดสินใจของผู้จัดการ</p>
     </section>"""
 
 
@@ -1324,12 +1351,35 @@ def main():
     by_lead = {}
     for lead in disp_cfg.get("leads", []):
         by_lead[lead] = {fk: engine.decide_dispatch(fk, asof, tables, params, summary, lead) for fk in FUEL_CONFIG}
-    dispatch_html = build_dispatch_section(by_lead, disp_cfg.get("default_lead_hours", 10), asof)
+    try:
+        dispatch_log = load_sheet_by_name(TABS_FEED["dispatch_log"])
+        if "outcome_delta" not in dispatch_log.columns:            # gviz ส่งชีทแรกมาแทนเมื่อไม่มีแท็บ
+            dispatch_log = pd.DataFrame()
+    except Exception:
+        dispatch_log = pd.DataFrame()
+    write_dispatch_snapshot(by_lead)
+    default_lead = disp_cfg.get("default_lead_hours", 10)
+    dispatch_html = build_dispatch_section(by_lead, default_lead, asof, build_dispatch_live(dispatch_log, default_lead) if by_lead else "")
 
     html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund, dispatch_html)
     write_text("index.html", html)
     write_decision_snapshot(results)
     print("Dashboard created successfully")
+
+
+def write_dispatch_snapshot(by_lead: dict, path: str = "dispatch_snapshot.json") -> None:
+    """คำแนะนำแผนส่งรถรอบนี้ (ทุกระยะเดินทาง) ให้ log_dispatch.py บันทึกลง DispatchLog"""
+    clean = lambda v: None if v is None or (isinstance(v, float) and np.isnan(v)) else round(float(v), 4)
+    snap = []
+    for lead, per_fuel in by_lead.items():
+        for fk, d in per_fuel.items():
+            if d.get("action_code") == "NO_DATA":
+                continue
+            snap.append({"asof": d["asof"].strftime("%Y-%m-%d %H:%M"), "window": d["window"], "fuel": d["fuel"], "lead": int(lead),
+                         "action_code": d["action_code"], "raw_action_code": d.get("raw_action_code"),
+                         "grade": (d.get("quality") or {}).get("grade"), "p_rise": clean(d["p_rise"]), "p_fall": clean(d["p_fall"]),
+                         "arrive": d["arrive"].strftime("%Y-%m-%d %H:%M")})
+    write_text(path, json.dumps(snap, ensure_ascii=False, indent=1))
 
 
 def write_decision_snapshot(results: list[dict], path: str = "decision_snapshot.json") -> None:

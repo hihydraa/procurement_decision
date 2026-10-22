@@ -288,3 +288,33 @@ def decide_dispatch(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params,
                 "p_rise": p_rise, "p_fall": p_fall, "base_rise": base_rise, "base_fall": base.get("base_fall"), "features": f,
                 "quality": q, "evidence": _evidence(summary, key, code, group="dispatch_results"), "thresholds": th, "raw_action_code": raw_code})
     return out
+
+
+MIN_DISPATCH_LIVE = 20     # จำนวนวัน (ที่มีผลลัพธ์แล้ว) ขั้นต่ำต่อชนิด/ระยะเดินทาง ก่อนสรุปว่าแม่นหรือไม่
+
+
+def dispatch_live_stats(log: pd.DataFrame, fuel: str, lead: int, window: str = None):
+    """ผลทดสอบเดินหน้าของแผนส่งรถจาก DispatchLog — นับ 1 รอบต่อ (วัน, ช่วง) คือรอบแรกที่ออกคำแนะนำในช่วงนั้น
+    คืน {n, by_action:{code:{n,rise_rate,fall_rate,avg}}, total_gain, avg_gain_per_day, pending} หรือ None ถ้าไม่มีข้อมูลเลย
+    gain ต่อแถว = M.utility(action, outcome_delta) ; ซื้อปกติ = 0 (เทียบกับ "ทำตามแผนเดิมทุกวัน")"""
+    need = {"date", "window", "fuel", "lead", "action_code", "outcome_delta", "asof"}
+    if log is None or log.empty or not need.issubset(log.columns):
+        return None
+    d = log.copy()
+    d["lead"] = pd.to_numeric(d["lead"], errors="coerce")
+    d = d[(d["fuel"] == fuel) & (d["lead"] == lead)]
+    if window:
+        d = d[d["window"] == window]
+    if d.empty:
+        return None
+    d["asof"] = pd.to_datetime(d["asof"], errors="coerce")
+    d = d.dropna(subset=["asof"]).sort_values("asof").drop_duplicates(["date", "window"], keep="first")
+    d["outcome_delta"] = pd.to_numeric(d["outcome_delta"], errors="coerce")
+    done, pending = d.dropna(subset=["outcome_delta"]), int(d["outcome_delta"].isna().sum())
+    by_action, total = {}, 0.0
+    for code, g in done.groupby("action_code"):
+        by_action[code] = {"n": int(len(g)), "rise_rate": float((g.outcome_delta > M.RISE_THB).mean()),
+                           "fall_rate": float((g.outcome_delta < -M.RISE_THB).mean()), "avg": float(g.outcome_delta.mean())}
+    total = float(sum(M.utility(c, g) for c, g in zip(done.action_code, done.outcome_delta)))
+    return {"n": int(len(done)), "pending": pending, "by_action": by_action, "total_gain": total,
+            "avg_gain_per_day": total / len(done) if len(done) else None}

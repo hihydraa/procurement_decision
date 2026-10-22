@@ -27,6 +27,7 @@ TABS = {
     "FEED_MOPS_CLOSE": "Entry_MopsClose",
     "FEED_PRICES": "Entry_Prices",
     "DECISION_LOG": "DecisionLog",
+    "DISPATCH_LOG": "DispatchLog",
 }
 
 TZ_NAME = "Asia/Bangkok"
