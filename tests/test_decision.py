@@ -364,6 +364,14 @@ class DispatchLogTests(unittest.TestCase):
         self.assertEqual(rows[0]["date"], "2026-10-22")
         self.assertEqual(rows[0]["outcome_delta"], "")
 
+    def test_new_rows_keep_model_version_and_blank_only_outcome_cells(self):
+        s = self.snap("2026-10-22 20:50")
+        s["model_version"] = "2026-10-22-abc1234"
+        row = self.LDP.new_rows([], [s])[0]
+        self.assertEqual(row["model_version"], "2026-10-22-abc1234")        # เดิมถูกล้างเป็นค่าว่างเพราะนับเป็นช่องผลลัพธ์
+        for c in ("price_arrive", "price_next", "outcome_delta", "outcome_filled_at"):
+            self.assertEqual(row[c], "")
+
     def test_outcome_waits_for_arrival_plus_24h(self):
         pr = pd.DataFrame({"provider": "A", "warehouse": "w", "fuel": "B7",
                            "price": [30.0, 31.0], "effective": ["2026-10-22 00:00", "2026-10-23 06:00"]})

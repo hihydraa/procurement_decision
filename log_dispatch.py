@@ -20,7 +20,8 @@ from zoneinfo import ZoneInfo
 
 COLUMNS = ["asof", "date", "window", "fuel", "lead", "action_code", "raw_action_code", "grade", "p_rise", "p_fall", "arrive",
            "price_arrive", "price_next", "outcome_delta", "outcome_filled_at", "model_version"]
-OUTCOME_FROM = COLUMNS.index("price_arrive")      # คอลัมน์ L..O
+OUTCOME_FROM = COLUMNS.index("price_arrive")      # คอลัมน์ L..O (ผลลัพธ์ 4 ช่อง ; model_version ต่อท้ายและไม่ใช่ช่องผลลัพธ์)
+OUTCOME_COLS = COLUMNS[OUTCOME_FROM:OUTCOME_FROM + 4]
 
 
 def _asof_key(v) -> str:
@@ -50,7 +51,7 @@ def new_rows(existing: list, snapshot: list) -> list:
         seen.add(k)
         row = {c: s.get(c, "") for c in COLUMNS}
         row["date"] = pd.Timestamp(s["asof"]).strftime("%Y-%m-%d")
-        for c in COLUMNS[OUTCOME_FROM:]:
+        for c in OUTCOME_COLS:
             row[c] = ""
         out.append(row)
     return out
@@ -101,7 +102,7 @@ def main():
     filled = reset = 0
     for i, r in enumerate(rows):
         if premature(r):
-            for c in COLUMNS[OUTCOME_FROM:]:
+            for c in OUTCOME_COLS:
                 r[c] = ""
             sheets_update(tok, SHEET_ID, f"{tab}!L{i + 2}:O{i + 2}", [["", "", "", ""]])
             reset += 1
