@@ -20,6 +20,10 @@ import model as M
 import signals as S
 
 PHASES = {"PM": 15.5, "EVE": 20.5}
+# ช่วงเวลาตัดสินใจ "ส่งรถออก" (ชั่วโมงของวัน) และระยะเดินทางสาขา→คลังที่รองรับ (ชั่วโมง) — ราคาที่ได้จริงคือราคา ณ เวลารถถึง
+DISPATCH_WINDOWS = {"D06": 6.0, "D12": 12.0, "D15": 15.5, "D20": 20.5}
+DISPATCH_LEADS = (8, 10, 12)
+DEFAULT_LEAD = 10
 MIN_TRAIN = 150
 STEP = 30
 
@@ -53,6 +57,59 @@ def build_dataset(book, tables, fuel, hour):
         f.update({"date": d, "p_today": a, "p_next": b, "y": b - a})
         rows.append(f)
     return pd.DataFrame(rows)
+
+
+def build_dispatch_dataset(book, tables, fuel, hour, lead):
+    """ออกรถ ณ เวลา hour ของวัน d ถึงคลังเวลา A = hour + lead ; เทียบราคาที่เวลาถึง A กับถ้าออกช้าไปอีก 24 ชม. (ถึง A+24)
+    y = ราคา(A+24ชม.) - ราคา(A) : บวก = รอแล้วแพงขึ้น (ควรส่งตอนนี้) , ลบ = รอแล้วถูกลง"""
+    d0 = tables.headsup.ts.min().normalize() + pd.Timedelta(days=10)
+    d1 = tables.headsup.ts.max().normalize() - pd.Timedelta(days=1)
+    days = pd.date_range(d0, d1)
+    arr = [d + pd.Timedelta(hours=hour + lead) for d in days]
+    p_now = book.min_at(fuel, arr)
+    p_next = book.min_at(fuel, [t + pd.Timedelta(days=1) for t in arr])
+    rows = []
+    for d, a, b in zip(days, p_now.to_numpy(), p_next.to_numpy()):
+        if np.isnan(a) or np.isnan(b):
+            continue
+        f = S.build_features(d + pd.Timedelta(hours=hour), tables, fuel)
+        f.update({"date": d, "p_today": a, "p_next": b, "y": b - a})
+        rows.append(f)
+    return pd.DataFrame(rows)
+
+
+def hour_profile(book, fuel, days):
+    """ราคาต่ำสุดของตลาดเฉลี่ยแต่ละชั่วโมงของวัน เทียบ 15:30 วันเดียวกัน (บาท/ลิตร) — บอกว่าเวลาถึงคลังมีผลต่อราคาแค่ไหน"""
+    base = book.min_at(fuel, [d + pd.Timedelta(hours=15.5) for d in days]).to_numpy()
+    out = {}
+    for h in range(24):
+        v = book.min_at(fuel, [d + pd.Timedelta(hours=h + 0.5) for d in days]).to_numpy()
+        m = np.nanmean(v - base) if np.isfinite(v - base).any() else None
+        out[str(h)] = None if m is None else round(float(m), 3)
+    return out
+
+
+def fit_key(df):
+    """walk-forward + จูนเกณฑ์ + โมเดลสุดท้ายของชุดข้อมูลเดียว — คืน (summary_dict, models, thresholds)"""
+    X, y_rise, y_fall, pr, pf = walk_forward(df)
+    ok = ~np.isnan(pr)
+    d, pr_o, pf_o = df[ok].reset_index(drop=True), pr[ok], pf[ok]
+    yr, yf = y_rise[ok], y_fall[ok]
+    half = len(d) // 2
+    th, _ = M.tune_thresholds(pr_o[:half], pf_o[:half], d.y.to_numpy()[:half])
+    res = {
+        "n_train_days": int(len(df)), "n_oos_days": int(ok.sum()),
+        "base_rise": float(yr.mean()), "base_fall": float(yf.mean()),
+        "auc_rise": auc(yr, pr_o), "auc_fall": auc(yf, pf_o),
+        "brier_rise": float(np.mean((pr_o - yr) ** 2)), "brier_rise_baseline": float(np.mean((yr.mean() - yr) ** 2)),
+        "thresholds": th,
+        "holdout_policy": summarize_policy(d.iloc[half:], pr_o[half:], pf_o[half:], th, "นโยบายใหม่ (ช่วงที่ไม่เคยใช้จูน)"),
+        "holdout_old_rule": old_rule_policy(d.iloc[half:]),
+        "holdout_always_buy_today": {"total_gain_thb_per_litre": 0.0},
+    }
+    models = {"rise": M.fit_logistic(X, y_rise), "fall": M.fit_logistic(X, y_fall)}
+    final_th, _ = M.tune_thresholds(pr_o, pf_o, d.y.to_numpy())
+    return res, models, final_th
 
 
 def walk_forward(df):
@@ -106,10 +163,14 @@ def main():
     ap.add_argument("data_dir")
     ap.add_argument("--out", default=M.PARAMS_PATH)
     ap.add_argument("--summary", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "backtest_summary.json"))
+    ap.add_argument("--dispatch-only", action="store_true",
+                    help="ฝึกเฉพาะโมเดลแผนส่งรถ (ช่วงเวลาออกรถ x ระยะเดินทาง) แล้วรวมเข้าไฟล์เดิม ไม่แตะโมเดลเดิม")
     a = ap.parse_args()
 
     prices, tables = load(a.data_dir)
     book = S.PriceBook(prices)
+    if a.dispatch_only:
+        return fit_dispatch(a, book, tables)
     params = {"features": M.FEATURES, "trained_at": datetime.now().strftime("%Y-%m-%d"), "models": {}, "thresholds": {}}
     summary = {"generated": datetime.now().strftime("%Y-%m-%d"), "target": "ราคาต่ำสุดของตลาด 15:30 พรุ่งนี้ เทียบ 15:30 วันนี้ (บาท/ลิตร)",
                "rise_threshold_thb": M.RISE_THB, "results": {}}
@@ -117,29 +178,41 @@ def main():
         for phase, hour in PHASES.items():
             key = f"{fuel}_{phase}"
             df = build_dataset(book, tables, fuel, hour)
-            X, y_rise, y_fall, pr, pf = walk_forward(df)
-            ok = ~np.isnan(pr)
-            d, pr_o, pf_o = df[ok].reset_index(drop=True), pr[ok], pf[ok]
-            yr, yf = y_rise[ok], y_fall[ok]
-            half = len(d) // 2
-            th, _ = M.tune_thresholds(pr_o[:half], pf_o[:half], d.y.to_numpy()[:half])     # จูนเกณฑ์ด้วยครึ่งแรกของช่วงทดสอบ
-            res = {
-                "n_train_days": int(len(df)), "n_oos_days": int(ok.sum()),
-                "base_rise": float(yr.mean()), "base_fall": float(yf.mean()),
-                "auc_rise": auc(yr, pr_o), "auc_fall": auc(yf, pf_o),
-                "brier_rise": float(np.mean((pr_o - yr) ** 2)), "brier_rise_baseline": float(np.mean((yr.mean() - yr) ** 2)),
-                "thresholds": th,
-                "holdout_policy": summarize_policy(d.iloc[half:], pr_o[half:], pf_o[half:], th, "นโยบายใหม่ (ช่วงที่ไม่เคยใช้จูน)"),
-                "holdout_old_rule": old_rule_policy(d.iloc[half:]),
-                "holdout_always_buy_today": {"total_gain_thb_per_litre": 0.0},
-            }
+            res, models, final_th = fit_key(df)
             summary["results"][key] = res
-            # โมเดลสุดท้ายฝึกด้วยข้อมูลทั้งหมด ; เกณฑ์จูนด้วยทุกวันที่ทดสอบ OOS
-            params["models"][key] = {"rise": M.fit_logistic(X, y_rise), "fall": M.fit_logistic(X, y_fall)}
-            params["thresholds"][key], _ = M.tune_thresholds(pr_o, pf_o, d.y.to_numpy())
-            print(f"[{key}] oos={ok.sum()} AUC rise={res['auc_rise']:.2f} fall={res['auc_fall']:.2f} | "
+            params["models"][key] = models
+            params["thresholds"][key] = final_th
+            ok_n = res["n_oos_days"]
+            print(f"[{key}] oos={ok_n} AUC rise={res['auc_rise']:.2f} fall={res['auc_fall']:.2f} | "
                   f"holdout gain new={res['holdout_policy']['total_gain_thb_per_litre']:+.1f} old={res['holdout_old_rule']['total_gain_thb_per_litre']:+.1f} "
                   f"(บาท/ลิตรรวมทุกวัน, n={res['holdout_policy']['n_days']})")
+    with open(a.out, "w", encoding="utf-8") as fh:
+        json.dump(params, fh, ensure_ascii=False, indent=1)
+    with open(a.summary, "w", encoding="utf-8") as fh:
+        json.dump(summary, fh, ensure_ascii=False, indent=1, default=float)
+    print("wrote", a.out, a.summary)
+
+
+def fit_dispatch(a, book, tables):
+    with open(a.out, encoding="utf-8") as fh:
+        params = json.load(fh)
+    with open(a.summary, encoding="utf-8") as fh:
+        summary = json.load(fh)
+    days = pd.date_range(tables.headsup.ts.min().normalize() + pd.Timedelta(days=10), tables.headsup.ts.max().normalize() - pd.Timedelta(days=1))
+    params["dispatch"] = {"default_lead_hours": DEFAULT_LEAD, "leads": list(DISPATCH_LEADS), "windows": DISPATCH_WINDOWS,
+                          "hour_profile": {f: hour_profile(book, f, days) for f in S.FUELS}, "trained_at": datetime.now().strftime("%Y-%m-%d")}
+    summary.setdefault("dispatch_results", {})
+    for fuel in S.FUELS:
+        for win, hour in DISPATCH_WINDOWS.items():
+            for lead in DISPATCH_LEADS:
+                key = f"{fuel}_{win}_L{lead}"
+                df = build_dispatch_dataset(book, tables, fuel, hour, lead)
+                res, models, th = fit_key(df)
+                summary["dispatch_results"][key] = res
+                params["models"][key] = models
+                params["thresholds"][key] = th
+                print(f"[{key}] n={len(df)} oos={res['n_oos_days']} AUC rise={res['auc_rise']:.2f} fall={res['auc_fall']:.2f} "
+                      f"holdout gain={res['holdout_policy']['total_gain_thb_per_litre']:+.1f} (n={res['holdout_policy']['n_days']})")
     with open(a.out, "w", encoding="utf-8") as fh:
         json.dump(params, fh, ensure_ascii=False, indent=1)
     with open(a.summary, "w", encoding="utf-8") as fh:

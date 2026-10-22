@@ -292,5 +292,58 @@ class FundBannerTests(unittest.TestCase):
         self.assertIn("ยังไม่พบประกาศ", html)
 
 
+class DispatchTests(unittest.TestCase):
+    import main as MAIN
+
+    def setUp(self):
+        self.params = M.load_params()
+        self.summary = engine.load_backtest_summary()
+        rows = [{"msg_date": "2026-10-20", "msg_time": "17:40", "provider": p, "direction": "UP", "scope": "ALL", "stated_time": "23:30"}
+                for p in ("SFL", "IRPC", "PTT")]
+        self.t = tables(headsup=rows, mops=[{"msg_date": "2026-10-20", "msg_time": "18:30", "mops_date": "2026-10-20", "g95": 100,
+                                             "g95_chg": 3.0, "diesel": 120, "diesel_chg": 6.0}])
+
+    def test_window_mapping(self):
+        w = {"D06": 6.0, "D12": 12.0, "D15": 15.5, "D20": 20.5}
+        f = lambda s: engine.dispatch_window(pd.Timestamp(s), w)
+        self.assertIsNone(f("2026-10-20 05:59"))
+        self.assertEqual(f("2026-10-20 06:00"), "D06")
+        self.assertEqual(f("2026-10-20 15:35"), "D15")
+        self.assertEqual(f("2026-10-20 23:00"), "D20")
+
+    def test_before_first_window_is_not_evaluated(self):
+        d = engine.decide_dispatch("DIESEL", pd.Timestamp("2026-10-20 05:00"), self.t, self.params, self.summary)
+        self.assertEqual(d["action_code"], "NO_DATA")
+
+    def test_evening_strong_signals_say_dispatch_now_with_arrival_time(self):
+        d = engine.decide_dispatch("DIESEL", pd.Timestamp("2026-10-20 20:35"), self.t, self.params, self.summary, 10)
+        self.assertEqual(d["window"], "D20")
+        self.assertEqual(d["action_code"], "URGENT")
+        self.assertEqual(d["arrive"], pd.Timestamp("2026-10-21 06:35"))
+        self.assertIn("06:35", d["headline"])
+        self.assertIn("วันถัดไป", d["headline"])
+
+    def test_weak_window_is_forced_to_normal(self):
+        # G95 หน้าต่าง 12:00 ผ่านเกณฑ์ไม่ถึง "พอใช้" ในการทดสอบย้อนหลัง → ห้ามแนะนำเร่ง/ชะลอ
+        self.assertEqual(engine.dispatch_quality(self.summary, "G95_D12_L10")["grade"], "อ่อน")
+        d = engine.decide_dispatch("GASOHOL95", pd.Timestamp("2026-10-20 13:00"), self.t, self.params, self.summary, 10)
+        self.assertEqual(d["action_code"], "NORMAL")
+
+    def test_lead_changes_arrival(self):
+        a = engine.decide_dispatch("DIESEL", pd.Timestamp("2026-10-20 20:35"), self.t, self.params, self.summary, 8)
+        b = engine.decide_dispatch("DIESEL", pd.Timestamp("2026-10-20 20:35"), self.t, self.params, self.summary, 12)
+        self.assertEqual((b["arrive"] - a["arrive"]).total_seconds(), 4 * 3600)
+
+    def test_section_renders_all_leads_and_hides_non_default(self):
+        asof = pd.Timestamp("2026-10-20 20:35")
+        by_lead = {l: {fk: engine.decide_dispatch(fk, asof, self.t, self.params, self.summary, l) for fk in self.MAIN.FUEL_CONFIG} for l in (8, 10, 12)}
+        html = self.MAIN.build_dispatch_section(by_lead, 10, asof)
+        self.assertEqual(html.count("lead-panel' data-lead"), 3)
+        self.assertEqual(html.count(" hidden"), 2)
+        self.assertIn("ส่งรถออกเลยตอนนี้", html)
+        self.assertIn("pbar", html)
+        self.assertEqual(self.MAIN.build_dispatch_section({}, 10, asof), "")
+
+
 if __name__ == "__main__":
     unittest.main()

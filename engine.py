@@ -92,11 +92,11 @@ def _reason_lines(fuel: str, f: dict, model_rise: dict, model_fall: dict) -> lis
     return [t for _, t in items[:4]]
 
 
-def _evidence(summary, key: str, action: str):
+def _evidence(summary, key: str, action: str, group: str = "results"):
     """สถิติย้อนหลังของคำแนะนำชนิดนี้ในช่วงทดสอบที่ไม่เคยใช้จูนเกณฑ์"""
     try:
-        a = summary["results"][key]["holdout_policy"]["actions"][action]
-        n = summary["results"][key]["holdout_policy"]["n_days"]
+        a = summary[group][key]["holdout_policy"]["actions"][action]
+        n = summary[group][key]["holdout_policy"]["n_days"]
         return {"share": a["share"], "rise_rate": a["rise_rate"], "fall_rate": a["fall_rate"],
                 "avg_move": a["avg_next_minus_today"], "n_days": n, "source": "backtest"}
     except (KeyError, TypeError):
@@ -168,4 +168,123 @@ def decide(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params, summary=
     ev = live_stats(decision_log, fuel, phase, code) or _evidence(summary, key, code)
     out.update({"action_code": code, "action": label, "color": color, "summary": lead, "reasons": reasons,
                 "p_rise": p_rise, "p_fall": p_fall, "features": f, "evidence": ev, "thresholds": th})
+    return out
+
+
+# ------------------------------------------------------------------ แผนส่งรถ (ระยะเดินทางสาขา -> คลัง)
+# ราคาที่ได้จริงคือราคา ณ เวลารถถึงคลัง (เวลาออก + lead) ; โมเดลตอบว่า "ถ้ารออีก 1 วัน ราคา ณ เวลาถึงจะแพงขึ้น/ถูกลงไหม"
+DISPATCH_FIRST_HOUR = 6.0          # ก่อนเวลานี้ยังไม่มีสัญญาณของวัน (ประกาศล่วงหน้านับตั้งแต่ 06:00) → ยังไม่ประเมิน
+GOOD_AUC, OK_AUC = 0.62, 0.55
+
+
+def dispatch_window(asof: pd.Timestamp, windows: dict):
+    """ช่วงเวลาตัดสินใจล่าสุดที่ผ่านมาแล้ว (เช่น 13:40 → D12) ; ก่อนช่วงแรกคืน None"""
+    h = asof.hour + asof.minute / 60
+    passed = [(hour, name) for name, hour in windows.items() if hour <= h]
+    return max(passed)[1] if passed else None
+
+
+def dispatch_quality(summary, key: str) -> dict:
+    """เกรดความเชื่อมั่นของโมเดลช่วงนี้ จากผลทดสอบย้อนหลังที่ไม่เคยใช้จูน: ดี / พอใช้ / อ่อน (อ่อน = ไม่ใช้แนะนำเร่ง/ชะลอ)"""
+    try:
+        r = summary["dispatch_results"][key]
+        ar, af = r["auc_rise"], r["auc_fall"]
+        gain = r["holdout_policy"]["total_gain_thb_per_litre"]
+    except (KeyError, TypeError):
+        return {"grade": "อ่อน", "auc_rise": None, "auc_fall": None, "gain": None, "n_days": None}
+    if min(ar, af) >= GOOD_AUC and gain > 0:
+        grade = "ดี"
+    elif min(ar, af) >= OK_AUC and gain > 0:
+        grade = "พอใช้"
+    else:
+        grade = "อ่อน"
+    return {"grade": grade, "auc_rise": ar, "auc_fall": af, "gain": gain, "n_days": r["holdout_policy"]["n_days"]}
+
+
+def _next_check(asof: pd.Timestamp, windows: dict) -> str:
+    h = asof.hour + asof.minute / 60
+    later = sorted(hour for hour in windows.values() if hour > h)
+    if later:
+        t = later[0]
+        return f"ประเมินรอบถัดไปหลัง {int(t):02d}:{int(round((t % 1) * 60)):02d}"
+    return "ประเมินรอบถัดไปพรุ่งนี้หลัง 06:00"
+
+
+def decide_dispatch(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params, summary=None, lead_hours: int = None) -> dict:
+    """คำแนะนำ "ส่งรถตอนนี้หรือรอ" สำหรับพนักงาน — ถ้าส่งรถตอนนี้จะถึงคลังที่ asof + lead_hours"""
+    fuel = FUEL_KEY[fuel_key]
+    disp = (params or {}).get("dispatch")
+    lead = lead_hours or (disp or {}).get("default_lead_hours", 10)
+    arrive = asof + pd.Timedelta(hours=lead)
+    out = {"fuel": fuel, "lead": lead, "asof": asof, "arrive": arrive, "p_rise": None, "p_fall": None, "action_code": "NO_DATA",
+           "reasons": [], "quality": None, "evidence": None, "features": None, "window": None,
+           "next_check": None, "arrival_note": None}
+
+    def no_data(msg):
+        label, color = M.ACTIONS["NO_DATA"]
+        out.update({"action": label, "color": color, "headline": msg, "detail": []})
+        return out
+
+    if not disp:
+        return no_data("ยังไม่มีโมเดลแผนส่งรถ (ต้องฝึกด้วย fit_model.py --dispatch-only)")
+    windows = disp["windows"]
+    win = dispatch_window(asof, windows)
+    out["next_check"] = _next_check(asof, windows)
+    if win is None:
+        return no_data(f"ยังไม่ถึงเวลาประเมิน (เริ่มประเมินตั้งแต่ {int(DISPATCH_FIRST_HOUR):02d}:00 เมื่อมีประกาศล่วงหน้าของวัน)")
+    key = f"{fuel}_{win}_L{lead}"
+    out["window"] = win
+    if key not in params.get("models", {}):
+        return no_data(f"ยังไม่มีโมเดลสำหรับระยะเดินทาง {lead} ชม.")
+    st = feed_status(tables, asof)
+    if not st["alive"]:
+        newest = st["newest"].strftime("%d/%m %H:%M") if st["newest"] is not None else "ไม่เคยมีข้อมูล"
+        return no_data(f"ฟีดสัญญาณจากไลน์ไม่อัปเดต (ล่าสุด {newest}) — ยังไม่ให้คำแนะนำ")
+
+    f = S.build_features(asof, tables, fuel)
+    mm = params["models"][key]
+    x = M.vectorize(f)
+    p_rise = float(M.predict_proba(mm["rise"], x)[0])
+    p_fall = float(M.predict_proba(mm["fall"], x)[0])
+    th = params.get("thresholds", {}).get(key, M.DEFAULT_THRESHOLDS)
+    code = M.choose_action(p_rise, p_fall, th)
+    q = dispatch_quality(summary, key)
+    base = (summary or {}).get("dispatch_results", {}).get(key) or {}
+    base_rise = base.get("base_rise")
+    raw_code = code
+    if q["grade"] == "อ่อน":
+        code = "NORMAL"                                   # โมเดลช่วงนี้ยังไม่แม่นพอ ไม่แนะนำเร่ง/ชะลอ
+    label, color = M.ACTIONS[code]
+    at = arrive.strftime("%H:%M")
+    day = "" if arrive.date() == asof.date() else " (วันถัดไป)"
+    wait_cost = f"{p_rise:.0%}" + (f" (ปกติ {base_rise:.0%})" if base_rise else "")
+    headline = {
+        "URGENT": f"ส่งรถออกเลยตอนนี้ → ถึงคลังประมาณ {at}{day}",
+        "GRADUAL": f"ส่งรถออกบางส่วนตอนนี้ (ประมาณครึ่งหนึ่งของแผน) → ถึงคลังประมาณ {at}{day}",
+        "NORMAL": f"ส่งรถตามแผนปกติ → ถึงคลังประมาณ {at}{day}",
+        "WAIT": f"ชะลอการส่งรถได้ → ถ้าออกตอนนี้จะถึงคลังประมาณ {at}{day}",
+    }[code]
+    detail = {
+        "URGENT": [f"ถ้ารอไปอีก 1 วัน มีโอกาส {wait_cost} ที่ราคา ณ เวลาถึงคลังจะแพงขึ้นเกิน {M.RISE_THB:.2f} บาท/ลิตร"],
+        "GRADUAL": [f"โอกาสที่ราคา ณ เวลาถึงจะแพงขึ้นถ้ารอ 1 วัน {wait_cost}"
+                    + (" — สูงกว่าปกติเล็กน้อย ทยอยออกรถดีกว่ารอทั้งหมด" if not base_rise or p_rise > base_rise
+                       else " — ไม่สูงกว่าปกติ แต่ไม่มีสัญญาณให้ชะลอ จึงทยอยออกรถเพื่อลดความเสี่ยง")],
+        "NORMAL": ["ไม่มีสัญญาณชัดเจนให้เร่งหรือชะลอ"] if raw_code == "NORMAL" else
+                  [f"ช่วงเวลานี้โมเดลยังไม่แม่นพอที่จะแนะนำให้เร่งหรือชะลอ (ตัวเลขดิบ: แพงขึ้น {p_rise:.0%} / ถูกลง {p_fall:.0%})"],
+        "WAIT": [f"โอกาส {p_fall:.0%} ที่ราคา ณ เวลาถึงคลังจะถูกลงเกิน {M.RISE_THB:.2f} บาท/ลิตร ถ้ารอไปอีก 1 วัน และโอกาสแพงขึ้นต่ำ ({p_rise:.0%})"],
+    }[code]
+
+    prof = (disp.get("hour_profile") or {}).get(fuel, {})
+    v = prof.get(str(arrive.hour))
+    if v is not None and abs(v) >= 0.03:
+        out["arrival_note"] = (f"ถึงคลังช่วง {arrive.hour:02d}:00 ราคาตลาดเฉลี่ยย้อนหลัง{'สูง' if v > 0 else 'ต่ำ'}กว่าช่วง 15:30 "
+                               f"ประมาณ {abs(v):.2f} บาท/ลิตร")
+    reasons = _reason_lines(fuel, f, mm["rise"], mm["fall"])
+    if f["trend"] is None or (isinstance(f["trend"], float) and np.isnan(f["trend"])):
+        reasons.append("ยังไม่มี Trend Mops ของวันนี้ — ความมั่นใจต่ำกว่าปกติ")
+    if not reasons:
+        reasons.append("ไม่มีสัญญาณขึ้น/ลงที่เด่นพอในตอนนี้")
+    out.update({"action_code": code, "action": label, "color": color, "headline": headline, "detail": detail, "reasons": reasons,
+                "p_rise": p_rise, "p_fall": p_fall, "base_rise": base_rise, "base_fall": base.get("base_fall"), "features": f,
+                "quality": q, "evidence": _evidence(summary, key, code, group="dispatch_results"), "thresholds": th, "raw_action_code": raw_code})
     return out
