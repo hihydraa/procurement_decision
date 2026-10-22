@@ -267,5 +267,30 @@ class LiveStatsTests(unittest.TestCase):
         self.assertEqual(r["n_days"], n)
 
 
+class FundBannerTests(unittest.TestCase):
+    import main as MAIN
+
+    def feed(self):
+        return pd.DataFrame([{"msg_date": "2026-10-21", "msg_time": "20:05", "issue_no": 5, "effective_date": "2026-10-22",
+                              "diesel_old": -1.5, "diesel_new": -1.0, "benzene_old": 0.5, "benzene_new": 0.5}])
+
+    def test_no_banner_when_fund_healthy(self):
+        self.assertEqual(self.MAIN.build_fund_risk_banner({"cash": 5000, "runway": 80, "status": "OK"}, self.feed()), "")
+        self.assertEqual(self.MAIN.build_fund_risk_banner({}, self.feed()), "")
+
+    def test_danger_banner_with_notice(self):
+        html = self.MAIN.build_fund_risk_banner({"cash": -108.76, "runway": -0.3, "subsidy": 345.18, "balance": -103045, "status": "CRITICAL"}, self.feed())
+        self.assertIn("fund-risk-danger", html)
+        self.assertIn("เงินสดหมดแล้ว", html)
+        self.assertIn("-1.50 → -1.00", html)             # ดีเซล: ลดเงินอุดหนุน 0.50
+        self.assertIn("22/10/2026", html)
+        self.assertIn("ไม่เปลี่ยน", html)                   # เบนซินไม่เปลี่ยน
+
+    def test_warning_banner_without_notice(self):
+        html = self.MAIN.build_fund_risk_banner({"cash": 900, "runway": 30, "subsidy": 30, "balance": -5000, "status": "WATCH"}, pd.DataFrame())
+        self.assertIn("fund-risk-warning", html)
+        self.assertIn("ยังไม่พบประกาศ", html)
+
+
 if __name__ == "__main__":
     unittest.main()

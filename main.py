@@ -605,6 +605,61 @@ def freshness_warnings(today, df_eppo, df_mops, df_wti, df_oilfund) -> list[str]
     return out
 
 
+def fund_risk_level(fund_snap: dict):
+    """ระดับความเสี่ยงของกองทุน: danger = เงินสดหมด/ติดลบ, สถานะ CRITICAL หรือพยุงได้ไม่เกิน 20 วัน ; warning = ไม่เกิน 35 วัน ; อื่น ๆ ไม่แสดงแถบ"""
+    if not fund_snap:
+        return None
+    cash, runway = fund_snap.get("cash"), fund_snap.get("runway")
+    status = str(fund_snap.get("status") or "").upper()
+    if (cash is not None and cash < 0) or (runway is not None and runway <= 20) or status == "CRITICAL":
+        return "danger"
+    if runway is not None and runway <= 35:
+        return "warning"
+    return None
+
+
+def _notice_change(label, old, new):
+    old, new = safe_float(old), safe_float(new)
+    if old is None or new is None:
+        return None
+    d = new - old
+    if abs(d) < 0.005:
+        return f"{label} {new:+.2f} บาท/ลิตร (ไม่เปลี่ยน)"
+    hint = "เก็บเข้ากองทุนเพิ่ม / ลดเงินอุดหนุน → แรงดันให้ราคาหน้าปั๊มขึ้น" if d > 0 else "ลดการเก็บ / เพิ่มเงินอุดหนุน → แรงดันให้ราคาหน้าปั๊มลง"
+    return f"{label} {old:+.2f} → {new:+.2f} บาท/ลิตร ({d:+.2f}: {hint})"
+
+
+def build_fund_risk_banner(fund_snap: dict, fund_feed: pd.DataFrame) -> str:
+    """แถบเตือนความเสี่ยงกองทุนบนหน้าแรก: เงินสด/จำนวนวันที่พยุงได้ + ประกาศ กบน. ล่าสุดจากกลุ่ม Jobber
+    เป็นข้อมูลประกอบการตัดสินใจเท่านั้น ไม่ได้ใส่ในโมเดลความน่าจะเป็น (ทดสอบแล้วไม่ช่วยให้แม่นขึ้น)"""
+    level = fund_risk_level(fund_snap)
+    if level is None:
+        return ""
+    cash, runway = fund_snap.get("cash"), fund_snap.get("runway")
+    if cash is not None and cash < 0:
+        headline = "กองทุนน้ำมันเงินสดหมดแล้ว (ติดลบ) — ความเสี่ยงที่รัฐต้องปรับอัตราเก็บ/ลดเงินอุดหนุนสูง"
+    elif runway is not None:
+        headline = f"กองทุนน้ำมันพยุงราคาได้อีกประมาณ {runway:.1f} วัน — ความเสี่ยงปรับอัตราสูงขึ้น"
+    else:
+        headline = "กองทุนน้ำมันอยู่ในสถานะเสี่ยง"
+    facts = [f"เงินสดคงเหลือ {fmt_num(cash, 0)} ล้านบาท", f"เงินอุดหนุน {fmt_num(fund_snap.get('subsidy'), 0)} ล้านบาท/วัน",
+             f"ฐานะสุทธิ {fmt_num(fund_snap.get('balance'), 0)} ล้านบาท"]
+    notice_html = "<div class='muted'>ยังไม่พบประกาศ กบน. จากกลุ่ม Jobber</div>"
+    t = S.add_ts(fund_feed) if fund_feed is not None else pd.DataFrame()
+    if not t.empty and "effective_date" in t.columns:
+        last = t.iloc[-1]
+        eff = pd.to_datetime(last.get("effective_date"), errors="coerce")
+        parts = [_notice_change("ดีเซล", last.get("diesel_old"), last.get("diesel_new")),
+                 _notice_change("เบนซิน/แก๊สโซฮอล์", last.get("benzene_old"), last.get("benzene_new"))]
+        parts = [p for p in parts if p]
+        head = f"ประกาศ กบน. ล่าสุด (โพสต์ {last['ts'].strftime('%d/%m %H:%M')}"
+        head += f", มีผล {eff.strftime('%d/%m/%Y')})" if not pd.isna(eff) else ")"
+        if parts:
+            notice_html = f"<div><strong>{html_escape(head)}</strong><ul>" + "".join(f"<li>{html_escape(p)}</li>" for p in parts) + "</ul></div>"
+    return (f"<div class='fund-risk fund-risk-{level}'><strong>{html_escape(headline)}</strong>"
+            f"<div class='muted' style='margin:6px 0'>{html_escape(' | '.join(facts))}</div>{notice_html}</div>")
+
+
 def build_accuracy_section(summary, decision_log) -> str:
     """ตารางความแม่นยำของคำแนะนำ: สถิติ backtest (ช่วงที่ไม่เคยใช้จูนเกณฑ์) และสถิติสดจาก DecisionLog เมื่อมีพอ"""
     if not summary:
@@ -770,7 +825,7 @@ def build_news_section(news_df: pd.DataFrame, max_items: int = 1) -> str:
 
 
 
-def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str], accuracy_html: str = "") -> str:
+def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str], accuracy_html: str = "", fund_feed: pd.DataFrame = None) -> str:
     updated_at = datetime.now(TZ).strftime("%d/%m/%Y %H:%M")
     sections = "\n".join(build_fuel_section(r) for r in results)
     news_html = build_news_section(news_df)
@@ -834,6 +889,8 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
     if warnings:
         items = "".join(f"<li>{html_escape(w)}</li>" for w in warnings)
         warnings_html = f"<div class='warning-box'><strong>Data warnings</strong><ul>{items}</ul></div>"
+
+    fund_risk_html = build_fund_risk_banner(fund_snap, fund_feed)
 
     return f"""<!DOCTYPE html>
 <html lang="th">
@@ -984,6 +1041,10 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
     .text-bg-secondary {{ background: #6c757d; }}
 
     .warning-box {{ background: #fff7ed; border: 1px solid #fdba74; border-radius: 18px; padding: 16px; margin-bottom: 20px; }}
+    .fund-risk {{ border-radius: 18px; padding: 16px; margin-bottom: 20px; border: 1px solid; }}
+    .fund-risk ul {{ margin: 6px 0 0 18px; padding: 0; }}
+    .fund-risk-danger {{ background: #fef2f2; border-color: #fca5a5; }}
+    .fund-risk-warning {{ background: #fffbeb; border-color: #fcd34d; }}
     .footer {{ color: var(--muted); text-align: center; padding: 16px 0 28px; }}
 
     .news-list {{ display: grid; gap: 14px; margin-top: 10px; }}
@@ -1030,6 +1091,8 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
     </section>
 
     {warnings_html}
+
+    {fund_risk_html}
 
     <section class="top-grid">
       <div class="top-card">
@@ -1169,7 +1232,7 @@ def main():
             warnings.append(f"ไม่พบข้อมูลล่าสุดของ {config['label_th']} ใน EPPO/MOPS")
         results.append(result)
 
-    html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log))
+    html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund)
     write_text("index.html", html)
     write_decision_snapshot(results)
     print("Dashboard created successfully")
