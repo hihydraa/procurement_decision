@@ -660,6 +660,70 @@ def build_fund_risk_banner(fund_snap: dict, fund_feed: pd.DataFrame) -> str:
             f"<div class='muted' style='margin:6px 0'>{html_escape(' | '.join(facts))}</div>{notice_html}</div>")
 
 
+def _risk_bar(p_rise, p_fall):
+    """แท่งสีสรุป "ถ้ารอ 1 วัน ราคา ณ เวลาถึงคลังจะ": แพงขึ้น / ใกล้เดิม / ถูกลง (ปรับให้รวมไม่เกิน 100%)"""
+    r, f = max(0.0, min(1.0, p_rise)), max(0.0, min(1.0, p_fall))
+    if r + f > 1:
+        r, f = r / (r + f), f / (r + f)
+    mid = 1 - r - f
+    return (f"<div class='pbar'><span class='pbar-up' style='width:{r * 100:.0f}%'>{r:.0%}</span>"
+            f"<span class='pbar-mid' style='width:{mid * 100:.0f}%'>{mid:.0%}</span>"
+            f"<span class='pbar-dn' style='width:{f * 100:.0f}%'>{f:.0%}</span></div>"
+            "<div class='pbar-legend'><span class='lg-up'>แพงขึ้น</span><span>ใกล้เดิม</span><span class='lg-dn'>ถูกลง</span></div>")
+
+
+def _dispatch_card(label_th, d):
+    color = d.get("color", "secondary")
+    q = d.get("quality") or {}
+    quality = ""
+    if q.get("grade"):
+        quality = f"<span class='qtag qtag-{ {'ดี': 'good', 'พอใช้': 'ok', 'อ่อน': 'weak'}[q['grade']] }'>ความเชื่อมั่น: {q['grade']}</span>"
+    body = ""
+    if d.get("p_rise") is not None:
+        body += "<div class='muted' style='margin-top:10px'>ถ้ารอไปอีก 1 วัน ราคา ณ เวลาที่รถถึงคลังจะ…</div>" + _risk_bar(d["p_rise"], d["p_fall"])
+    details = "".join(f"<li>{html_escape(x)}</li>" for x in d.get("detail", []))
+    reasons = "".join(f"<li>{html_escape(x)}</li>" for x in d.get("reasons", []))
+    ev = d.get("evidence")
+    evidence = ""
+    if ev and ev.get("source") == "backtest":
+        evidence = (f"<div class='muted'>ย้อนหลัง {ev['n_days']} วัน (ช่วงที่ไม่เคยใช้ปรับเกณฑ์): เมื่อระบบแนะนำแบบนี้ ราคาแพงขึ้นจริง {ev['rise_rate']:.0%} "
+                    f"ถูกลงจริง {ev['fall_rate']:.0%} เฉลี่ย {ev['avg_move']:+.2f} บาท/ลิตร</div>")
+    note = f"<div class='muted'>{html_escape(d['arrival_note'])}</div>" if d.get("arrival_note") else ""
+    nxt = f"<div class='muted'>{html_escape(d['next_check'])}</div>" if d.get("next_check") else ""
+    return f"""<div class="dispatch-card">
+      <div class="dispatch-head"><span class="dispatch-fuel">{html_escape(label_th)}</span><span class="badge text-bg-{color}">{html_escape(d.get('action', ''))}</span>{quality}</div>
+      <div class="dispatch-headline">{html_escape(d.get('headline', ''))}</div>
+      <ul>{details}</ul>{body}
+      <details><summary>เหตุผลจากสัญญาณ</summary><ul>{reasons}</ul></details>
+      {evidence}{note}{nxt}
+    </div>"""
+
+
+def build_dispatch_section(by_lead: dict, default_lead: int, asof) -> str:
+    """สรุปสำหรับพนักงานจัดซื้อ: ส่งรถตอนนี้หรือรอ — เลือกระยะเดินทางได้ (ค่าตั้งต้น default_lead ชม.)
+    by_lead = {lead: {fuel_key: decision}}"""
+    if not by_lead:
+        return ""
+    leads = sorted(by_lead)
+    radios = "".join(
+        f"<label class='lead-opt'><input type='radio' name='lead' value='{l}'{' checked' if l == default_lead else ''}"
+        f" onchange=\"document.querySelectorAll('.lead-panel').forEach(p=>p.hidden=p.dataset.lead!==this.value)\"> {l} ชม.</label>"
+        for l in leads)
+    panels = ""
+    for l in leads:
+        cards = "".join(_dispatch_card(FUEL_CONFIG[fk]["label_th"], by_lead[l][fk]) for fk in FUEL_CONFIG if fk in by_lead[l])
+        panels += f"<div class='lead-panel' data-lead='{l}'{'' if l == default_lead else ' hidden'}><div class='dispatch-grid'>{cards}</div></div>"
+    return f"""<section class="dispatch">
+      <h2>สรุปสำหรับทีมจัดซื้อ: ส่งรถตอนนี้ดีไหม?</h2>
+      <p class="muted">ราคาที่ซื้อได้จริงคือราคา ณ เวลารถถึงคลัง (เวลาออก + ระยะเดินทาง) ไม่ใช่ราคาตอนนี้ — ระบบจึงประเมินราคาที่เวลาถึง
+      เทียบกับถ้าออกรถช้าไปอีก 1 วัน &nbsp;|&nbsp; ประเมิน ณ {asof.strftime('%d/%m %H:%M')}</p>
+      <div class="lead-pick">ระยะเดินทางสาขา → คลัง: {radios}</div>
+      {panels}
+      <p class="muted">ข้อควรรู้: ความแม่นยำสูงสุดช่วงหลังประกาศกองทุนและ MOPS ปิดตลาด (~20:00) ; ช่วงเช้า–บ่ายสัญญาณน้อย ระบบจะบอกตรง ๆ ว่าไม่มีสัญญาณ
+      ยังไม่ได้ยืนยันผลจากคำแนะนำจริง (ตัวเลขย้อนหลังมาจากการทดสอบกับข้อมูลในอดีต) ห้ามใช้แทนการตัดสินใจของผู้จัดการ</p>
+    </section>"""
+
+
 def build_accuracy_section(summary, decision_log) -> str:
     """ตารางความแม่นยำของคำแนะนำ: สถิติ backtest (ช่วงที่ไม่เคยใช้จูนเกณฑ์) และสถิติสดจาก DecisionLog เมื่อมีพอ"""
     if not summary:
@@ -825,7 +889,7 @@ def build_news_section(news_df: pd.DataFrame, max_items: int = 1) -> str:
 
 
 
-def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str], accuracy_html: str = "", fund_feed: pd.DataFrame = None) -> str:
+def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str], accuracy_html: str = "", fund_feed: pd.DataFrame = None, dispatch_html: str = "") -> str:
     updated_at = datetime.now(TZ).strftime("%d/%m/%Y %H:%M")
     sections = "\n".join(build_fuel_section(r) for r in results)
     news_html = build_news_section(news_df)
@@ -1045,6 +1109,28 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
     .fund-risk ul {{ margin: 6px 0 0 18px; padding: 0; }}
     .fund-risk-danger {{ background: #fef2f2; border-color: #fca5a5; }}
     .fund-risk-warning {{ background: #fffbeb; border-color: #fcd34d; }}
+    .dispatch {{ background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 20px; margin-bottom: 20px; }}
+    .dispatch h2 {{ margin: 0 0 6px; }}
+    .lead-pick {{ margin: 10px 0 14px; }}
+    .lead-opt {{ margin-right: 16px; cursor: pointer; }}
+    .dispatch-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }}
+    .dispatch-card {{ border: 1px solid var(--line); border-radius: 18px; padding: 16px; background: #fbfdff; }}
+    .dispatch-head {{ display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }}
+    .dispatch-fuel {{ font-weight: 700; font-size: 1.1rem; }}
+    .dispatch-headline {{ font-size: 1.2rem; font-weight: 700; margin: 10px 0 4px; line-height: 1.4; }}
+    .dispatch-card ul {{ margin: 6px 0 0 18px; padding: 0; }}
+    .qtag {{ font-size: .8rem; padding: 4px 8px; border-radius: 999px; border: 1px solid; }}
+    .qtag-good {{ color: #15803d; border-color: #86efac; }}
+    .qtag-ok {{ color: #a16207; border-color: #fcd34d; }}
+    .qtag-weak {{ color: #b91c1c; border-color: #fca5a5; }}
+    .pbar {{ display: flex; height: 26px; border-radius: 8px; overflow: hidden; margin-top: 6px; font-size: .8rem; color: #fff; }}
+    .pbar span {{ display: flex; align-items: center; justify-content: center; min-width: 0; overflow: hidden; }}
+    .pbar-up {{ background: #dc3545; }}
+    .pbar-mid {{ background: #9ca3af; }}
+    .pbar-dn {{ background: #198754; }}
+    .pbar-legend {{ display: flex; justify-content: space-between; font-size: .75rem; color: var(--muted); margin-bottom: 8px; }}
+    .lg-up {{ color: #dc3545; }}
+    .lg-dn {{ color: #198754; }}
     .footer {{ color: var(--muted); text-align: center; padding: 16px 0 28px; }}
 
     .news-list {{ display: grid; gap: 14px; margin-top: 10px; }}
@@ -1093,6 +1179,8 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
     {warnings_html}
 
     {fund_risk_html}
+
+    {dispatch_html}
 
     <section class="top-grid">
       <div class="top-card">
@@ -1232,7 +1320,13 @@ def main():
             warnings.append(f"ไม่พบข้อมูลล่าสุดของ {config['label_th']} ใน EPPO/MOPS")
         results.append(result)
 
-    html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund)
+    disp_cfg = (params or {}).get("dispatch") or {}
+    by_lead = {}
+    for lead in disp_cfg.get("leads", []):
+        by_lead[lead] = {fk: engine.decide_dispatch(fk, asof, tables, params, summary, lead) for fk in FUEL_CONFIG}
+    dispatch_html = build_dispatch_section(by_lead, disp_cfg.get("default_lead_hours", 10), asof)
+
+    html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund, dispatch_html)
     write_text("index.html", html)
     write_decision_snapshot(results)
     print("Dashboard created successfully")
