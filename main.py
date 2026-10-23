@@ -832,15 +832,15 @@ def _outlook_card(label_th, d):
 def build_outlook_live(log: pd.DataFrame) -> str:
     rows = []
     for fk, cfg in FUEL_CONFIG.items():
-        for hz in (24, 48):
-            st = engine.outlook_live_stats(log, engine.FUEL_KEY[fk], hz)
+        for hz, rh in [(h_, r_) for r_ in ("20:30", "15:30") for h_ in (24, 48)]:
+            st = engine.outlook_live_stats(log, engine.FUEL_KEY[fk], hz, rh)
             if not st:
                 continue
             parts = []
             for tier, x in st["tiers"].items():
                 lab = M.OUTLOOK_TIERS[tier]
                 parts.append(f"{lab} {x['n']} ครั้ง" + (f" (ถูกทิศ {x['right10']:.0%} ผิดทิศ {x['wrong10']:.0%})" if "right10" in x else ""))
-            rows.append(f"<tr><td>{html_escape(cfg['label_th'])}</td><td>{hz} ชม.</td><td>{st['n_days']}</td><td>{html_escape(' / '.join(parts))}</td></tr>")
+            rows.append(f"<tr><td>{html_escape(cfg['label_th'])}</td><td>จากข้อมูล {rh} · {hz} ชม.</td><td>{st['n_days']}</td><td>{html_escape(' / '.join(parts))}</td></tr>")
     if not rows:
         return ("<div class='dispatch-live'><h3>ผลทดสอบจริง</h3><div class='muted'>เริ่มบันทึกแนวโน้มรอบ 20:30 แล้ว "
                 "ผลแรกออกหลังครบ 24 ชม. ของรอบแรก — ยังไม่ส่งข้อความใด ๆ เข้ากลุ่ม</div></div>")
@@ -855,7 +855,7 @@ def build_outlook_section(outlook: dict, asof, live_html: str = "") -> str:
     cards = "".join(_outlook_card(FUEL_CONFIG[fk]["label_th"], d) for fk, d in outlook.items())
     return f"""<section class="dispatch">
       <h2>แนวโน้มราคาตลาด 1–2 วันข้างหน้า</h2>
-      <p class="muted">ข้อความกลางสำหรับทุกสาขา ไม่ระบุเวลาออกรถ — แต่ละสาขาจัดสรรเองตามระยะทาง &nbsp;|&nbsp; ประเมินจากข้อมูล 20:30 น. (หลังประกาศกองทุนและ MOPS ปิด)
+      <p class="muted">ข้อความกลางสำหรับทุกสาขา ไม่ระบุเวลาออกรถ — แต่ละสาขาจัดสรรเองตามระยะทาง &nbsp;|&nbsp; ใช้รอบที่แม่นกว่าตามเวลา: หลัง 20:30 ใช้ข้อมูล 20:30 (หลังประกาศกองทุนและ MOPS ปิด) · 15:30–20:30 ใช้ข้อมูลบ่ายวันนี้ · ก่อนบ่ายใช้ของเมื่อคืน
       &nbsp;|&nbsp; ดู ณ {asof.strftime('%d/%m %H:%M')}</p>
       <div class="dispatch-grid">{cards}</div>
       {live_html}
@@ -879,7 +879,8 @@ def build_outlook_mini(outlook: dict) -> str:
     if not rows:
         return ""
     ref = next(d["ref"] for d in outlook.values() if d.get("horizons"))
-    return (f"<div class='om'><div class='om-title'>แนวโน้มราคาตลาด (ประเมินจากข้อมูล {ref.strftime('%d/%m %H:%M')})</div>{''.join(rows)}"
+    stale = " · ข้อมูลเมื่อคืน" if next(d for d in outlook.values() if d.get("horizons")).get("stale") else ""
+    return (f"<div class='om'><div class='om-title'>แนวโน้มราคาตลาด (ประเมินจากข้อมูล {ref.strftime('%d/%m %H:%M')}{stale})</div>{''.join(rows)}"
             "<div class='om-note'>🟢 สูง 🟡 กลาง 🔴 ต่ำ = ความเชื่อมั่น · ยังอยู่ระหว่างทดสอบความแม่นจริง · รายละเอียดด้านล่าง</div></div>")
 
 

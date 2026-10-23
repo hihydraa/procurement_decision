@@ -381,10 +381,20 @@ OUTLOOK_SIZE = {"UP_STRONG": "มักขยับตั้งแต่ 40 ส�
                 "DOWN": "มักขยับราว 10–40 สต./ลิตร", "DOWN_STRONG": "มักขยับตั้งแต่ 40 สต./ลิตรขึ้นไป"}
 
 
+def outlook_source(asof: pd.Timestamp):
+    """เลือกรอบที่แม่นกว่าสำหรับเวลานี้ : (เวลาอ้างอิง, รหัสรอบ "E"=20:30 / "P"=15:30)
+    หลัง 20:30 → 20:30 วันนี้ ; 15:30–20:30 → 15:30 วันนี้ (ข้อมูลวันนี้แม่นกว่าข้อมูลเมื่อคืนบนเป้าหมายเดียวกัน) ; ก่อน 15:30 → 20:30 เมื่อคืน"""
+    day = asof.normalize()
+    e_ref, p_ref = day + pd.Timedelta(hours=M.OUTLOOK_REF_HOUR), day + pd.Timedelta(hours=M.OUTLOOK_REF_PM)
+    if asof >= e_ref:
+        return e_ref, "E"
+    if asof >= p_ref:
+        return p_ref, "P"
+    return e_ref - pd.Timedelta(days=1), "E"
+
+
 def outlook_ref(asof: pd.Timestamp) -> pd.Timestamp:
-    """รอบประเมิน = 20:30 ล่าสุดที่ผ่านมาแล้ว (ก่อน 20:30 ใช้ของเมื่อคืน ซึ่งยังครอบคลุมช่วงเวลาที่เหลือของ 24 ชม.)"""
-    ref = asof.normalize() + pd.Timedelta(hours=M.OUTLOOK_REF_HOUR)
-    return ref if asof >= ref else ref - pd.Timedelta(days=1)
+    return outlook_source(asof)[0]
 
 
 def _outlook_evidence(summary, key, tier):
@@ -400,8 +410,9 @@ def _outlook_evidence(summary, key, tier):
 def decide_outlook(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params, summary=None) -> dict:
     """แนวโน้มราคาตลาดข้างหน้า 24/48 ชม. จากรอบ 20:30 — ไม่ระบุเวลาออกรถ ให้แต่ละสาขาจัดสรรเอง"""
     fuel = FUEL_KEY[fuel_key]
-    ref = outlook_ref(asof)
-    out = {"fuel": fuel, "asof": asof, "ref": ref, "horizons": [], "note": None}
+    ref, code = outlook_source(asof)
+    tag = "P_" if code == "P" else ""
+    out = {"fuel": fuel, "asof": asof, "ref": ref, "source": code, "stale": (asof - ref) > pd.Timedelta(hours=12), "horizons": [], "note": None}
     cfg = (params or {}).get("outlook")
     if not cfg:
         out["note"] = "ยังไม่มีโมเดลแนวโน้ม (ต้องฝึกด้วย fit_model.py --outlook-only)"
@@ -415,7 +426,7 @@ def decide_outlook(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params, 
     x = M.vectorize(f)
     out["features"] = f
     for hz in cfg["horizons"]:
-        key = f"{fuel}_H{hz}"
+        key = f"{fuel}_{tag}H{hz}"
         mm = cfg["models"].get(key)
         if not mm:
             continue
@@ -451,7 +462,8 @@ def outlook_text(per_fuel: dict, now: pd.Timestamp = None) -> str:
     if not items:
         return ""
     ref = items[0]["ref"]
-    lines = ["พยากรณ์แนวโน้มราคาน้ำมัน", f"ประเมินจากข้อมูล {ref.strftime('%H:%M')} น. วันที่ {ref.strftime('%d/%m')}"]
+    stale = " (ข้อมูลเมื่อคืน)" if items[0].get("stale") else ""
+    lines = ["พยากรณ์แนวโน้มราคาน้ำมัน", f"ประเมินจากข้อมูล {ref.strftime('%H:%M')} น. วันที่ {ref.strftime('%d/%m')}{stale}"]
     for d in items:
         lines += ["", f"{d['fuel']}"]
         for h in d["horizons"]:
@@ -467,11 +479,13 @@ def outlook_text(per_fuel: dict, now: pd.Timestamp = None) -> str:
     return "\n".join(lines)
 
 
-def outlook_live_stats(log: pd.DataFrame, fuel: str, hours: int):
+def outlook_live_stats(log: pd.DataFrame, fuel: str, hours: int, ref_hhmm: str = "20:30"):
     """ผลทดสอบเดินหน้าของแนวโน้มจาก OutlookLog : {tier: {n, right10, wrong10, avg_move}} เฉพาะวันที่มีผลแล้ว ; None ถ้ายังไม่มี"""
     if log is None or log.empty or "outcome_delta" not in log.columns:
         return None
     d = log[(log["fuel"].astype(str) == fuel) & (pd.to_numeric(log["hours"], errors="coerce") == hours)].copy()
+    if "ref" in d.columns:                                           # แยกรอบ 20:30 กับ 15:30 (คนละโมเดล ห้ามปนกัน)
+        d = d[pd.to_datetime(d["ref"], errors="coerce").dt.strftime("%H:%M").fillna(ref_hhmm) == ref_hhmm]
     if "asof" in d.columns and "ref" in d.columns:                    # นับเฉพาะแนวโน้มที่ออกภายใน 3 ชม. หลังรอบ 20:30 (แถวที่ออกช้ากว่านั้นไม่ใช่การทดสอบเดินหน้า)
         lag = pd.to_datetime(d["asof"], errors="coerce") - pd.to_datetime(d["ref"], errors="coerce")
         d = d[lag.isna() | (lag <= pd.Timedelta(hours=3))]

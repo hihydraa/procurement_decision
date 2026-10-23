@@ -239,14 +239,14 @@ def outlook_tier_stats(y, tiers):
 
 
 def fit_outlook_into(book, tables, params, summary):
-    """โมเดลแนวโน้ม 24/48 ชม. ณ 20:30 : ชนิด x ขอบฟ้า x {ขึ้น,ลง} x {>=10 สต., >=40 สต.}"""
-    params["outlook"] = {"ref_hour": M.OUTLOOK_REF_HOUR, "horizons": list(M.OUTLOOK_HORIZONS), "small": M.OUTLOOK_SMALL,
-                         "big": M.OUTLOOK_BIG, "trained_at": datetime.now().strftime("%Y-%m-%d"), "models": {}}
+    """โมเดลแนวโน้ม 24/48 ชม. ณ 20:30 (key {ชนิด}_H{ชม.}) และ ณ 15:30 (key {ชนิด}_P_H{ชม.}) : x {ขึ้น,ลง} x {>=10 สต., >=40 สต.}"""
+    params["outlook"] = {"ref_hour": M.OUTLOOK_REF_HOUR, "ref_hour_pm": M.OUTLOOK_REF_PM, "horizons": list(M.OUTLOOK_HORIZONS),
+                         "small": M.OUTLOOK_SMALL, "big": M.OUTLOOK_BIG, "trained_at": datetime.now().strftime("%Y-%m-%d"), "models": {}}
     summary["outlook_results"] = {}
-    for fuel in S.FUELS:
-        for hz in M.OUTLOOK_HORIZONS:
-            key = f"{fuel}_H{hz}"
-            df = build_outlook_dataset(book, tables, fuel, hz)
+    for fuel, hz, tag, ref_hour in [(f_, h_, t_, r_) for f_ in S.FUELS for t_, r_ in (("", M.OUTLOOK_REF_HOUR), ("P_", M.OUTLOOK_REF_PM)) for h_ in M.OUTLOOK_HORIZONS]:
+        if True:
+            key = f"{fuel}_{tag}H{hz}"
+            df = build_outlook_dataset(book, tables, fuel, hz, ref_hour)
             X = np.vstack([M.vectorize(r) for r in df.to_dict("records")])
             y = df.y.to_numpy()
             tg = {"r10": (y >= M.OUTLOOK_SMALL), "f10": (y <= -M.OUTLOOK_SMALL), "r40": (y >= M.OUTLOOK_BIG), "f40": (y <= -M.OUTLOOK_BIG)}
