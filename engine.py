@@ -469,6 +469,9 @@ def outlook_live_stats(log: pd.DataFrame, fuel: str, hours: int):
     if log is None or log.empty or "outcome_delta" not in log.columns:
         return None
     d = log[(log["fuel"].astype(str) == fuel) & (pd.to_numeric(log["hours"], errors="coerce") == hours)].copy()
+    if "asof" in d.columns and "ref" in d.columns:                    # นับเฉพาะแนวโน้มที่ออกภายใน 3 ชม. หลังรอบ 20:30 (แถวที่ออกช้ากว่านั้นไม่ใช่การทดสอบเดินหน้า)
+        lag = pd.to_datetime(d["asof"], errors="coerce") - pd.to_datetime(d["ref"], errors="coerce")
+        d = d[lag.isna() | (lag <= pd.Timedelta(hours=3))]
     d["outcome_delta"] = pd.to_numeric(d["outcome_delta"], errors="coerce")
     d = d.dropna(subset=["outcome_delta"]).drop_duplicates(subset=["date"], keep="first")
     if d.empty:
