@@ -219,6 +219,46 @@ def classify_market_tone(change_1d, change_3d):
     return {"tone": "warning", "label": "แกว่งตัว"}
 
 
+TREND_KIND_TH = {"TREND": "Trend", "HALF": "ครึ่งวัน", "HALF_IMG": "ครึ่งวัน (จากรูป)"}
+
+
+def trend_snapshot(tables, fuel: str, asof):
+    """Trend Mops ล่าสุดของชนิดน้ำมัน (ดีเซล B7 = คอลัมน์ d, เบนซิน G95 = คอลัมน์ b) ที่โพสต์ก่อน asof ; None ถ้าไม่เคยมี"""
+    df = tables.intraday
+    col = S.TREND_COL[fuel]
+    if df.empty or col not in df.columns:
+        return None
+    w = df[df.ts <= asof]
+    w = w[w[col].map(S._num).notna()]
+    if w.empty:
+        return None
+    last = w.iloc[-1]
+    return {"value": S._num(last[col]), "ts": last.ts, "kind": str(last.get("kind", "")),
+            "today": last.ts.normalize() == asof.normalize(), "n_today": int((w.ts >= asof.normalize()).sum())}
+
+
+def classify_trend_tone(snap):
+    if not snap:
+        return {"tone": "neutral", "label": "ยังไม่มีข้อมูล"}
+    if not snap["today"]:
+        return {"tone": "neutral", "label": "ยังไม่มีของวันนี้"}
+    if snap["value"] >= 1:
+        return {"tone": "danger", "label": "ดันราคาขึ้น"}
+    if snap["value"] <= -1:
+        return {"tone": "success", "label": "กดราคาลง"}
+    return {"tone": "warning", "label": "ใกล้ศูนย์"}
+
+
+def trend_card_html(title, snap):
+    tone = classify_trend_tone(snap)
+    if not snap:
+        return snapshot_card(title, "-", "ยังไม่เคยมี Trend Mops ในระบบ", tone["tone"], tone["label"])
+    kind = TREND_KIND_TH.get(snap["kind"], snap["kind"] or "Trend")
+    when = snap["ts"].strftime("%d/%m %H:%M")
+    sub = f"USD/BBL | {kind} โพสต์ {when}" + (f" | วันนี้ {snap['n_today']} ครั้ง" if snap["today"] else " | ของวันก่อน")
+    return snapshot_card(title, fmt_change(snap["value"], 2), sub, tone["tone"], tone["label"])
+
+
 def classify_balance_tone(balance):
     if balance is None or pd.isna(balance):
         return {"tone": "neutral", "label": "ข้อมูลไม่พอ"}
@@ -1007,7 +1047,7 @@ def build_news_section(news_df: pd.DataFrame, max_items: int = 1) -> str:
 
 
 
-def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str], accuracy_html: str = "", fund_feed: pd.DataFrame = None, dispatch_html: str = "") -> str:
+def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str], accuracy_html: str = "", fund_feed: pd.DataFrame = None, dispatch_html: str = "", trend_snaps: dict = None) -> str:
     updated_at = datetime.now(TZ).strftime("%d/%m/%Y %H:%M")
     sections = "\n".join(build_fuel_section(r) for r in results)
     news_html = build_news_section(news_df)
@@ -1027,6 +1067,7 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
     balance_tone = classify_balance_tone(fund_snap.get("balance"))
     runway_tone = classify_runway_tone(fund_snap.get("runway"))
 
+    trend_snaps = trend_snaps or {}
     snapshot_html = f"""
     <div class="snapshot-grid">
       {snapshot_card(
@@ -1050,6 +1091,8 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
           ds_mops_tone["tone"],
           ds_mops_tone["label"]
       )}
+      {trend_card_html("Trend Mops ดีเซล", trend_snaps.get("B7"))}
+      {trend_card_html("Trend Mops เบนซิน (G95)", trend_snaps.get("G95"))}
       {snapshot_card(
           "ฐานะกองทุนน้ำมันสุทธิ",
           fmt_num(fund_snap.get('balance'), 0),
@@ -1469,7 +1512,8 @@ def main():
     write_outlook_files(outlook, M.model_version(params))
     dispatch_html = build_outlook_section(outlook, asof, build_outlook_live(outlook_log)) + dispatch_html
 
-    html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund, dispatch_html)
+    trend_snaps = {fuel: trend_snapshot(tables, fuel, asof) for fuel in S.FUELS}
+    html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund, dispatch_html, trend_snaps)
     write_text("index.html", html)
     write_decision_snapshot(results)
     print("Dashboard created successfully")
