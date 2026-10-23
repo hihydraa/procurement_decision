@@ -19,22 +19,27 @@
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: var(--bg); color: var(--text); }
     .container { max-width: 1260px; margin: 0 auto; padding: 24px; }
-    .hero { background: linear-gradient(135deg, #0f172a, #1d4ed8); color: #fff; border-radius: 24px; padding: 28px; margin-bottom: 24px; }
-    .hero-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; }
-    .hero h1 { margin: 0 0 8px; font-size: 2rem; }
-    .hero p { margin: 0; opacity: 0.92; line-height: 1.6; }
+    .hero { background: linear-gradient(135deg, #0f172a, #1d4ed8); color: #fff; border-radius: 20px; padding: 18px 20px; margin-bottom: 16px; }
+    .hero-grid { display: grid; grid-template-columns: minmax(300px, .95fr) 1.7fr; gap: 16px; align-items: start; }
+    .hero h1 { margin: 0 0 6px; font-size: 1.5rem; }
+    .hero p { margin: 0; opacity: 0.92; line-height: 1.5; font-size: .9rem; }
+    .om { margin-top: 12px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18); border-radius: 14px; padding: 10px 12px; }
+    .om-title { font-weight: 700; font-size: .85rem; margin-bottom: 6px; }
+    .om-row { display: grid; grid-template-columns: 88px 1fr 1fr; gap: 8px; font-size: .88rem; padding: 4px 0; border-top: 1px solid rgba(255,255,255,.14); }
+    .om-fuel { font-weight: 700; }
+    .om-note { opacity: .8; font-size: .75rem; margin-top: 6px; }
 
     .snapshot-grid {
       display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 12px;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
       align-content: start;
     }
 
 
     .snapshot-card {
-      border-radius: 18px;
-      padding: 16px;
+      border-radius: 14px;
+      padding: 11px 12px;
       border: 1px solid rgba(255,255,255,0.18);
       position: relative;
       overflow: hidden;
@@ -65,25 +70,25 @@
     }
 
     .snapshot-card .v {
-      font-size: 1.7rem;
+      font-size: 1.35rem;
       font-weight: 800;
-      margin-top: 10px;
+      margin-top: 6px;
       line-height: 1.1;
     }
 
     .snapshot-card .sub {
-      margin-top: 8px;
-      line-height: 1.5;
-      font-size: .95rem;
+      margin-top: 4px;
+      line-height: 1.4;
+      font-size: .8rem;
       opacity: .96;
       white-space: pre-line;
     }
 
     .tone-badge {
       display: inline-block;
-      padding: 4px 10px;
+      padding: 3px 8px;
       border-radius: 999px;
-      font-size: .72rem;
+      font-size: .68rem;
       font-weight: 700;
       white-space: nowrap;
     }
@@ -190,13 +195,17 @@
       .metric-grid { grid-template-columns: repeat(2, 1fr); }
       .top-grid { grid-template-columns: repeat(2, 1fr); }
       .hero-grid { grid-template-columns: 1fr; }
-      .snapshot-grid { grid-template-columns: repeat(2, 1fr); }
+      .snapshot-grid { grid-template-columns: repeat(4, 1fr); }
+    }
+    @media (max-width: 860px) {
+      .snapshot-grid { grid-template-columns: repeat(3, 1fr); }
     }
 
     @media (max-width: 680px) {
       .metric-grid { grid-template-columns: 1fr; }
       .top-grid { grid-template-columns: 1fr; }
-      .snapshot-grid { grid-template-columns: 1fr; }
+      .snapshot-grid { grid-template-columns: repeat(2, 1fr); }
+      .om-row { grid-template-columns: 1fr; gap: 2px; }
       .container { padding: 16px; }
       .hero { padding: 20px; border-radius: 20px; }
       .hero h1 { font-size: 1.5rem; }
@@ -216,8 +225,9 @@
       <div class="hero-grid">
         <div>
           <h1>Fuel Procurement Decision Dashboard</h1>
-          <p>ระบบช่วยตัดสินใจจัดซื้อน้ำมัน โดยผสานสัญญาณจากกลุ่ม Jobber (Trend Mops, ประกาศ "มีปรับขึ้น/ลง", ประกาศกองทุน), MOPS ปิด และข้อมูลตลาด เพื่อประเมินโอกาสที่ราคาจะขึ้น/ลงข้ามคืน แล้วสรุปเป็น Action สำหรับทีมจัดซื้อ</p>
-          <p style="margin-top:10px;">อัปเดตล่าสุด: 23/10/2026 15:54</p>
+          <p>ผสานสัญญาณจากกลุ่ม Jobber (Trend Mops, ประกาศปรับราคา, ประกาศกองทุน), MOPS ปิด และข้อมูลตลาด เพื่อพยากรณ์แนวโน้มราคาและสรุปให้ทีมจัดซื้อ</p>
+          <p style="margin-top:4px;">อัปเดตล่าสุด: 23/10/2026 15:59</p>
+          <div class='om'><div class='om-title'>แนวโน้มราคาตลาด (ประเมินจากข้อมูล 22/10 20:30)</div><div class='om-row'><span class='om-fuel'>แก๊สโซฮอล์ 95</span><span>24 ชม. ❓ ยังไม่ชัดเจน</span><span>48 ชม. ❓ ยังไม่ชัดเจน</span></div><div class='om-row'><span class='om-fuel'>ดีเซล</span><span>24 ชม. 📉 ลงแรง 🟡</span><span>48 ชม. 📉 ลงแรง 🔴</span></div><div class='om-note'>🟢 สูง 🟡 กลาง 🔴 ต่ำ = ความเชื่อมั่น · ยังอยู่ระหว่างทดสอบความแม่นจริง · รายละเอียดด้านล่าง</div></div>
         </div>
         
     <div class="snapshot-grid">
@@ -258,7 +268,7 @@
         <div class="tone-badge badge-danger">ดันราคาขึ้น</div>
       </div>
       <div class="v">+3.92</div>
-      <div class="sub">USD/BBL | ครึ่งวัน (จากรูป) โพสต์ 23/10 13:20 | วันนี้ 1 ครั้ง</div>
+      <div class="sub">ครึ่งวัน (จากรูป) 23/10 13:20 · วันนี้ 1 ครั้ง</div>
     </div>
     
       
@@ -268,7 +278,7 @@
         <div class="tone-badge badge-success">กดราคาลง</div>
       </div>
       <div class="v">-2.09</div>
-      <div class="sub">USD/BBL | ครึ่งวัน (จากรูป) โพสต์ 23/10 13:20 | วันนี้ 1 ครั้ง</div>
+      <div class="sub">ครึ่งวัน (จากรูป) 23/10 13:20 · วันนี้ 1 ครั้ง</div>
     </div>
     
       
@@ -303,7 +313,7 @@
     <section class="dispatch">
       <h2>แนวโน้มราคาตลาด 1–2 วันข้างหน้า</h2>
       <p class="muted">ข้อความกลางสำหรับทุกสาขา ไม่ระบุเวลาออกรถ — แต่ละสาขาจัดสรรเองตามระยะทาง &nbsp;|&nbsp; ประเมินจากข้อมูล 20:30 น. (หลังประกาศกองทุนและ MOPS ปิด)
-      &nbsp;|&nbsp; ดู ณ 23/10 15:54</p>
+      &nbsp;|&nbsp; ดู ณ 23/10 15:59</p>
       <div class="dispatch-grid"><div class='dispatch-card'><div class='dispatch-head'><span class='dispatch-fuel'>แก๊สโซฮอล์ 95</span></div><div class='outlook-main'><div class='dispatch-head'><span class='badge text-bg-secondary'>ยังไม่ชัดเจน</span></div><div class='dispatch-headline'>ยังไม่ชัดเจน — ระบบไม่ฟันธงทิศทาง ภายใน 24 ชม.</div><div class='muted'>ย้อนหลังพบสถานการณ์แบบนี้ 65% ของวัน (ไม่ทายทิศทาง)</div><div class='muted'>ครอบคลุมถึง 23/10 20:30</div></div><div class='outlook-sub'><div class='dispatch-head'><span class='badge text-bg-secondary'>ยังไม่ชัดเจน</span></div><div class='dispatch-headline'>ยังไม่ชัดเจน — ระบบไม่ฟันธงทิศทาง ภายใน 48 ชม.</div><div class='muted'>ย้อนหลังพบสถานการณ์แบบนี้ 62% ของวัน (ไม่ทายทิศทาง)</div><div class='muted'>ครอบคลุมถึง 24/10 20:30</div></div></div><div class='dispatch-card'><div class='dispatch-head'><span class='dispatch-fuel'>ดีเซล</span></div><div class='outlook-main'><div class='dispatch-head'><span class='badge text-bg-success'>ลงแรง</span><span class='qtag qtag-ok'>ความเชื่อมั่น: กลาง</span></div><div class='dispatch-headline'>ราคามีแนวโน้มลงแรง ภายใน 24 ชม.</div><div class='muted'>มักขยับตั้งแต่ 40 สต./ลิตรขึ้นไป</div><div class='muted'>ย้อนหลัง 66 ครั้งที่ระบบบอกแบบนี้: ถูกทิศ 68% ผิดทิศ 8% ขยับเฉลี่ย 0.41 บาท/ลิตร</div><div class='muted'>ครอบคลุมถึง 23/10 20:30</div></div><div class='outlook-sub'><div class='dispatch-head'><span class='badge text-bg-success'>ลงแรง</span><span class='qtag qtag-weak'>ความเชื่อมั่น: ต่ำ</span></div><div class='dispatch-headline'>ราคามีแนวโน้มลงแรง ภายใน 48 ชม.</div><div class='muted'>มักขยับตั้งแต่ 40 สต./ลิตรขึ้นไป</div><div class='muted'>ย้อนหลัง 98 ครั้งที่ระบบบอกแบบนี้: ถูกทิศ 63% ผิดทิศ 17% ขยับเฉลี่ย 0.42 บาท/ลิตร</div><div class='muted'>ครอบคลุมถึง 24/10 20:30</div></div></div></div>
       <div class='dispatch-live'><h3>ผลทดสอบจริง</h3><div class='muted'>เริ่มบันทึกแนวโน้มรอบ 20:30 แล้ว ผลแรกออกหลังครบ 24 ชม. ของรอบแรก — ยังไม่ส่งข้อความใด ๆ เข้ากลุ่ม</div></div>
       <p class="muted">อ่านอย่างไร: "ขึ้น/ลง" = ราคาต่ำสุดของตลาดขยับตั้งแต่ 10 สต./ลิตร ; "แรง" = มีโอกาสขยับตั้งแต่ 40 สต./ลิตร ;
@@ -312,48 +322,48 @@
     </section><details class='dispatch-old'><summary>แผนส่งรถตามระยะเดินทางของแต่ละสาขา (แบบเดิม — ยังบันทึกผลทดสอบอยู่)</summary><section class="dispatch">
       <h2>สรุปสำหรับทีมจัดซื้อ: ส่งรถตอนนี้ดีไหม?</h2>
       <p class="muted">ราคาที่ซื้อได้จริงคือราคา ณ เวลารถถึงคลัง (เวลาออก + ระยะเดินทาง) ไม่ใช่ราคาตอนนี้ — ระบบจึงประเมินราคาที่เวลาถึง
-      เทียบกับถ้าออกรถช้าไปอีก 1 วัน &nbsp;|&nbsp; ประเมิน ณ 23/10 15:54</p>
+      เทียบกับถ้าออกรถช้าไปอีก 1 วัน &nbsp;|&nbsp; ประเมิน ณ 23/10 15:59</p>
       <div class="lead-pick">ระยะเดินทางสาขา → คลัง: <label class='lead-opt'><input type='radio' name='lead' value='8' onchange="document.querySelectorAll('.lead-panel').forEach(p=>p.hidden=p.dataset.lead!==this.value)"> 8 ชม.</label><label class='lead-opt'><input type='radio' name='lead' value='10' checked onchange="document.querySelectorAll('.lead-panel').forEach(p=>p.hidden=p.dataset.lead!==this.value)"> 10 ชม.</label><label class='lead-opt'><input type='radio' name='lead' value='12' onchange="document.querySelectorAll('.lead-panel').forEach(p=>p.hidden=p.dataset.lead!==this.value)"> 12 ชม.</label></div>
       <div class='lead-panel' data-lead='8' hidden><div class='dispatch-grid'><div class="dispatch-card">
       <div class="dispatch-head"><span class="dispatch-fuel">แก๊สโซฮอล์ 95</span><span class="badge text-bg-danger">ชะลอการซื้อ</span><span class='qtag qtag-ok'>ความเชื่อมั่น: พอใช้</span></div>
-      <div class="dispatch-headline">ชะลอการส่งรถได้ → ถ้าออกตอนนี้จะถึงคลังประมาณ 23:54</div>
+      <div class="dispatch-headline">ชะลอการส่งรถได้ → ถ้าออกตอนนี้จะถึงคลังประมาณ 23:59</div>
       <ul><li>โอกาส 23% ที่ราคา ณ เวลาถึงคลังจะถูกลงเกิน 0.20 บาท/ลิตร ถ้ารอไปอีก 1 วัน และโอกาสแพงขึ้นต่ำ (2%)</li></ul><div class='muted' style='margin-top:10px'>ถ้ารอไปอีก 1 วัน ราคา ณ เวลาที่รถถึงคลังจะ…</div><div class='pbar'><span class='pbar-up' style='width:2%'>2%</span><span class='pbar-mid' style='width:74%'>74%</span><span class='pbar-dn' style='width:23%'>23%</span></div><div class='pbar-legend'><span class='lg-up'>แพงขึ้น</span><span>ใกล้เดิม</span><span class='lg-dn'>ถูกลง</span></div>
       <details><summary>เหตุผลจากสัญญาณ</summary><ul><li>Trend Mops แก๊สโซฮอล์ 95 ระหว่างวัน -2.09 USD/bbl → โน้มราคาลง</li><li>2 ราย ประกาศ 'มีปรับขึ้น' วันนี้ → เสี่ยงราคาขึ้น</li></ul></details>
       <div class='muted'>ย้อนหลัง 324 วัน (ช่วงที่ไม่เคยใช้ปรับเกณฑ์): เมื่อระบบแนะนำแบบนี้ ราคาแพงขึ้นจริง 27% ถูกลงจริง 27% เฉลี่ย -0.05 บาท/ลิตร</div><div class='muted'>ประเมินรอบถัดไปหลัง 20:30</div>
     </div><div class="dispatch-card">
       <div class="dispatch-head"><span class="dispatch-fuel">ดีเซล</span><span class="badge text-bg-success">เร่งซื้อ</span><span class='qtag qtag-good'>ความเชื่อมั่น: ดี</span></div>
-      <div class="dispatch-headline">ส่งรถออกเลยตอนนี้ → ถึงคลังประมาณ 23:54</div>
+      <div class="dispatch-headline">ส่งรถออกเลยตอนนี้ → ถึงคลังประมาณ 23:59</div>
       <ul><li>ถ้ารอไปอีก 1 วัน มีโอกาส 86% (ปกติ 24%) ที่ราคา ณ เวลาถึงคลังจะแพงขึ้นเกิน 0.20 บาท/ลิตร</li></ul><div class='muted' style='margin-top:10px'>ถ้ารอไปอีก 1 วัน ราคา ณ เวลาที่รถถึงคลังจะ…</div><div class='pbar'><span class='pbar-up' style='width:86%'>86%</span><span class='pbar-mid' style='width:14%'>14%</span><span class='pbar-dn' style='width:1%'>1%</span></div><div class='pbar-legend'><span class='lg-up'>แพงขึ้น</span><span>ใกล้เดิม</span><span class='lg-dn'>ถูกลง</span></div>
       <details><summary>เหตุผลจากสัญญาณ</summary><ul><li>Trend Mops ดีเซล ระหว่างวัน +3.92 USD/bbl → เสี่ยงราคาขึ้น</li><li>2 ราย ประกาศ 'มีปรับขึ้น' วันนี้ → เสี่ยงราคาขึ้น</li></ul></details>
       <div class='muted'>ย้อนหลัง 324 วัน (ช่วงที่ไม่เคยใช้ปรับเกณฑ์): เมื่อระบบแนะนำแบบนี้ ราคาแพงขึ้นจริง 49% ถูกลงจริง 13% เฉลี่ย +0.21 บาท/ลิตร</div><div class='muted'>ถึงคลังช่วง 23:00 ราคาตลาดเฉลี่ยย้อนหลังต่ำกว่าช่วง 15:30 ประมาณ 0.04 บาท/ลิตร</div><div class='muted'>ประเมินรอบถัดไปหลัง 20:30</div>
     </div></div></div><div class='lead-panel' data-lead='10'><div class='dispatch-grid'><div class="dispatch-card">
       <div class="dispatch-head"><span class="dispatch-fuel">แก๊สโซฮอล์ 95</span><span class="badge text-bg-primary">ซื้อปกติ</span><span class='qtag qtag-weak'>ความเชื่อมั่น: อ่อน</span></div>
-      <div class="dispatch-headline">ส่งรถตามแผนปกติ → ถึงคลังประมาณ 01:54 (วันถัดไป)</div>
+      <div class="dispatch-headline">ส่งรถตามแผนปกติ → ถึงคลังประมาณ 01:59 (วันถัดไป)</div>
       <ul><li>ช่วงเวลานี้โมเดลยังไม่แม่นพอที่จะแนะนำให้เร่งหรือชะลอ (ตัวเลขดิบ: แพงขึ้น 6% / ถูกลง 24%)</li></ul><div class='muted' style='margin-top:10px'>ถ้ารอไปอีก 1 วัน ราคา ณ เวลาที่รถถึงคลังจะ…</div><div class='pbar'><span class='pbar-up' style='width:6%'>6%</span><span class='pbar-mid' style='width:70%'>70%</span><span class='pbar-dn' style='width:24%'>24%</span></div><div class='pbar-legend'><span class='lg-up'>แพงขึ้น</span><span>ใกล้เดิม</span><span class='lg-dn'>ถูกลง</span></div>
       <details><summary>เหตุผลจากสัญญาณ</summary><ul><li>Trend Mops แก๊สโซฮอล์ 95 ระหว่างวัน -2.09 USD/bbl → โน้มราคาลง</li><li>2 ราย ประกาศ 'มีปรับขึ้น' วันนี้ → เสี่ยงราคาขึ้น</li></ul></details>
       <div class='muted'>ย้อนหลัง 324 วัน (ช่วงที่ไม่เคยใช้ปรับเกณฑ์): เมื่อระบบแนะนำแบบนี้ ราคาแพงขึ้นจริง 22% ถูกลงจริง 22% เฉลี่ย -0.05 บาท/ลิตร</div><div class='muted'>ประเมินรอบถัดไปหลัง 20:30</div>
     </div><div class="dispatch-card">
       <div class="dispatch-head"><span class="dispatch-fuel">ดีเซล</span><span class="badge text-bg-success">เร่งซื้อ</span><span class='qtag qtag-ok'>ความเชื่อมั่น: พอใช้</span></div>
-      <div class="dispatch-headline">ส่งรถออกเลยตอนนี้ → ถึงคลังประมาณ 01:54 (วันถัดไป)</div>
+      <div class="dispatch-headline">ส่งรถออกเลยตอนนี้ → ถึงคลังประมาณ 01:59 (วันถัดไป)</div>
       <ul><li>ถ้ารอไปอีก 1 วัน มีโอกาส 64% (ปกติ 23%) ที่ราคา ณ เวลาถึงคลังจะแพงขึ้นเกิน 0.20 บาท/ลิตร</li></ul><div class='muted' style='margin-top:10px'>ถ้ารอไปอีก 1 วัน ราคา ณ เวลาที่รถถึงคลังจะ…</div><div class='pbar'><span class='pbar-up' style='width:64%'>64%</span><span class='pbar-mid' style='width:34%'>34%</span><span class='pbar-dn' style='width:2%'>2%</span></div><div class='pbar-legend'><span class='lg-up'>แพงขึ้น</span><span>ใกล้เดิม</span><span class='lg-dn'>ถูกลง</span></div>
       <details><summary>เหตุผลจากสัญญาณ</summary><ul><li>Trend Mops ดีเซล ระหว่างวัน +3.92 USD/bbl → เสี่ยงราคาขึ้น</li><li>2 ราย ประกาศ 'มีปรับขึ้น' วันนี้ → เสี่ยงราคาขึ้น</li><li>3 ราย ประกาศ 'มีปรับลง' วันนี้ → โน้มราคาลง</li></ul></details>
       <div class='muted'>ย้อนหลัง 324 วัน (ช่วงที่ไม่เคยใช้ปรับเกณฑ์): เมื่อระบบแนะนำแบบนี้ ราคาแพงขึ้นจริง 52% ถูกลงจริง 10% เฉลี่ย +0.19 บาท/ลิตร</div><div class='muted'>ประเมินรอบถัดไปหลัง 20:30</div>
     </div></div></div><div class='lead-panel' data-lead='12' hidden><div class='dispatch-grid'><div class="dispatch-card">
       <div class="dispatch-head"><span class="dispatch-fuel">แก๊สโซฮอล์ 95</span><span class="badge text-bg-primary">ซื้อปกติ</span><span class='qtag qtag-weak'>ความเชื่อมั่น: อ่อน</span></div>
-      <div class="dispatch-headline">ส่งรถตามแผนปกติ → ถึงคลังประมาณ 03:54 (วันถัดไป)</div>
+      <div class="dispatch-headline">ส่งรถตามแผนปกติ → ถึงคลังประมาณ 03:59 (วันถัดไป)</div>
       <ul><li>ช่วงเวลานี้โมเดลยังไม่แม่นพอที่จะแนะนำให้เร่งหรือชะลอ (ตัวเลขดิบ: แพงขึ้น 6% / ถูกลง 24%)</li></ul><div class='muted' style='margin-top:10px'>ถ้ารอไปอีก 1 วัน ราคา ณ เวลาที่รถถึงคลังจะ…</div><div class='pbar'><span class='pbar-up' style='width:6%'>6%</span><span class='pbar-mid' style='width:70%'>70%</span><span class='pbar-dn' style='width:24%'>24%</span></div><div class='pbar-legend'><span class='lg-up'>แพงขึ้น</span><span>ใกล้เดิม</span><span class='lg-dn'>ถูกลง</span></div>
       <details><summary>เหตุผลจากสัญญาณ</summary><ul><li>Trend Mops แก๊สโซฮอล์ 95 ระหว่างวัน -2.09 USD/bbl → โน้มราคาลง</li><li>2 ราย ประกาศ 'มีปรับขึ้น' วันนี้ → เสี่ยงราคาขึ้น</li></ul></details>
       <div class='muted'>ย้อนหลัง 324 วัน (ช่วงที่ไม่เคยใช้ปรับเกณฑ์): เมื่อระบบแนะนำแบบนี้ ราคาแพงขึ้นจริง 25% ถูกลงจริง 19% เฉลี่ย +0.02 บาท/ลิตร</div><div class='muted'>ประเมินรอบถัดไปหลัง 20:30</div>
     </div><div class="dispatch-card">
       <div class="dispatch-head"><span class="dispatch-fuel">ดีเซล</span><span class="badge text-bg-success">เร่งซื้อ</span><span class='qtag qtag-ok'>ความเชื่อมั่น: พอใช้</span></div>
-      <div class="dispatch-headline">ส่งรถออกเลยตอนนี้ → ถึงคลังประมาณ 03:54 (วันถัดไป)</div>
+      <div class="dispatch-headline">ส่งรถออกเลยตอนนี้ → ถึงคลังประมาณ 03:59 (วันถัดไป)</div>
       <ul><li>ถ้ารอไปอีก 1 วัน มีโอกาส 64% (ปกติ 23%) ที่ราคา ณ เวลาถึงคลังจะแพงขึ้นเกิน 0.20 บาท/ลิตร</li></ul><div class='muted' style='margin-top:10px'>ถ้ารอไปอีก 1 วัน ราคา ณ เวลาที่รถถึงคลังจะ…</div><div class='pbar'><span class='pbar-up' style='width:64%'>64%</span><span class='pbar-mid' style='width:34%'>34%</span><span class='pbar-dn' style='width:2%'>2%</span></div><div class='pbar-legend'><span class='lg-up'>แพงขึ้น</span><span>ใกล้เดิม</span><span class='lg-dn'>ถูกลง</span></div>
       <details><summary>เหตุผลจากสัญญาณ</summary><ul><li>Trend Mops ดีเซล ระหว่างวัน +3.92 USD/bbl → เสี่ยงราคาขึ้น</li><li>2 ราย ประกาศ 'มีปรับขึ้น' วันนี้ → เสี่ยงราคาขึ้น</li></ul></details>
       <div class='muted'>ย้อนหลัง 324 วัน (ช่วงที่ไม่เคยใช้ปรับเกณฑ์): เมื่อระบบแนะนำแบบนี้ ราคาแพงขึ้นจริง 50% ถูกลงจริง 10% เฉลี่ย +0.16 บาท/ลิตร</div><div class='muted'>ประเมินรอบถัดไปหลัง 20:30</div>
     </div></div></div>
       <div class='dispatch-live'><h3>ผลทดสอบจริง (เริ่มนับตั้งแต่เริ่มบันทึก, ระยะเดินทาง 10 ชม.)</h3>
       <div style='overflow-x:auto'><table class='acc-table'><thead><tr><th>ชนิด</th><th>จำนวนวันที่มีผล</th><th>คำแนะนำ → ผลจริง</th>
-      <th>กำไรเฉลี่ย บาท/ลิตร/วัน</th><th>กำไรรวม บาท/ลิตร</th></tr></thead><tbody><tr><td>แก๊สโซฮอล์ 95</td><td colspan='4'>กำลังสะสมผล: มีผลลัพธ์แล้ว 0 วัน (รอผลอีก 5) ต้องครบ 20 วันก่อนสรุป</td></tr><tr><td>ดีเซล</td><td colspan='4'>กำลังสะสมผล: มีผลลัพธ์แล้ว 0 วัน (รอผลอีก 5) ต้องครบ 20 วันก่อนสรุป</td></tr></tbody></table></div>
+      <th>กำไรเฉลี่ย บาท/ลิตร/วัน</th><th>กำไรรวม บาท/ลิตร</th></tr></thead><tbody><tr><td>แก๊สโซฮอล์ 95</td><td colspan='4'>กำลังสะสมผล: มีผลลัพธ์แล้ว 0 วัน (รอผลอีก 6) ต้องครบ 20 วันก่อนสรุป</td></tr><tr><td>ดีเซล</td><td colspan='4'>กำลังสะสมผล: มีผลลัพธ์แล้ว 0 วัน (รอผลอีก 6) ต้องครบ 20 วันก่อนสรุป</td></tr></tbody></table></div>
       <div class='muted'>กำไร = ถ้าเร่งส่งแล้วราคาที่เวลาถึงถูกกว่าถ้ารอ 1 วัน หรือชะลอแล้วราคาถูกลง ; ส่งปกติ = 0 (เทียบกับทำตามแผนเดิมทุกวัน)</div>
       <div class='muted' style='margin-top:8px'><strong>ความพร้อมแจ้งเตือน</strong> (ตอนนี้ยังไม่ส่งข้อความใด ๆ เข้ากลุ่ม ; ต้องมีผลจริง ≥ 40 วันและผ่านเกณฑ์ความแม่นยำก่อน)<ul><li>แก๊สโซฮอล์ 95 ช่วงบ่าย 15:30 — ยังไม่พร้อม: มีผลจริง 0/40 วัน</li><li>แก๊สโซฮอล์ 95 ช่วงค่ำ 20:30 — ยังไม่พร้อม: มีผลจริง 0/40 วัน</li><li>ดีเซล ช่วงบ่าย 15:30 — ยังไม่พร้อม: มีผลจริง 0/40 วัน</li><li>ดีเซล ช่วงค่ำ 20:30 — ยังไม่พร้อม: มีผลจริง 0/40 วัน</li></ul></div></div>
       <p class="muted">ข้อควรรู้: ความแม่นยำสูงสุดช่วงหลังประกาศกองทุนและ MOPS ปิดตลาด (~20:00) ; ช่วงเช้า–บ่ายสัญญาณน้อย ระบบจะบอกตรง ๆ ว่าไม่มีสัญญาณ
@@ -400,7 +410,7 @@
             <div class="summary-box">
             <div class="summary-title">บทสรุปเชิงวิเคราะห์</div>
             <div class="summary-text">โอกาสราคาลง 16% และโอกาสขึ้นต่ำ 2% — ชะลอการซื้อได้</div>
-            <div class="muted" style="margin-top:8px;">ช่วงตัดสินใจ: บ่าย (ก่อน MOPS ปิด) | โอกาสราคาขึ้นข้ามคืน 2% | โอกาสราคาลง 16% | ณ 23/10 15:54</div>
+            <div class="muted" style="margin-top:8px;">ช่วงตัดสินใจ: บ่าย (ก่อน MOPS ปิด) | โอกาสราคาขึ้นข้ามคืน 2% | โอกาสราคาลง 16% | ณ 23/10 15:59</div>
             <ul><li>Trend Mops แก๊สโซฮอล์ 95 ระหว่างวัน -2.09 USD/bbl → โน้มราคาลง</li><li>2 ราย ประกาศ 'มีปรับขึ้น' วันนี้ → เสี่ยงราคาขึ้น</li><li>3 ราย ประกาศ 'มีปรับลง' วันนี้ → โน้มราคาลง</li><li>MOPS ปิดล่าสุด +0.67 USD/bbl → เสี่ยงราคาขึ้น</li></ul>
             <div class="muted">หลักฐาน (backtest, 324 วัน): เมื่อระบบแนะนำแบบนี้ ราคาขึ้นจริง 18% ลงจริง 32% ขยับเฉลี่ย -0.10 บาท/ลิตร</div>
         </div>
@@ -474,7 +484,7 @@
             <div class="summary-box">
             <div class="summary-title">บทสรุปเชิงวิเคราะห์</div>
             <div class="summary-text">โอกาสราคาขึ้นภายในคืนนี้ 86% (ปกติ 25%) — ควรสั่งซื้อวันนี้</div>
-            <div class="muted" style="margin-top:8px;">ช่วงตัดสินใจ: บ่าย (ก่อน MOPS ปิด) | โอกาสราคาขึ้นข้ามคืน 86% | โอกาสราคาลง 1% | ณ 23/10 15:54</div>
+            <div class="muted" style="margin-top:8px;">ช่วงตัดสินใจ: บ่าย (ก่อน MOPS ปิด) | โอกาสราคาขึ้นข้ามคืน 86% | โอกาสราคาลง 1% | ณ 23/10 15:59</div>
             <ul><li>Trend Mops ดีเซล ระหว่างวัน +3.92 USD/bbl → เสี่ยงราคาขึ้น</li><li>3 ราย ประกาศ 'มีปรับลง' วันนี้ → โน้มราคาลง</li><li>2 ราย ประกาศ 'มีปรับขึ้น' วันนี้ → เสี่ยงราคาขึ้น</li><li>MOPS ปิดล่าสุด -3.04 USD/bbl → โน้มราคาลง</li></ul>
             <div class="muted">หลักฐาน (backtest, 324 วัน): เมื่อระบบแนะนำแบบนี้ ราคาขึ้นจริง 49% ลงจริง 16% ขยับเฉลี่ย +0.22 บาท/ลิตร</div>
         </div>
@@ -552,8 +562,8 @@
       <div class="news-list">
         
         <div class="news-item">
-          <div class="news-time">23/10/2026 15:54</div>
-          <div class="news-content">🛢️ Executive Summary (24 ชม. ล่าสุด)<br><br>- WTI Crude ปิดที่ 99.55 ปรับขึ้น +2.61 จากวันก่อนหน้า สะท้อนแรงหนุนฝั่งอุปทานตึงตัว (Bullish)<br>- NYMEX Singapore Gasoil อยู่ที่ 177.54 และ MOPS DS ที่ 176.75 ไม่เปลี่ยนแปลง สะท้อนตลาดดีเซลภูมิภาคนิ่ง รอทิศทางชัดเจน (Neutral)<br>- MOPS G95 ที่ 134.47 คงที่ ขณะที่ราคาขายปลีก GASOHOL95 E10 อยู่ที่ 42.04 บาท/ลิตร โดยมีค่าการตลาด 3.35 บาท/ลิตร (Neutral)<br>- ราคาขายปลีก H-DIESEL 43.54 บาท/ลิตร ค่าการตลาด 2.00 บาท/ลิตร ต่ำกว่าค่าการตลาดน้ำมันเบนซิน สะท้อนแรงกดดันต้นทุนดีเซล (Bearish)<br>- ฐานะกองทุนน้ำมันสุทธิ -103,932.34 ล้านบาท เงินสดคงเหลือ -995.81 ล้านบาท Runway -4.03 วัน สถานะ CRITICAL (Bearish)<br><br>สรุป:<br>👉 ภาพรวมราคาน้ำมันดิบมีแรงหนุนขึ้น แต่ตลาดภูมิภาคนิ่ง ขณะที่สถานะกองทุนน้ำมันวิกฤตระดับ CRITICAL ต้องเฝ้าระวังต้นทุนและการบริหารความเสี่ยงอย่างใกล้ชิด</div>
+          <div class="news-time">23/10/2026 15:59</div>
+          <div class="news-content">🛢️ Executive Summary (24 ชม. ล่าสุด)<br><br>- WTI Crude ปรับขึ้น +2.61 มาที่ 99.55 USD/BBL ส่งสัญญาณแรงกดดันขาขึ้นต่อต้นทุนน้ำมันดิบ (Bullish)<br>- NYMEX Singapore Gasoil ทรงตัวที่ 177.54 (+0.00) และ MOPS DS ทรงตัวที่ 176.75 USD/BBL (+0.00) สะท้อนตลาดดีเซลยังไม่ขยับ (Neutral)<br>- MOPS G95 ทรงตัวที่ 134.47 USD/BBL (+0.00) ขณะที่ราคาขายปลีก GASOHOL95 E10 อยู่ที่ 42.04 บาท/ลิตร ค่าการตลาด 3.35 บาท/ลิตร (Neutral)<br>- ราคาขายปลีก H-DIESEL 43.54 บาท/ลิตร ค่าการตลาด 2.00 บาท/ลิตร ยังอยู่ในระดับจำกัด (Neutral)<br>- ฐานะกองทุนน้ำมันสุทธิ -103,932.34 ล้านบาท เงินสดคงเหลือ -995.81 ล้านบาท Runway -4.03 วัน สถานะ CRITICAL เป็นความเสี่ยงเชิงลบต่อเสถียรภาพราคาในประเทศ (Bearish)<br><br>สรุป:<br>👉 ต้นทุนน้ำมันดิบมีแรงหนุนขาขึ้น แต่ราคาผลิตภัณฑ์ยังทรงตัว ขณะที่สถานะกองทุนน้ำมันวิกฤต (CRITICAL) เป็นความเสี่ยงหลักที่ต้องจับตา</div>
         </div>
         
       </div>
