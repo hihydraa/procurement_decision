@@ -441,26 +441,29 @@ def outlook_evidence_text(h: dict) -> str:
             f"ขยับเฉลี่ย {ev['avg_move']:.2f} บาท/ลิตร")
 
 
+TIER_EMOJI = {"UP_STRONG": "📈🔺", "UP": "📈", "UNCLEAR": "❓", "DOWN": "📉", "DOWN_STRONG": "📉🔻"}
+GRADE_EMOJI = {"สูง": "🟢", "กลาง": "🟡", "ต่ำ": "🔴"}
+
+
 def outlook_text(per_fuel: dict, now: pd.Timestamp = None) -> str:
-    """ข้อความสั้นสำหรับส่งเข้าไลน์/แสดงที่อื่น per_fuel = {fuel_key: decide_outlook(...)}"""
+    """ข้อความสั้นสำหรับส่งเข้าไลน์ (มี emoji สื่อทิศทาง/ความเชื่อมั่น) per_fuel = {fuel_key: decide_outlook(...)}"""
     items = [d for d in per_fuel.values() if d.get("horizons")]
     if not items:
         return ""
     ref = items[0]["ref"]
-    lines = [f"แนวโน้มราคาน้ำมัน (ประเมินจากข้อมูล {ref.strftime('%H:%M')} น. วันที่ {ref.strftime('%d/%m')})"]
+    lines = [f"📊 พยากรณ์แนวโน้มราคาน้ำมัน", f"🕗 ประเมินจากข้อมูล {ref.strftime('%H:%M')} น. วันที่ {ref.strftime('%d/%m')}"]
     for d in items:
-        lines.append("")
-        lines.append(f"{d['fuel']}")
+        lines += ["", f"⛽ {d['fuel']}"]
         for h in d["horizons"]:
             size = f" ({h['size']})" if h.get("size") else ""
-            conf = "" if h["tier"] == "UNCLEAR" else f" — ความเชื่อมั่น {h['grade']}"
-            lines.append(f"• {h['hours']} ชม.: {h['label']}{size}{conf}")
+            conf = "" if h["tier"] == "UNCLEAR" else f" {GRADE_EMOJI[h['grade']]} ความเชื่อมั่น: {h['grade']}"
+            lines.append(f"⏳ {h['hours']} ชม.: {TIER_EMOJI[h['tier']]} {h['label']}{size}{conf}")
             ev = outlook_evidence_text(h)
             if ev and h["hours"] == 24:
-                lines.append(f"   {ev}")
+                lines.append(f"   🔎 {ev}")
         if d.get("note"):
-            lines.append(f"   * {d['note']}")
-    lines += ["", "ใช้ประกอบการตัดสินใจ แต่ละสาขาจัดสรรเองตามระยะทาง — ยังอยู่ระหว่างทดสอบความแม่นจริง"]
+            lines.append(f"   ℹ️ {d['note']}")
+    lines += ["", "⚠️ ใช้ประกอบการตัดสินใจ แต่ละสาขาจัดสรรเองตามระยะทาง", "🧪 ยังอยู่ระหว่างทดสอบความแม่นจริง"]
     return "\n".join(lines)
 
 
