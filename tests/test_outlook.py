@@ -88,6 +88,17 @@ class LogRowsTest(unittest.TestCase):
         again = log_outlook.new_rows(add, [{**snap[0], "asof": "2026-10-22 22:40"}])          # รอบถัดไปของคืนเดียวกัน: ไม่บันทึกซ้ำ
         self.assertEqual(again, [])
 
+    def test_late_rows_not_logged(self):
+        late = [{"asof": "2026-10-23 13:07", "ref": "2026-10-22 20:30", "fuel": "B7", "hours": 24, "tier": "UP", "grade": "กลาง", "model_version": "v"}]
+        self.assertEqual(log_outlook.new_rows([], late), [])        # ออกบ่ายวันถัดไป = ไม่ใช่เดินหน้าจริง
+
+    def test_late_rows_excluded_from_stats(self):
+        log = pd.DataFrame([
+            {"asof": "2026-10-22 21:00", "ref": "2026-10-22 20:30", "date": "2026-10-22", "fuel": "B7", "hours": 24, "tier": "UP", "outcome_delta": "0.30"},
+            {"asof": "2026-10-24 13:00", "ref": "2026-10-23 20:30", "date": "2026-10-23", "fuel": "B7", "hours": 24, "tier": "UP", "outcome_delta": "0.50"},
+        ])
+        self.assertEqual(engine.outlook_live_stats(log, "B7", 24)["n_days"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

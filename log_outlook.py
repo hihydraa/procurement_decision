@@ -21,6 +21,7 @@ COLUMNS = ["asof", "date", "ref", "fuel", "hours", "tier", "p_rise10", "p_fall10
            "price_ref", "price_target", "outcome_delta", "outcome_filled_at", "model_version"]
 OUTCOME_FROM = COLUMNS.index("price_ref")
 OUTCOME_COLS = COLUMNS[OUTCOME_FROM:OUTCOME_FROM + 4]
+MAX_LAG_H = 3          # บันทึก/นับเฉพาะแนวโน้มที่ออกภายใน 3 ชม. หลังรอบ 20:30
 
 
 def new_rows(existing: list, snapshot: list) -> list:
@@ -31,6 +32,8 @@ def new_rows(existing: list, snapshot: list) -> list:
     seen = {(k(r.get("ref")), str(r.get("fuel")), str(r.get("hours"))) for r in existing}
     out = []
     for s in snapshot:
+        if pd.Timestamp(s["asof"]) - pd.Timestamp(s["ref"]) > pd.Timedelta(hours=MAX_LAG_H):
+            continue                                   # ออกหลังรอบ 20:30 นานเกินไป: ช่วงราคาบางส่วนรู้แล้ว ไม่นับเป็นการทดสอบเดินหน้า
         key = (k(s["ref"]), str(s["fuel"]), str(s["hours"]))
         if key in seen:
             continue
