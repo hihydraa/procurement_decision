@@ -367,3 +367,121 @@ def alert_status(log: pd.DataFrame, summary, fuel: str, window: str, lead: int) 
         else:
             out["reasons"].append(f"{label}: ถูกจริง {a[rate_key]:.0%} สูงกว่าปกติ {st[base_key]:.0%} แค่ {lift * 100:.0f} จุด (ต้อง ≥ {ALERT_MIN_LIFT * 100:.0f})")
     return out
+
+
+# ------------------------------------------------------------------ แนวโน้มราคา 24/48 ชม. (ข้อความกลางสำหรับทุกสาขา)
+OUTLOOK_HEADLINE = {
+    "UP_STRONG": "ราคามีแนวโน้มขึ้นแรง",
+    "UP": "ราคามีแนวโน้มขึ้น",
+    "DOWN": "ราคามีแนวโน้มลง",
+    "DOWN_STRONG": "ราคามีแนวโน้มลงแรง",
+    "UNCLEAR": "ยังไม่ชัดเจน — ระบบไม่ฟันธงทิศทาง",
+}
+OUTLOOK_SIZE = {"UP_STRONG": "มักขยับตั้งแต่ 40 สต./ลิตรขึ้นไป", "UP": "มักขยับราว 10–40 สต./ลิตร",
+                "DOWN": "มักขยับราว 10–40 สต./ลิตร", "DOWN_STRONG": "มักขยับตั้งแต่ 40 สต./ลิตรขึ้นไป"}
+
+
+def outlook_ref(asof: pd.Timestamp) -> pd.Timestamp:
+    """รอบประเมิน = 20:30 ล่าสุดที่ผ่านมาแล้ว (ก่อน 20:30 ใช้ของเมื่อคืน ซึ่งยังครอบคลุมช่วงเวลาที่เหลือของ 24 ชม.)"""
+    ref = asof.normalize() + pd.Timedelta(hours=M.OUTLOOK_REF_HOUR)
+    return ref if asof >= ref else ref - pd.Timedelta(days=1)
+
+
+def _outlook_evidence(summary, key, tier):
+    st = ((summary or {}).get("outlook_results", {}).get(key) or {}).get("tiers", {}).get(tier) or {}
+    if not st.get("n"):
+        return None
+    if tier == "UNCLEAR":
+        return {"n": st["n"], "share": st["share"], "grade": "ต่ำ"}
+    return {"n": st["n"], "share": st["share"], "right10": st["right10"], "right40": st["right40"], "wrong10": st["wrong10"],
+            "avg_move": st["avg_move"], "grade": st.get("grade", "ต่ำ")}
+
+
+def decide_outlook(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params, summary=None) -> dict:
+    """แนวโน้มราคาตลาดข้างหน้า 24/48 ชม. จากรอบ 20:30 — ไม่ระบุเวลาออกรถ ให้แต่ละสาขาจัดสรรเอง"""
+    fuel = FUEL_KEY[fuel_key]
+    ref = outlook_ref(asof)
+    out = {"fuel": fuel, "asof": asof, "ref": ref, "horizons": [], "note": None}
+    cfg = (params or {}).get("outlook")
+    if not cfg:
+        out["note"] = "ยังไม่มีโมเดลแนวโน้ม (ต้องฝึกด้วย fit_model.py --outlook-only)"
+        return out
+    st = feed_status(tables, asof)
+    if not st["alive"]:
+        newest = st["newest"].strftime("%d/%m %H:%M") if st["newest"] is not None else "ไม่เคยมีข้อมูล"
+        out["note"] = f"ฟีดสัญญาณจากไลน์ไม่อัปเดต (ล่าสุด {newest}) — ยังไม่ให้แนวโน้ม"
+        return out
+    f = S.build_features(ref, tables, fuel)
+    x = M.vectorize(f)
+    out["features"] = f
+    for hz in cfg["horizons"]:
+        key = f"{fuel}_H{hz}"
+        mm = cfg["models"].get(key)
+        if not mm:
+            continue
+        p = {k: float(M.predict_proba(mm[k], x)[0]) for k in ("r10", "f10", "r40", "f40")}
+        tier = M.classify_outlook(p["r10"], p["f10"], p["r40"], p["f40"])
+        ev = _outlook_evidence(summary, key, tier)
+        until = ref + pd.Timedelta(hours=hz)
+        out["horizons"].append({
+            "hours": hz, "tier": tier, "label": M.OUTLOOK_TIERS[tier], "headline": f"{OUTLOOK_HEADLINE[tier]} ภายใน {hz} ชม.",
+            "size": OUTLOOK_SIZE.get(tier), "until": until, "p": p, "grade": (ev or {}).get("grade", "ต่ำ"), "evidence": ev,
+            "base_up": ((summary or {}).get("outlook_results", {}).get(key) or {}).get("base_up10"),
+            "base_down": ((summary or {}).get("outlook_results", {}).get(key) or {}).get("base_down10")})
+    return out
+
+
+def outlook_evidence_text(h: dict) -> str:
+    ev = h.get("evidence")
+    if not ev:
+        return ""
+    if h["tier"] == "UNCLEAR":
+        return f"ย้อนหลังพบสถานการณ์แบบนี้ {ev['share']:.0%} ของวัน (ไม่ทายทิศทาง)"
+    return (f"ย้อนหลัง {ev['n']} ครั้งที่ระบบบอกแบบนี้: ถูกทิศ {ev['right10']:.0%} ผิดทิศ {ev['wrong10']:.0%} "
+            f"ขยับเฉลี่ย {ev['avg_move']:.2f} บาท/ลิตร")
+
+
+def outlook_text(per_fuel: dict, now: pd.Timestamp = None) -> str:
+    """ข้อความสั้นสำหรับส่งเข้าไลน์/แสดงที่อื่น per_fuel = {fuel_key: decide_outlook(...)}"""
+    items = [d for d in per_fuel.values() if d.get("horizons")]
+    if not items:
+        return ""
+    ref = items[0]["ref"]
+    lines = [f"แนวโน้มราคาน้ำมัน (ประเมินจากข้อมูล {ref.strftime('%H:%M')} น. วันที่ {ref.strftime('%d/%m')})"]
+    for d in items:
+        lines.append("")
+        lines.append(f"{d['fuel']}")
+        for h in d["horizons"]:
+            size = f" ({h['size']})" if h.get("size") else ""
+            conf = "" if h["tier"] == "UNCLEAR" else f" — ความเชื่อมั่น {h['grade']}"
+            lines.append(f"• {h['hours']} ชม.: {h['label']}{size}{conf}")
+            ev = outlook_evidence_text(h)
+            if ev and h["hours"] == 24:
+                lines.append(f"   {ev}")
+        if d.get("note"):
+            lines.append(f"   * {d['note']}")
+    lines += ["", "ใช้ประกอบการตัดสินใจ แต่ละสาขาจัดสรรเองตามระยะทาง — ยังอยู่ระหว่างทดสอบความแม่นจริง"]
+    return "\n".join(lines)
+
+
+def outlook_live_stats(log: pd.DataFrame, fuel: str, hours: int):
+    """ผลทดสอบเดินหน้าของแนวโน้มจาก OutlookLog : {tier: {n, right10, wrong10, avg_move}} เฉพาะวันที่มีผลแล้ว ; None ถ้ายังไม่มี"""
+    if log is None or log.empty or "outcome_delta" not in log.columns:
+        return None
+    d = log[(log["fuel"].astype(str) == fuel) & (pd.to_numeric(log["hours"], errors="coerce") == hours)].copy()
+    d["outcome_delta"] = pd.to_numeric(d["outcome_delta"], errors="coerce")
+    d = d.dropna(subset=["outcome_delta"]).drop_duplicates(subset=["date"], keep="first")
+    if d.empty:
+        return None
+    out = {}
+    for tier in M.OUTLOOK_TIERS:
+        t = d[d["tier"] == tier]
+        if t.empty:
+            continue
+        if tier == "UNCLEAR":
+            out[tier] = {"n": int(len(t))}
+            continue
+        mv = t["outcome_delta"] * (1.0 if tier.startswith("UP") else -1.0)
+        out[tier] = {"n": int(len(t)), "right10": float((mv >= M.OUTLOOK_SMALL).mean()), "wrong10": float((mv <= -M.OUTLOOK_SMALL).mean()),
+                     "avg_move": float(mv.mean())}
+    return {"n_days": int(len(d)), "tiers": out}

@@ -28,6 +28,7 @@ TABS = {
     "FEED_PRICES": "Entry_Prices",
     "DECISION_LOG": "DecisionLog",
     "DISPATCH_LOG": "DispatchLog",
+    "OUTLOOK_LOG": "OutlookLog",
 }
 
 TZ_NAME = "Asia/Bangkok"
