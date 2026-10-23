@@ -115,3 +115,42 @@ def tune_thresholds(p_rise, p_fall, gain_buy_now):
 
 def utility(action: str, gain_buy_now: float) -> float:
     return gain_buy_now if action == "URGENT" else 0.5 * gain_buy_now if action == "GRADUAL" else -gain_buy_now if action == "WAIT" else 0.0
+
+
+# ------------------------------------------------------------------ แนวโน้มราคา 24/48 ชม. (ข้อความกลาง ไม่ผูกกับเวลาออกรถของแต่ละสาขา)
+OUTLOOK_REF_HOUR = 20.5            # ประเมิน ณ 20:30 (หลังประกาศกองทุน + MOPS ปิด) — ช่วงที่ backtest แม่นที่สุด
+OUTLOOK_HORIZONS = (24, 48)
+OUTLOOK_SMALL, OUTLOOK_BIG = 0.10, 0.40   # บาท/ลิตร: ขยับ >= SMALL นับเป็นขึ้น/ลง ; >= BIG นับเป็น "แรง"
+OUTLOOK_MIN_P = 0.50               # โอกาสขั้นต่ำที่จะทายว่าขึ้น/ลง (ต่ำกว่านี้ = ยังไม่ชัดเจน ไม่ฝืนทาย)
+OUTLOOK_STRONG_P = 0.30            # โอกาสขยับ >= BIG ขั้นต่ำที่จะเรียก "แรง"
+OUTLOOK_TIERS = {"UP_STRONG": "ขึ้นแรง", "UP": "ขึ้น", "UNCLEAR": "ยังไม่ชัดเจน", "DOWN": "ลง", "DOWN_STRONG": "ลงแรง"}
+
+
+def classify_outlook(p10_rise: float, p10_fall: float, p40_rise: float, p40_fall: float) -> str:
+    if p10_rise >= OUTLOOK_MIN_P and p10_rise > p10_fall:
+        return "UP_STRONG" if p40_rise >= OUTLOOK_STRONG_P else "UP"
+    if p10_fall >= OUTLOOK_MIN_P and p10_fall > p10_rise:
+        return "DOWN_STRONG" if p40_fall >= OUTLOOK_STRONG_P else "DOWN"
+    return "UNCLEAR"
+
+
+def outlook_grade(st: dict) -> str:
+    """ความเชื่อมั่นจากผล walk-forward ของระดับคำแนะนำนั้น: สูง / กลาง / ต่ำ
+    สูง = ถูกทิศ >= 60% ผิดทิศ <= 13% และมี >= 40 ครั้ง ; กลาง = ถูกทิศ >= 50% ผิดทิศ <= 15% และมี >= 15 ครั้ง ; ที่เหลือ = ต่ำ
+    ความนิ่ง: ถ้าครึ่งแรก/ครึ่งหลังของช่วงทดสอบถูกทิศต่างกันเกิน 10 จุด ลดลงหนึ่งระดับ ; ถ้าครึ่งใดครึ่งหนึ่งมีคำแนะนำระดับนี้ < 8 ครั้ง
+    (พิสูจน์ความนิ่งไม่ได้) ไม่ให้เกินระดับกลาง"""
+    n, right, wrong = st.get("n", 0), st.get("right10"), st.get("wrong10")
+    if not n or right is None or wrong is None:
+        return "ต่ำ"
+    if right >= 0.60 and wrong <= 0.13 and n >= 40:
+        g = 2
+    elif right >= 0.50 and wrong <= 0.15 and n >= 15:
+        g = 1
+    else:
+        g = 0
+    h1, h2 = st.get("right_h1"), st.get("right_h2")
+    if g == 2 and (h1 is None or h2 is None):
+        g = 1
+    elif g and h1 is not None and h2 is not None and abs(h1 - h2) > 0.10:
+        g -= 1
+    return ["ต่ำ", "กลาง", "สูง"][g]

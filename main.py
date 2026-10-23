@@ -47,7 +47,7 @@ FUEL_CONFIG = {
 # ชื่อแท็บฟีดสัญญาณ (ตรงกับ common.TABS — ไม่ import common เพราะ common ต้องใช้ jwt/credential ซึ่ง main.py ไม่ต้องการ)
 TABS_FEED = {
     "intraday": "Entry_Intraday", "headsup": "Entry_HeadsUp", "fund": "Entry_FundNotice",
-    "mops_close": "Entry_MopsClose", "decision_log": "DecisionLog", "dispatch_log": "DispatchLog",
+    "mops_close": "Entry_MopsClose", "decision_log": "DecisionLog", "dispatch_log": "DispatchLog", "outlook_log": "OutlookLog",
 }
 
 DASHBOARD_TITLE = "Fuel Procurement Decision Dashboard"
@@ -767,6 +767,81 @@ def build_dispatch_section(by_lead: dict, default_lead: int, asof, live_html: st
     </section>"""
 
 
+def _outlook_horizon_html(h):
+    gmap = {"สูง": "good", "กลาง": "ok", "ต่ำ": "weak"}
+    color = {"UP_STRONG": "danger", "UP": "danger", "DOWN": "success", "DOWN_STRONG": "success", "UNCLEAR": "secondary"}[h["tier"]]
+    size = f"<div class='muted'>{html_escape(h['size'])}</div>" if h.get("size") else ""
+    ev = engine.outlook_evidence_text(h)
+    evidence = f"<div class='muted'>{html_escape(ev)}</div>" if ev else ""
+    cls = "outlook-main" if h["hours"] == 24 else "outlook-sub"
+    return (f"<div class='{cls}'><div class='dispatch-head'><span class='badge text-bg-{color}'>{html_escape(h['label'])}</span>"
+            + ("" if h["tier"] == "UNCLEAR" else f"<span class='qtag qtag-{gmap[h['grade']]}'>ความเชื่อมั่น: {h['grade']}</span>") + "</div>"
+            f"<div class='dispatch-headline'>{html_escape(h['headline'])}</div>{size}{evidence}"
+            f"<div class='muted'>ครอบคลุมถึง {h['until'].strftime('%d/%m %H:%M')}</div></div>")
+
+
+def _outlook_card(label_th, d):
+    if not d.get("horizons"):
+        return (f"<div class='dispatch-card'><div class='dispatch-head'><span class='dispatch-fuel'>{html_escape(label_th)}</span></div>"
+                f"<div class='dispatch-headline'>{html_escape(d.get('note') or 'ยังไม่มีข้อมูลพอ')}</div></div>")
+    note = f"<div class='muted'>* {html_escape(d['note'])}</div>" if d.get("note") else ""
+    return (f"<div class='dispatch-card'><div class='dispatch-head'><span class='dispatch-fuel'>{html_escape(label_th)}</span></div>"
+            + "".join(_outlook_horizon_html(h) for h in d["horizons"]) + note + "</div>")
+
+
+def build_outlook_live(log: pd.DataFrame) -> str:
+    rows = []
+    for fk, cfg in FUEL_CONFIG.items():
+        for hz in (24, 48):
+            st = engine.outlook_live_stats(log, engine.FUEL_KEY[fk], hz)
+            if not st:
+                continue
+            parts = []
+            for tier, x in st["tiers"].items():
+                lab = M.OUTLOOK_TIERS[tier]
+                parts.append(f"{lab} {x['n']} ครั้ง" + (f" (ถูกทิศ {x['right10']:.0%} ผิดทิศ {x['wrong10']:.0%})" if "right10" in x else ""))
+            rows.append(f"<tr><td>{html_escape(cfg['label_th'])}</td><td>{hz} ชม.</td><td>{st['n_days']}</td><td>{html_escape(' / '.join(parts))}</td></tr>")
+    if not rows:
+        return ("<div class='dispatch-live'><h3>ผลทดสอบจริง</h3><div class='muted'>เริ่มบันทึกแนวโน้มรอบ 20:30 แล้ว "
+                "ผลแรกออกหลังครบ 24 ชม. ของรอบแรก — ยังไม่ส่งข้อความใด ๆ เข้ากลุ่ม</div></div>")
+    return ("<div class='dispatch-live'><h3>ผลทดสอบจริง (นับจากแนวโน้มที่ออกจริง)</h3><div style='overflow-x:auto'><table class='acc-table'>"
+            "<thead><tr><th>ชนิด</th><th>ขอบฟ้า</th><th>วันที่มีผล</th><th>ระดับคำแนะนำ → ผลจริง</th></tr></thead><tbody>"
+            + "".join(rows) + "</tbody></table></div><div class='muted'>ยังไม่ส่งข้อความใด ๆ เข้ากลุ่ม ต้องผ่านเกณฑ์ที่ตกลงกันก่อน</div></div>")
+
+
+def build_outlook_section(outlook: dict, asof, live_html: str = "") -> str:
+    if not outlook:
+        return ""
+    cards = "".join(_outlook_card(FUEL_CONFIG[fk]["label_th"], d) for fk, d in outlook.items())
+    return f"""<section class="dispatch">
+      <h2>แนวโน้มราคาตลาด 1–2 วันข้างหน้า</h2>
+      <p class="muted">ข้อความกลางสำหรับทุกสาขา ไม่ระบุเวลาออกรถ — แต่ละสาขาจัดสรรเองตามระยะทาง &nbsp;|&nbsp; ประเมินจากข้อมูล 20:30 น. (หลังประกาศกองทุนและ MOPS ปิด)
+      &nbsp;|&nbsp; ดู ณ {asof.strftime('%d/%m %H:%M')}</p>
+      <div class="dispatch-grid">{cards}</div>
+      {live_html}
+      <p class="muted">อ่านอย่างไร: "ขึ้น/ลง" = ราคาต่ำสุดของตลาดขยับตั้งแต่ 10 สต./ลิตร ; "แรง" = มีโอกาสขยับตั้งแต่ 40 สต./ลิตร ;
+      "ยังไม่ชัดเจน" ไม่ได้แปลว่าทรงตัว แต่ระบบไม่ฟันธง (ย้อนหลังทายทรงตัวไม่แม่น) ; ความเชื่อมั่นมาจากผลทดสอบย้อนหลังที่ไม่เคยใช้จูน
+      และยังไม่ได้พิสูจน์กับข้อมูลจริงล่วงหน้า — ใช้ประกอบการตัดสินใจ ไม่ใช่คำสั่ง</p>
+    </section>"""
+
+
+def write_outlook_files(outlook: dict, version: str = "", snap_path: str = "outlook_snapshot.json", pub_path: str = "outlook.json") -> None:
+    """snapshot ให้ log_outlook.py บันทึกลง OutlookLog ; outlook.json = ข้อความ + ระดับ (ไม่มีข้อมูลดิบ) ให้ส่งต่อเข้าไลน์/หน้าอื่น"""
+    clean = lambda v: None if v is None or (isinstance(v, float) and np.isnan(v)) else round(float(v), 4)
+    snap, pub = [], {}
+    for fk, d in outlook.items():
+        for h in d.get("horizons", []):
+            snap.append({"asof": d["asof"].strftime("%Y-%m-%d %H:%M"), "ref": d["ref"].strftime("%Y-%m-%d %H:%M"), "fuel": d["fuel"],
+                         "hours": h["hours"], "tier": h["tier"], "p_rise10": clean(h["p"]["r10"]), "p_fall10": clean(h["p"]["f10"]),
+                         "p_rise40": clean(h["p"]["r40"]), "p_fall40": clean(h["p"]["f40"]), "grade": h["grade"], "model_version": version})
+        pub[d["fuel"]] = {"ref": d["ref"].strftime("%Y-%m-%d %H:%M"), "note": d.get("note"),
+                          "horizons": [{"hours": h["hours"], "tier": h["tier"], "label": h["label"], "grade": h["grade"],
+                                        "until": h["until"].strftime("%Y-%m-%d %H:%M")} for h in d.get("horizons", [])]}
+    write_text(snap_path, json.dumps(snap, ensure_ascii=False, indent=1))
+    write_text(pub_path, json.dumps({"generated": datetime.now().strftime("%Y-%m-%d %H:%M"), "text": engine.outlook_text(outlook), "fuels": pub},
+                                    ensure_ascii=False, indent=1))
+
+
 def build_accuracy_section(summary, decision_log) -> str:
     """ตารางความแม่นยำของคำแนะนำ: สถิติ backtest (ช่วงที่ไม่เคยใช้จูนเกณฑ์) และสถิติสดจาก DecisionLog เมื่อมีพอ"""
     if not summary:
@@ -1166,6 +1241,11 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
     .qtag-good {{ color: #15803d; border-color: #86efac; }}
     .qtag-ok {{ color: #a16207; border-color: #fcd34d; }}
     .qtag-weak {{ color: #b91c1c; border-color: #fca5a5; }}
+    .outlook-main {{ margin-top: 10px; }}
+    .outlook-sub {{ margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); opacity: .92; }}
+    .outlook-sub .dispatch-headline {{ font-size: 1rem; }}
+    .dispatch-old {{ margin-bottom: 20px; }}
+    .dispatch-old > summary {{ cursor: pointer; font-weight: 600; margin: 8px 0; }}
     .pbar {{ display: flex; height: 26px; border-radius: 8px; overflow: hidden; margin-top: 6px; font-size: .8rem; color: #fff; }}
     .pbar span {{ display: flex; align-items: center; justify-content: center; min-width: 0; overflow: hidden; }}
     .pbar-up {{ background: #dc3545; }}
@@ -1376,6 +1456,18 @@ def main():
     write_dispatch_snapshot(by_lead, version=M.model_version(params))
     default_lead = disp_cfg.get("default_lead_hours", 10)
     dispatch_html = build_dispatch_section(by_lead, default_lead, asof, build_dispatch_live(dispatch_log, default_lead, summary) if by_lead else "")
+    if dispatch_html:
+        dispatch_html = ("<details class='dispatch-old'><summary>แผนส่งรถตามระยะเดินทางของแต่ละสาขา (แบบเดิม — ยังบันทึกผลทดสอบอยู่)</summary>"
+                         + dispatch_html + "</details>")
+    outlook = {fk: engine.decide_outlook(fk, asof, tables, params, summary) for fk in FUEL_CONFIG}
+    try:
+        outlook_log = load_sheet_by_name(TABS_FEED["outlook_log"])
+        if "outcome_delta" not in outlook_log.columns:
+            outlook_log = pd.DataFrame()
+    except Exception:
+        outlook_log = pd.DataFrame()
+    write_outlook_files(outlook, M.model_version(params))
+    dispatch_html = build_outlook_section(outlook, asof, build_outlook_live(outlook_log)) + dispatch_html
 
     html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund, dispatch_html)
     write_text("index.html", html)
