@@ -54,7 +54,9 @@ class TextTest(unittest.TestCase):
         self.assertIn("ขึ้นแรง", t)
         self.assertIn("ความเชื่อมั่น: กลาง", t)
         self.assertIn("ถูกทิศ 82%", t)
-        self.assertIn("📈🔺", t)
+        self.assertIn("📈", t)
+        for noisy in ("📊", "🕗", "⛽", "⏳", "🔎", "🧪", "🔺", "🔻"):
+            self.assertNotIn(noisy, t)
         self.assertIn("🟡", t)
         self.assertLess(len(t), 1000)
 
