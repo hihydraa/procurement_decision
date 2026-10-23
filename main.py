@@ -255,7 +255,7 @@ def trend_card_html(title, snap):
         return snapshot_card(title, "-", "ยังไม่เคยมี Trend Mops ในระบบ", tone["tone"], tone["label"])
     kind = TREND_KIND_TH.get(snap["kind"], snap["kind"] or "Trend")
     when = snap["ts"].strftime("%d/%m %H:%M")
-    sub = f"USD/BBL | {kind} โพสต์ {when}" + (f" | วันนี้ {snap['n_today']} ครั้ง" if snap["today"] else " | ของวันก่อน")
+    sub = f"{kind} {when}" + (f" · วันนี้ {snap['n_today']} ครั้ง" if snap["today"] else " · ของวันก่อน")
     return snapshot_card(title, fmt_change(snap["value"], 2), sub, tone["tone"], tone["label"])
 
 
@@ -865,6 +865,24 @@ def build_outlook_section(outlook: dict, asof, live_html: str = "") -> str:
     </section>"""
 
 
+def build_outlook_mini(outlook: dict) -> str:
+    """แนวโน้ม 24/48 ชม. แบบย่อ สำหรับมุมซ้ายของส่วนหัว (รายละเอียดเต็มอยู่ในการ์ดแนวโน้มด้านล่าง)"""
+    rows = []
+    for fk, d in (outlook or {}).items():
+        if not d.get("horizons"):
+            continue
+        cells = []
+        for h in d["horizons"]:
+            conf = "" if h["tier"] == "UNCLEAR" else f" {engine.GRADE_EMOJI[h['grade']]}"
+            cells.append(f"<span>{h['hours']} ชม. {engine.TIER_EMOJI[h['tier']]} {html_escape(h['label'])}{conf}</span>")
+        rows.append(f"<div class='om-row'><span class='om-fuel'>{html_escape(FUEL_CONFIG[fk]['label_th'])}</span>{''.join(cells)}</div>")
+    if not rows:
+        return ""
+    ref = next(d["ref"] for d in outlook.values() if d.get("horizons"))
+    return (f"<div class='om'><div class='om-title'>แนวโน้มราคาตลาด (ประเมินจากข้อมูล {ref.strftime('%d/%m %H:%M')})</div>{''.join(rows)}"
+            "<div class='om-note'>🟢 สูง 🟡 กลาง 🔴 ต่ำ = ความเชื่อมั่น · ยังอยู่ระหว่างทดสอบความแม่นจริง · รายละเอียดด้านล่าง</div></div>")
+
+
 def write_outlook_files(outlook: dict, version: str = "", snap_path: str = "outlook_snapshot.json", pub_path: str = "outlook.json") -> None:
     """snapshot ให้ log_outlook.py บันทึกลง OutlookLog ; outlook.json = ข้อความ + ระดับ (ไม่มีข้อมูลดิบ) ให้ส่งต่อเข้าไลน์/หน้าอื่น"""
     clean = lambda v: None if v is None or (isinstance(v, float) and np.isnan(v)) else round(float(v), 4)
@@ -1047,7 +1065,7 @@ def build_news_section(news_df: pd.DataFrame, max_items: int = 1) -> str:
 
 
 
-def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str], accuracy_html: str = "", fund_feed: pd.DataFrame = None, dispatch_html: str = "", trend_snaps: dict = None) -> str:
+def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str], accuracy_html: str = "", fund_feed: pd.DataFrame = None, dispatch_html: str = "", trend_snaps: dict = None, outlook_mini_html: str = "") -> str:
     updated_at = datetime.now(TZ).strftime("%d/%m/%Y %H:%M")
     sections = "\n".join(build_fuel_section(r) for r in results)
     news_html = build_news_section(news_df)
@@ -1138,22 +1156,27 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
     * {{ box-sizing: border-box; }}
     body {{ margin: 0; font-family: Arial, Helvetica, sans-serif; background: var(--bg); color: var(--text); }}
     .container {{ max-width: 1260px; margin: 0 auto; padding: 24px; }}
-    .hero {{ background: linear-gradient(135deg, #0f172a, #1d4ed8); color: #fff; border-radius: 24px; padding: 28px; margin-bottom: 24px; }}
-    .hero-grid {{ display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; }}
-    .hero h1 {{ margin: 0 0 8px; font-size: 2rem; }}
-    .hero p {{ margin: 0; opacity: 0.92; line-height: 1.6; }}
+    .hero {{ background: linear-gradient(135deg, #0f172a, #1d4ed8); color: #fff; border-radius: 20px; padding: 18px 20px; margin-bottom: 16px; }}
+    .hero-grid {{ display: grid; grid-template-columns: minmax(300px, .95fr) 1.7fr; gap: 16px; align-items: start; }}
+    .hero h1 {{ margin: 0 0 6px; font-size: 1.5rem; }}
+    .hero p {{ margin: 0; opacity: 0.92; line-height: 1.5; font-size: .9rem; }}
+    .om {{ margin-top: 12px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18); border-radius: 14px; padding: 10px 12px; }}
+    .om-title {{ font-weight: 700; font-size: .85rem; margin-bottom: 6px; }}
+    .om-row {{ display: grid; grid-template-columns: 88px 1fr 1fr; gap: 8px; font-size: .88rem; padding: 4px 0; border-top: 1px solid rgba(255,255,255,.14); }}
+    .om-fuel {{ font-weight: 700; }}
+    .om-note {{ opacity: .8; font-size: .75rem; margin-top: 6px; }}
 
     .snapshot-grid {{
       display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 12px;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
       align-content: start;
     }}
 
 
     .snapshot-card {{
-      border-radius: 18px;
-      padding: 16px;
+      border-radius: 14px;
+      padding: 11px 12px;
       border: 1px solid rgba(255,255,255,0.18);
       position: relative;
       overflow: hidden;
@@ -1184,25 +1207,25 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
     }}
 
     .snapshot-card .v {{
-      font-size: 1.7rem;
+      font-size: 1.35rem;
       font-weight: 800;
-      margin-top: 10px;
+      margin-top: 6px;
       line-height: 1.1;
     }}
 
     .snapshot-card .sub {{
-      margin-top: 8px;
-      line-height: 1.5;
-      font-size: .95rem;
+      margin-top: 4px;
+      line-height: 1.4;
+      font-size: .8rem;
       opacity: .96;
       white-space: pre-line;
     }}
 
     .tone-badge {{
       display: inline-block;
-      padding: 4px 10px;
+      padding: 3px 8px;
       border-radius: 999px;
-      font-size: .72rem;
+      font-size: .68rem;
       font-weight: 700;
       white-space: nowrap;
     }}
@@ -1309,13 +1332,17 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
       .metric-grid {{ grid-template-columns: repeat(2, 1fr); }}
       .top-grid {{ grid-template-columns: repeat(2, 1fr); }}
       .hero-grid {{ grid-template-columns: 1fr; }}
-      .snapshot-grid {{ grid-template-columns: repeat(2, 1fr); }}
+      .snapshot-grid {{ grid-template-columns: repeat(4, 1fr); }}
+    }}
+    @media (max-width: 860px) {{
+      .snapshot-grid {{ grid-template-columns: repeat(3, 1fr); }}
     }}
 
     @media (max-width: 680px) {{
       .metric-grid {{ grid-template-columns: 1fr; }}
       .top-grid {{ grid-template-columns: 1fr; }}
-      .snapshot-grid {{ grid-template-columns: 1fr; }}
+      .snapshot-grid {{ grid-template-columns: repeat(2, 1fr); }}
+      .om-row {{ grid-template-columns: 1fr; gap: 2px; }}
       .container {{ padding: 16px; }}
       .hero {{ padding: 20px; border-radius: 20px; }}
       .hero h1 {{ font-size: 1.5rem; }}
@@ -1335,8 +1362,9 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
       <div class="hero-grid">
         <div>
           <h1>{DASHBOARD_TITLE}</h1>
-          <p>ระบบช่วยตัดสินใจจัดซื้อน้ำมัน โดยผสานสัญญาณจากกลุ่ม Jobber (Trend Mops, ประกาศ \"มีปรับขึ้น/ลง\", ประกาศกองทุน), MOPS ปิด และข้อมูลตลาด เพื่อประเมินโอกาสที่ราคาจะขึ้น/ลงข้ามคืน แล้วสรุปเป็น Action สำหรับทีมจัดซื้อ</p>
-          <p style="margin-top:10px;">อัปเดตล่าสุด: {updated_at}</p>
+          <p>ผสานสัญญาณจากกลุ่ม Jobber (Trend Mops, ประกาศปรับราคา, ประกาศกองทุน), MOPS ปิด และข้อมูลตลาด เพื่อพยากรณ์แนวโน้มราคาและสรุปให้ทีมจัดซื้อ</p>
+          <p style="margin-top:4px;">อัปเดตล่าสุด: {updated_at}</p>
+          {outlook_mini_html}
         </div>
         {snapshot_html}
       </div>
@@ -1513,7 +1541,7 @@ def main():
     dispatch_html = build_outlook_section(outlook, asof, build_outlook_live(outlook_log)) + dispatch_html
 
     trend_snaps = {fuel: trend_snapshot(tables, fuel, asof) for fuel in S.FUELS}
-    html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund, dispatch_html, trend_snaps)
+    html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund, dispatch_html, trend_snaps, build_outlook_mini(outlook))
     write_text("index.html", html)
     write_decision_snapshot(results)
     print("Dashboard created successfully")

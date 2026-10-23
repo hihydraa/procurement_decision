@@ -45,3 +45,18 @@ class TrendCardTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OutlookMiniTest(unittest.TestCase):
+    def test_mini_panel(self):
+        import engine
+        ref = pd.Timestamp("2026-10-22 20:30")
+        mk = lambda tier, grade, hz: {"hours": hz, "tier": tier, "label": __import__("model").OUTLOOK_TIERS[tier], "grade": grade}
+        outlook = {"DIESEL": {"fuel": "B7", "ref": ref, "horizons": [mk("DOWN_STRONG", "กลาง", 24), mk("DOWN_STRONG", "ต่ำ", 48)]},
+                   "GASOHOL95": {"fuel": "G95", "ref": ref, "horizons": [mk("UNCLEAR", "ต่ำ", 24), mk("UNCLEAR", "ต่ำ", 48)]}}
+        html = MAIN.build_outlook_mini(outlook)
+        self.assertIn("ลงแรง", html)
+        self.assertIn("🟡", html)
+        self.assertIn("ยังไม่ชัดเจน", html)
+        self.assertEqual(MAIN.build_outlook_mini({}), "")
+        self.assertEqual(MAIN.build_outlook_mini({"DIESEL": {"fuel": "B7", "ref": ref, "horizons": []}}), "")
