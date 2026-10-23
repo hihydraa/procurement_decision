@@ -30,9 +30,13 @@ class ClassifyTest(unittest.TestCase):
 
 class RefTest(unittest.TestCase):
     def test_ref(self):
+        self.assertEqual(engine.outlook_source(pd.Timestamp("2026-10-22 21:10")), (pd.Timestamp("2026-10-22 20:30"), "E"))
+        self.assertEqual(engine.outlook_source(pd.Timestamp("2026-10-22 20:30")), (pd.Timestamp("2026-10-22 20:30"), "E"))
+        self.assertEqual(engine.outlook_source(pd.Timestamp("2026-10-23 07:00")), (pd.Timestamp("2026-10-22 20:30"), "E"))   # เช้า: ของเมื่อคืน
+        self.assertEqual(engine.outlook_source(pd.Timestamp("2026-10-23 15:29")), (pd.Timestamp("2026-10-22 20:30"), "E"))
+        self.assertEqual(engine.outlook_source(pd.Timestamp("2026-10-23 15:59")), (pd.Timestamp("2026-10-23 15:30"), "P"))   # บ่าย: ใช้ข้อมูลวันนี้
+        self.assertEqual(engine.outlook_source(pd.Timestamp("2026-10-23 20:29")), (pd.Timestamp("2026-10-23 15:30"), "P"))
         self.assertEqual(engine.outlook_ref(pd.Timestamp("2026-10-22 21:10")), pd.Timestamp("2026-10-22 20:30"))
-        self.assertEqual(engine.outlook_ref(pd.Timestamp("2026-10-23 07:00")), pd.Timestamp("2026-10-22 20:30"))
-        self.assertEqual(engine.outlook_ref(pd.Timestamp("2026-10-22 20:30")), pd.Timestamp("2026-10-22 20:30"))
 
 
 class TextTest(unittest.TestCase):
@@ -66,6 +70,13 @@ class TextTest(unittest.TestCase):
             self.assertIn(engine.TIER_EMOJI[tier], engine.outlook_text({"DIESEL": self._d(tier)}))
         self.assertEqual(set(engine.GRADE_EMOJI), {"สูง", "กลาง", "ต่ำ"})
 
+    def test_stale_label_in_text(self):
+        d = self._d("UP")
+        d["stale"] = True
+        self.assertIn("ข้อมูลเมื่อคืน", engine.outlook_text({"DIESEL": d}))
+        d["stale"] = False
+        self.assertNotIn("ข้อมูลเมื่อคืน", engine.outlook_text({"DIESEL": d}))
+
     def test_empty(self):
         self.assertEqual(engine.outlook_text({"DIESEL": {"fuel": "B7", "horizons": []}}), "")
 
@@ -87,6 +98,14 @@ class LiveStatsTest(unittest.TestCase):
         self.assertAlmostEqual(st["tiers"]["UP"]["wrong10"], 0.5)
         self.assertAlmostEqual(st["tiers"]["DOWN"]["right10"], 1.0)
         self.assertIsNone(engine.outlook_live_stats(pd.DataFrame(), "B7", 24))
+
+    def test_live_stats_split_by_reference_time(self):
+        log = pd.DataFrame([
+            {"asof": "2026-10-22 21:00", "ref": "2026-10-22 20:30", "date": "2026-10-22", "fuel": "B7", "hours": 24, "tier": "UP", "outcome_delta": "0.30"},
+            {"asof": "2026-10-22 16:00", "ref": "2026-10-22 15:30", "date": "2026-10-22", "fuel": "B7", "hours": 24, "tier": "DOWN", "outcome_delta": "0.40"},
+        ])
+        self.assertEqual(list(engine.outlook_live_stats(log, "B7", 24, "20:30")["tiers"]), ["UP"])
+        self.assertEqual(list(engine.outlook_live_stats(log, "B7", 24, "15:30")["tiers"]), ["DOWN"])
 
 
 class LogRowsTest(unittest.TestCase):
