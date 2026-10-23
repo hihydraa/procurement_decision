@@ -47,13 +47,22 @@ class TextTest(unittest.TestCase):
         self.assertIn("ยังไม่ชัดเจน", t)
         self.assertNotIn("ความเชื่อมั่น", t)
         self.assertNotIn("ทรงตัว", t)
+        self.assertIn("❓", t)
 
     def test_text_up(self):
         t = engine.outlook_text({"DIESEL": self._d("UP_STRONG")})
         self.assertIn("ขึ้นแรง", t)
-        self.assertIn("ความเชื่อมั่น กลาง", t)
+        self.assertIn("ความเชื่อมั่น: กลาง", t)
         self.assertIn("ถูกทิศ 82%", t)
-        self.assertLess(len(t), 1000)                      # ข้อความไลน์ที่ worker รับได้ไม่เกิน 1000 ตัวอักษร
+        self.assertIn("📈🔺", t)
+        self.assertIn("🟡", t)
+        self.assertLess(len(t), 1000)
+
+    def test_each_tier_has_emoji(self):
+        for tier in M.OUTLOOK_TIERS:
+            self.assertIn(tier, engine.TIER_EMOJI)
+            self.assertIn(engine.TIER_EMOJI[tier], engine.outlook_text({"DIESEL": self._d(tier)}))
+        self.assertEqual(set(engine.GRADE_EMOJI), {"สูง", "กลาง", "ต่ำ"})
 
     def test_empty(self):
         self.assertEqual(engine.outlook_text({"DIESEL": {"fuel": "B7", "horizons": []}}), "")
