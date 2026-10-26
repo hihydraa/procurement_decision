@@ -829,7 +829,23 @@ def _outlook_card(label_th, d):
             + "".join(_outlook_horizon_html(h) for h in d["horizons"]) + note + "</div>")
 
 
-def build_outlook_live(log: pd.DataFrame) -> str:
+def build_outlook_readiness(log: pd.DataFrame, summary) -> str:
+    """ความพร้อมแจ้งเตือนของแนวโน้ม (24 ชม.) ตามเกณฑ์ที่ตกลงไว้ — แสดงสถานะเท่านั้น ไม่ส่งข้อความใด ๆ"""
+    items = []
+    for fk, cfg in FUEL_CONFIG.items():
+        for ref in ("20:30", "15:30"):
+            s = engine.outlook_alert_status(log, summary, engine.FUEL_KEY[fk], ref, 24)
+            if s["eligible"]["UP"] or s["eligible"]["DOWN"]:
+                ok = " และ ".join(x for x, c in (("ทิศขึ้น", s["eligible"]["UP"]), ("ทิศลง", s["eligible"]["DOWN"])) if c)
+                txt = f"ผ่านเกณฑ์: {ok}" + (f" (ที่เหลือ: {'; '.join(s['reasons'])})" if s["reasons"] else "")
+            else:
+                txt = "ยังไม่พร้อม: " + "; ".join(s["reasons"])
+            items.append(f"<li>{html_escape(cfg['label_th'])} จากข้อมูล {ref} — {html_escape(txt)}</li>")
+    return ("<div class='muted' style='margin-top:8px'><strong>ความพร้อมแจ้งเตือน</strong> (ตอนนี้ยังไม่ส่งข้อความใด ๆ เข้ากลุ่ม ; "
+            f"ต้องมีผลจริง ≥ {engine.ALERT_MIN_DAYS} วันและผ่านเกณฑ์ความแม่นยำก่อน)<ul>{''.join(items)}</ul></div>")
+
+
+def build_outlook_live(log: pd.DataFrame, summary=None) -> str:
     rows = []
     for fk, cfg in FUEL_CONFIG.items():
         for hz, rh in [(h_, r_) for r_ in ("20:30", "15:30") for h_ in (24, 48)]:
@@ -842,11 +858,11 @@ def build_outlook_live(log: pd.DataFrame) -> str:
                 parts.append(f"{lab} {x['n']} ครั้ง" + (f" (ถูกทิศ {x['right10']:.0%} ผิดทิศ {x['wrong10']:.0%})" if "right10" in x else ""))
             rows.append(f"<tr><td>{html_escape(cfg['label_th'])}</td><td>จากข้อมูล {rh} · {hz} ชม.</td><td>{st['n_days']}</td><td>{html_escape(' / '.join(parts))}</td></tr>")
     if not rows:
-        return ("<div class='dispatch-live'><h3>ผลทดสอบจริง</h3><div class='muted'>เริ่มบันทึกแนวโน้มรอบ 20:30 แล้ว "
-                "ผลแรกออกหลังครบ 24 ชม. ของรอบแรก — ยังไม่ส่งข้อความใด ๆ เข้ากลุ่ม</div></div>")
+        return ("<div class='dispatch-live'><h3>ผลทดสอบจริง</h3><div class='muted'>เริ่มบันทึกแนวโน้มแล้ว "
+                "ผลแรกออกหลังครบ 24 ชม. ของรอบแรก — ยังไม่ส่งข้อความใด ๆ เข้ากลุ่ม</div>" + build_outlook_readiness(log, summary) + "</div>")
     return ("<div class='dispatch-live'><h3>ผลทดสอบจริง (นับจากแนวโน้มที่ออกจริง)</h3><div style='overflow-x:auto'><table class='acc-table'>"
             "<thead><tr><th>ชนิด</th><th>ขอบฟ้า</th><th>วันที่มีผล</th><th>ระดับคำแนะนำ → ผลจริง</th></tr></thead><tbody>"
-            + "".join(rows) + "</tbody></table></div><div class='muted'>ยังไม่ส่งข้อความใด ๆ เข้ากลุ่ม ต้องผ่านเกณฑ์ที่ตกลงกันก่อน</div></div>")
+            + "".join(rows) + "</tbody></table></div>" + build_outlook_readiness(log, summary) + "</div>")
 
 
 def build_outlook_section(outlook: dict, asof, live_html: str = "") -> str:
@@ -1539,7 +1555,7 @@ def main():
     except Exception:
         outlook_log = pd.DataFrame()
     write_outlook_files(outlook, M.model_version(params))
-    dispatch_html = build_outlook_section(outlook, asof, build_outlook_live(outlook_log)) + dispatch_html
+    dispatch_html = build_outlook_section(outlook, asof, build_outlook_live(outlook_log, summary)) + dispatch_html
 
     trend_snaps = {fuel: trend_snapshot(tables, fuel, asof) for fuel in S.FUELS}
     html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund, dispatch_html, trend_snaps, build_outlook_mini(outlook))
