@@ -23,6 +23,9 @@ FEED_MAX_AGE_H = 72          # ฟีดสัญญาณทุกชนิด�
 MIN_LIVE_OUTCOMES = 20       # สถิติสดจาก DecisionLog ต้องมีผลลัพธ์อย่างน้อยเท่านี้ถึงจะนำมาแสดงแทนสถิติ backtest
 
 
+LEGACY_FIRST_HOUR = 6.0       # คำแนะนำเดิม (เร่ง/ทยอย/ซื้อปกติ/ชะลอ) ไม่ประเมินก่อนเวลานี้
+
+
 def phase_of(asof: pd.Timestamp) -> str:
     """หลัง ~19:00 ถือว่ารู้ MOPS ปิดและประกาศกองทุนแล้ว (EVE) ก่อนหน้านั้นใช้โมเดลช่วงบ่าย (PM)"""
     return "EVE" if asof.hour + asof.minute / 60 >= 19.0 else "PM"
@@ -137,6 +140,9 @@ def decide(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params, summary=
 
     if params is None or key not in params.get("models", {}):
         return no_data("ยังไม่มีพารามิเตอร์โมเดล (model_params.json) — ยังไม่ให้คำแนะนำ")
+    if asof.hour + asof.minute / 60 < LEGACY_FIRST_HOUR:
+        # ก่อน 06:00 ยังไม่มี Trend/ประกาศของวันใหม่ ถ้าประเมินจะได้ตัวเลขอ่อนที่ไม่มีความหมาย (ใช้กติกาเดียวกับแผนส่งรถ)
+        return no_data(f"ยังไม่ถึงเวลาประเมิน (เริ่มตั้งแต่ {int(LEGACY_FIRST_HOUR):02d}:00 เมื่อมีประกาศล่วงหน้าของวัน) — ดูแนวโน้มราคาด้านบนก่อน")
     if not st["alive"]:
         newest = st["newest"].strftime("%d/%m %H:%M") if st["newest"] is not None else "ไม่เคยมีข้อมูล"
         return no_data(f"ฟีดสัญญาณจากไลน์ไม่อัปเดต (ล่าสุด {newest}) — ตรวจ worker/แท็บ Entry_* ก่อนใช้คำแนะนำ")
