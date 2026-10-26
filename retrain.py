@@ -126,14 +126,48 @@ def sign_issues(models: dict, key: str) -> list:
     return issues
 
 
+TIER_N_MIN = 15          # ระดับแนวโน้มที่มีน้อยกว่านี้ (ทั้งเดิมและใหม่) ไม่นำมาเทียบ
+TIER_WRONG_TOL = 0.05    # ผิดทิศของระดับเดียวกันแย่ลงเกินนี้ → ไม่ผ่าน
+TIER_RIGHT_TOL = 0.07    # ถูกทิศของระดับเดียวกันลดลงเกินนี้ → ไม่ผ่าน
+
+
+def sign_issues_outlook(models: dict, key: str) -> list:
+    """ทิศทางสัมประสิทธิ์ของโมเดลแนวโน้ม (r10=โอกาสขึ้น ≥10 สต., f10=โอกาสลง) ใช้กติกาเดียวกับ sign_issues ; รอบ 20:30 (ไม่มี _P_) ตรวจสัญญาณช่วงค่ำเพิ่ม"""
+    evening = "_P_" not in key
+    return sign_issues({"rise": models["r10"], "fall": models["f10"]}, "B7_EVE" if evening else "B7_PM")
+
+
+def tier_regressions(old: dict, new: dict) -> list:
+    """เทียบความแม่นรายระดับ (ขึ้นแรง/ขึ้น/ลง/ลงแรง) เฉพาะระดับที่มีตัวอย่างพอทั้งสองชุด"""
+    issues = []
+    for code, o in (old.get("tiers") or {}).items():
+        n = (new.get("tiers") or {}).get(code)
+        if not n or code == "UNCLEAR" or o.get("n", 0) < TIER_N_MIN or n.get("n", 0) < TIER_N_MIN:
+            continue
+        if n["wrong10"] > o["wrong10"] + TIER_WRONG_TOL:
+            issues.append(f"{M.OUTLOOK_TIERS[code]}: ผิดทิศแย่ลง {o['wrong10']:.0%} → {n['wrong10']:.0%}")
+        if n["right10"] < o["right10"] - TIER_RIGHT_TOL:
+            issues.append(f"{M.OUTLOOK_TIERS[code]}: ถูกทิศลดลง {o['right10']:.0%} → {n['right10']:.0%}")
+    return issues
+
+
+def _metrics_outlook(res: dict) -> dict:
+    return {"auc_rise": res.get("auc_r10"), "auc_fall": res.get("auc_f10"), "gain_per_day": None}
+
+
 def gate(old_summary: dict, new_summary: dict, new_params: dict) -> dict:
     """คืน {'group:key': {ok, reasons, old, new}} — key ใหม่ที่ไม่เคยมีผ่านได้ถ้าทิศทางสัมประสิทธิ์ผ่าน"""
     out = {}
-    for group in ("results", "dispatch_results"):
+    for group in ("results", "dispatch_results", "outlook_results"):
         for key, new in new_summary.get(group, {}).items():
             old = (old_summary or {}).get(group, {}).get(key)
-            reasons = [f"สัมประสิทธิ์: {x}" for x in sign_issues(new_params["models"][key], key)]
-            mn, mo = _metrics(new), (_metrics(old) if old else None)
+            outlook = group == "outlook_results"
+            models = new_params["outlook"]["models"][key] if outlook else new_params["models"][key]
+            reasons = [f"สัมประสิทธิ์: {x}" for x in (sign_issues_outlook(models, key) if outlook else sign_issues(models, key))]
+            metrics = _metrics_outlook if outlook else _metrics
+            mn, mo = metrics(new), (metrics(old) if old else None)
+            if outlook and old:
+                reasons += [f"ระดับแนวโน้ม {x}" for x in tier_regressions(old, new)]
             if mo:
                 for k, tol, label in (("auc_rise", AUC_TOL, "AUC ขึ้น"), ("auc_fall", AUC_TOL, "AUC ลง"), ("gain_per_day", GAIN_TOL, "กำไรเฉลี่ยต่อวัน")):
                     a, b = mn[k], mo[k]
@@ -150,12 +184,21 @@ def merge_models(old_params: dict, old_summary: dict, new_params: dict, new_summ
     """เอาเฉพาะ key ที่ผ่านประตูจากชุดใหม่ ที่เหลือคงของเดิม"""
     params, summary = copy.deepcopy(old_params), copy.deepcopy(old_summary)
     dispatch_changed = False
+    outlook_changed = False
     for ident in accepted:
         group, key = ident.split(":", 1)
+        if group == "outlook_results":
+            params.setdefault("outlook", {**{k: v for k, v in new_params["outlook"].items() if k != "models"}, "models": {}})
+            params["outlook"]["models"][key] = new_params["outlook"]["models"][key]
+            summary.setdefault(group, {})[key] = new_summary[group][key]
+            outlook_changed = True
+            continue
         params["models"][key] = new_params["models"][key]
         params["thresholds"][key] = new_params["thresholds"][key]
         summary.setdefault(group, {})[key] = new_summary[group][key]
         dispatch_changed = dispatch_changed or group == "dispatch_results"
+    if outlook_changed:
+        params["outlook"]["trained_at"] = new_params["outlook"]["trained_at"]
     if accepted:
         params["trained_at"], params["data_through"] = new_params["trained_at"], new_params.get("data_through")
         summary["generated"] = new_summary["generated"]
@@ -185,6 +228,10 @@ def render_report(info: dict) -> str:
         L += ["", "## ความพร้อมแจ้งเตือน (ผลทดสอบเดินหน้า, ระยะเดินทาง 10 ชม.)", "", "| ชนิด | ช่วง | วันที่มีผล | เร่ง | ชะลอ | หมายเหตุ |", "|---|---|---|---|---|---|"]
         for a in info["alert"]:
             L.append(f"| {a['fuel']} | {a['window']} | {a['n']} | {'ผ่าน' if a['eligible']['URGENT'] else 'ยัง'} | {'ผ่าน' if a['eligible']['WAIT'] else 'ยัง'} | {'; '.join(a['reasons'])} |")
+    if info.get("outlook_alert"):
+        L += ["", "## ความพร้อมแจ้งเตือนของแนวโน้ม (ผลทดสอบเดินหน้า, 24 ชม.)", "", "| ชนิด | รอบข้อมูล | วันที่มีผล | ทิศขึ้น | ทิศลง | หมายเหตุ |", "|---|---|---|---|---|---|"]
+        for a in info["outlook_alert"]:
+            L.append(f"| {a['fuel']} | {a['ref']} | {a['n']} | {'ผ่าน' if a['eligible']['UP'] else 'ยัง'} | {'ผ่าน' if a['eligible']['DOWN'] else 'ยัง'} | {'; '.join(a['reasons'])} |")
     L += ["", "**ข้อสรุป:** " + info["verdict"]]
     return "\n".join(L) + "\n"
 
@@ -194,6 +241,13 @@ def alert_overview(summary) -> list:
     if log.empty or "outcome_delta" not in log.columns:
         return []
     return [engine.alert_status(log, summary, fuel, win, 10) for fuel in S.FUELS for win in FM.DISPATCH_WINDOWS]
+
+
+def outlook_overview(summary) -> list:
+    log = fetch_tab("OutlookLog")
+    if log.empty or "outcome_delta" not in log.columns:
+        return []
+    return [engine.outlook_alert_status(log, summary, fuel, ref, 24) for fuel in S.FUELS for ref in ("20:30", "15:30")]
 
 
 # ------------------------------------------------------------------ ตัวรัน
@@ -238,7 +292,8 @@ def run(data_dir: str, out_dir: str, use_sheet: bool = True, fetch=fetch_tab) ->
                f"เสนอโมเดลใหม่ {len(accepted)} จาก {len(g)} โมเดล (ที่เหลือคงเดิม) — ต้องให้คนอนุมัติ" if changed else "ไม่มีโมเดลใดผ่านประตู คงโมเดลเดิมทั้งหมด")
     info = {"when": datetime.now().strftime("%Y-%m-%d %H:%M"), "data_through": new_params["data_through"], "old_data_through": old_through, "added": added,
             "trend_scale": scale, "gate": g, "n_ok": n_ok, "n_bad": n_bad, "accepted": accepted, "changed": changed, "verdict": verdict,
-            "alert": alert_overview(old_summary) if use_sheet else []}
+            "alert": alert_overview(old_summary) if use_sheet else [],
+            "outlook_alert": outlook_overview(old_summary) if use_sheet else []}
     with open(os.path.join(out_dir, "report.md"), "w", encoding="utf-8") as fh:
         fh.write(render_report(info))
     with open(os.path.join(out_dir, "report.json"), "w", encoding="utf-8") as fh:

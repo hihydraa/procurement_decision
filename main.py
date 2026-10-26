@@ -829,7 +829,23 @@ def _outlook_card(label_th, d):
             + "".join(_outlook_horizon_html(h) for h in d["horizons"]) + note + "</div>")
 
 
-def build_outlook_live(log: pd.DataFrame) -> str:
+def build_outlook_readiness(log: pd.DataFrame, summary) -> str:
+    """ความพร้อมแจ้งเตือนของแนวโน้ม (24 ชม.) ตามเกณฑ์ที่ตกลงไว้ — แสดงสถานะเท่านั้น ไม่ส่งข้อความใด ๆ"""
+    items = []
+    for fk, cfg in FUEL_CONFIG.items():
+        for ref in ("20:30", "15:30"):
+            s = engine.outlook_alert_status(log, summary, engine.FUEL_KEY[fk], ref, 24)
+            if s["eligible"]["UP"] or s["eligible"]["DOWN"]:
+                ok = " และ ".join(x for x, c in (("ทิศขึ้น", s["eligible"]["UP"]), ("ทิศลง", s["eligible"]["DOWN"])) if c)
+                txt = f"ผ่านเกณฑ์: {ok}" + (f" (ที่เหลือ: {'; '.join(s['reasons'])})" if s["reasons"] else "")
+            else:
+                txt = "ยังไม่พร้อม: " + "; ".join(s["reasons"])
+            items.append(f"<li>{html_escape(cfg['label_th'])} จากข้อมูล {ref} — {html_escape(txt)}</li>")
+    return ("<div class='muted' style='margin-top:8px'><strong>ความพร้อมแจ้งเตือน</strong> (ตอนนี้ยังไม่ส่งข้อความใด ๆ เข้ากลุ่ม ; "
+            f"ต้องมีผลจริง ≥ {engine.ALERT_MIN_DAYS} วันและผ่านเกณฑ์ความแม่นยำก่อน)<ul>{''.join(items)}</ul></div>")
+
+
+def build_outlook_live(log: pd.DataFrame, summary=None) -> str:
     rows = []
     for fk, cfg in FUEL_CONFIG.items():
         for hz, rh in [(h_, r_) for r_ in ("20:30", "15:30") for h_ in (24, 48)]:
@@ -842,11 +858,11 @@ def build_outlook_live(log: pd.DataFrame) -> str:
                 parts.append(f"{lab} {x['n']} ครั้ง" + (f" (ถูกทิศ {x['right10']:.0%} ผิดทิศ {x['wrong10']:.0%})" if "right10" in x else ""))
             rows.append(f"<tr><td>{html_escape(cfg['label_th'])}</td><td>จากข้อมูล {rh} · {hz} ชม.</td><td>{st['n_days']}</td><td>{html_escape(' / '.join(parts))}</td></tr>")
     if not rows:
-        return ("<div class='dispatch-live'><h3>ผลทดสอบจริง</h3><div class='muted'>เริ่มบันทึกแนวโน้มรอบ 20:30 แล้ว "
-                "ผลแรกออกหลังครบ 24 ชม. ของรอบแรก — ยังไม่ส่งข้อความใด ๆ เข้ากลุ่ม</div></div>")
+        return ("<div class='dispatch-live'><h3>ผลทดสอบจริง</h3><div class='muted'>เริ่มบันทึกแนวโน้มแล้ว "
+                "ผลแรกออกหลังครบ 24 ชม. ของรอบแรก — ยังไม่ส่งข้อความใด ๆ เข้ากลุ่ม</div>" + build_outlook_readiness(log, summary) + "</div>")
     return ("<div class='dispatch-live'><h3>ผลทดสอบจริง (นับจากแนวโน้มที่ออกจริง)</h3><div style='overflow-x:auto'><table class='acc-table'>"
             "<thead><tr><th>ชนิด</th><th>ขอบฟ้า</th><th>วันที่มีผล</th><th>ระดับคำแนะนำ → ผลจริง</th></tr></thead><tbody>"
-            + "".join(rows) + "</tbody></table></div><div class='muted'>ยังไม่ส่งข้อความใด ๆ เข้ากลุ่ม ต้องผ่านเกณฑ์ที่ตกลงกันก่อน</div></div>")
+            + "".join(rows) + "</tbody></table></div>" + build_outlook_readiness(log, summary) + "</div>")
 
 
 def build_outlook_section(outlook: dict, asof, live_html: str = "") -> str:
@@ -962,7 +978,23 @@ def snapshot_card(title, value, subtext, tone="neutral", badge_text=""):
     """
 
 
-def build_fuel_section(result: dict) -> str:
+def legacy_alignment(code: str, outlook_d):
+    """เทียบคำแนะนำเดิม (เร่ง/ทยอย/ซื้อปกติ/ชะลอ) กับแนวโน้มหลัก 24 ชม. : คืน (ระดับ, ข้อความ) ; ระดับ = conflict / unconfirmed / ok / none"""
+    if code in (None, "NO_DATA", "NORMAL"):
+        return "none", ""
+    if not outlook_d or not outlook_d.get("horizons"):
+        return "none", ""
+    tier = outlook_d["horizons"][0]["tier"]
+    rise_side, fall_side = code in ("URGENT", "GRADUAL"), code == "WAIT"
+    up, down = tier in ("UP", "UP_STRONG"), tier in ("DOWN", "DOWN_STRONG")
+    if (rise_side and down) or (fall_side and up):
+        return "conflict", "ขัดกับแนวโน้มหลัก — ให้ใช้แนวโน้มหลักด้านบน"
+    if tier == "UNCLEAR":
+        return "unconfirmed", "แนวโน้มหลักยังไม่ยืนยัน — สัญญาณของคำแนะนำเดิมอ่อน"
+    return "ok", "สอดคล้องกับแนวโน้มหลัก"
+
+
+def build_fuel_section(result: dict, outlook_d=None) -> str:
     color_map = {
         "success": "#198754",
         "warning": "#ffc107",
@@ -991,28 +1023,29 @@ def build_fuel_section(result: dict) -> str:
         evidence_line = ""
     oilfund_latest = safe_float(result["oilfund"].get("latest"))
     oilfund_theme = "danger" if oilfund_latest is not None and oilfund_latest < 0 else "default"
+    level, align_text = legacy_alignment(d.get("action_code"), outlook_d)
+    align_html = f" <span class='legacy-align legacy-align-{level}'>{html_escape(align_text)}</span>" if align_text else ""
 
     return f"""
     <section class="fuel-panel" style="border-top: 6px solid {border};">
         <div class="fuel-head">
             <div>
-                <div class="eyebrow">คำแนะนำการจัดซื้อ</div>
+                <div class="eyebrow">ข้อมูลอ้างอิงและคำแนะนำแบบเดิม</div>
                 <h2>{html_escape(result['label_th'])}</h2>
                 <div class="muted">ข้อมูลอ้างอิงล่าสุด: {date_text}</div>
             </div>
-            <div class="action-box action-{result['color']}">
-                <div class="action-label">Action</div>
-                <div class="action-value">{html_escape(result['action'])}</div>
-            </div>
         </div>
 
+        <details class="legacy-action">
+            <summary>คำแนะนำแบบเดิม (ทดลอง): <span class="legacy-badge action-{result['color']}">{html_escape(result['action'])}</span>{align_html}</summary>
             <div class="summary-box">
             <div class="summary-title">บทสรุปเชิงวิเคราะห์</div>
             <div class="summary-text">{html_escape(result['summary'])}</div>
             <div class="muted" style="margin-top:8px;">{decision_line}</div>
             <ul>{reasons_html}</ul>
             <div class="muted">{evidence_line}</div>
-        </div>
+            </div>
+        </details>
 
         <div class="metric-grid">
             {metric_card('ค่าการตลาด', fmt_num(result['mm'].get('latest'), 2), 'บาท/ลิตร', result['mm'].get('chg_1d'), 'primary')}
@@ -1066,9 +1099,9 @@ def build_news_section(news_df: pd.DataFrame, max_items: int = 1) -> str:
 
 
 
-def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str], accuracy_html: str = "", fund_feed: pd.DataFrame = None, dispatch_html: str = "", trend_snaps: dict = None, outlook_mini_html: str = "") -> str:
+def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str], accuracy_html: str = "", fund_feed: pd.DataFrame = None, dispatch_html: str = "", trend_snaps: dict = None, outlook_mini_html: str = "", outlook: dict = None) -> str:
     updated_at = datetime.now(TZ).strftime("%d/%m/%Y %H:%M")
-    sections = "\n".join(build_fuel_section(r) for r in results)
+    sections = "\n".join(build_fuel_section(r, (outlook or {}).get(r.get("fuel_key"))) for r in results)
     news_html = build_news_section(news_df)
 
     fund_date = fund_snap.get("date")
@@ -1312,6 +1345,14 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
     .outlook-sub {{ margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); opacity: .92; }}
     .outlook-sub .dispatch-headline {{ font-size: 1rem; }}
     .dispatch-old {{ margin-bottom: 20px; }}
+    .legacy-action {{ margin: 12px 0; border: 1px dashed var(--line); border-radius: 14px; padding: 8px 12px; background: #fafbfd; }}
+    .legacy-action > summary {{ cursor: pointer; font-weight: 600; }}
+    .legacy-badge {{ display: inline-block; padding: 2px 10px; border-radius: 999px; color: #fff; font-size: .85rem; }}
+    .legacy-badge.action-warning {{ color: #1f2937; }}
+    .legacy-align {{ font-size: .8rem; font-weight: 600; margin-left: 6px; }}
+    .legacy-align-conflict {{ color: #b91c1c; }}
+    .legacy-align-unconfirmed {{ color: #a16207; }}
+    .legacy-align-ok {{ color: #15803d; }}
     .dispatch-old > summary {{ cursor: pointer; font-weight: 600; margin: 8px 0; }}
     .pbar {{ display: flex; height: 26px; border-radius: 8px; overflow: hidden; margin-top: 6px; font-size: .8rem; color: #fff; }}
     .pbar span {{ display: flex; align-items: center; justify-content: center; min-width: 0; overflow: hidden; }}
@@ -1539,10 +1580,10 @@ def main():
     except Exception:
         outlook_log = pd.DataFrame()
     write_outlook_files(outlook, M.model_version(params))
-    dispatch_html = build_outlook_section(outlook, asof, build_outlook_live(outlook_log)) + dispatch_html
+    dispatch_html = build_outlook_section(outlook, asof, build_outlook_live(outlook_log, summary)) + dispatch_html
 
     trend_snaps = {fuel: trend_snapshot(tables, fuel, asof) for fuel in S.FUELS}
-    html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund, dispatch_html, trend_snaps, build_outlook_mini(outlook))
+    html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund, dispatch_html, trend_snaps, build_outlook_mini(outlook), outlook)
     write_text("index.html", html)
     write_decision_snapshot(results)
     print("Dashboard created successfully")

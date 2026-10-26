@@ -23,6 +23,9 @@ FEED_MAX_AGE_H = 72          # ฟีดสัญญาณทุกชนิด�
 MIN_LIVE_OUTCOMES = 20       # สถิติสดจาก DecisionLog ต้องมีผลลัพธ์อย่างน้อยเท่านี้ถึงจะนำมาแสดงแทนสถิติ backtest
 
 
+LEGACY_FIRST_HOUR = 6.0       # คำแนะนำเดิม (เร่ง/ทยอย/ซื้อปกติ/ชะลอ) ไม่ประเมินก่อนเวลานี้
+
+
 def phase_of(asof: pd.Timestamp) -> str:
     """หลัง ~19:00 ถือว่ารู้ MOPS ปิดและประกาศกองทุนแล้ว (EVE) ก่อนหน้านั้นใช้โมเดลช่วงบ่าย (PM)"""
     return "EVE" if asof.hour + asof.minute / 60 >= 19.0 else "PM"
@@ -137,6 +140,9 @@ def decide(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params, summary=
 
     if params is None or key not in params.get("models", {}):
         return no_data("ยังไม่มีพารามิเตอร์โมเดล (model_params.json) — ยังไม่ให้คำแนะนำ")
+    if asof.hour + asof.minute / 60 < LEGACY_FIRST_HOUR:
+        # ก่อน 06:00 ยังไม่มี Trend/ประกาศของวันใหม่ ถ้าประเมินจะได้ตัวเลขอ่อนที่ไม่มีความหมาย (ใช้กติกาเดียวกับแผนส่งรถ)
+        return no_data(f"ยังไม่ถึงเวลาประเมิน (เริ่มตั้งแต่ {int(LEGACY_FIRST_HOUR):02d}:00 เมื่อมีประกาศล่วงหน้าของวัน) — ดูแนวโน้มราคาด้านบนก่อน")
     if not st["alive"]:
         newest = st["newest"].strftime("%d/%m %H:%M") if st["newest"] is not None else "ไม่เคยมีข้อมูล"
         return no_data(f"ฟีดสัญญาณจากไลน์ไม่อัปเดต (ล่าสุด {newest}) — ตรวจ worker/แท็บ Entry_* ก่อนใช้คำแนะนำ")
@@ -479,19 +485,25 @@ def outlook_text(per_fuel: dict, now: pd.Timestamp = None) -> str:
     return "\n".join(lines)
 
 
-def outlook_live_stats(log: pd.DataFrame, fuel: str, hours: int, ref_hhmm: str = "20:30"):
-    """ผลทดสอบเดินหน้าของแนวโน้มจาก OutlookLog : {tier: {n, right10, wrong10, avg_move}} เฉพาะวันที่มีผลแล้ว ; None ถ้ายังไม่มี"""
+def _outlook_scored(log: pd.DataFrame, fuel: str, hours: int, ref_hhmm: str = "20:30"):
+    """แถวทดสอบเดินหน้าของแนวโน้มที่มีผลจริงแล้ว: 1 แถวต่อวัน (รอบแรก) เฉพาะรอบ ref_hhmm และที่ออกภายใน 3 ชม. หลังเวลาอ้างอิง ; None ถ้าไม่มี"""
     if log is None or log.empty or "outcome_delta" not in log.columns:
         return None
     d = log[(log["fuel"].astype(str) == fuel) & (pd.to_numeric(log["hours"], errors="coerce") == hours)].copy()
     if "ref" in d.columns:                                           # แยกรอบ 20:30 กับ 15:30 (คนละโมเดล ห้ามปนกัน)
         d = d[pd.to_datetime(d["ref"], errors="coerce").dt.strftime("%H:%M").fillna(ref_hhmm) == ref_hhmm]
-    if "asof" in d.columns and "ref" in d.columns:                    # นับเฉพาะแนวโน้มที่ออกภายใน 3 ชม. หลังรอบ 20:30 (แถวที่ออกช้ากว่านั้นไม่ใช่การทดสอบเดินหน้า)
+    if "asof" in d.columns and "ref" in d.columns:                    # นับเฉพาะแนวโน้มที่ออกภายใน 3 ชม. หลังรอบอ้างอิง (แถวที่ออกช้ากว่านั้นไม่ใช่การทดสอบเดินหน้า)
         lag = pd.to_datetime(d["asof"], errors="coerce") - pd.to_datetime(d["ref"], errors="coerce")
         d = d[lag.isna() | (lag <= pd.Timedelta(hours=3))]
     d["outcome_delta"] = pd.to_numeric(d["outcome_delta"], errors="coerce")
     d = d.dropna(subset=["outcome_delta"]).drop_duplicates(subset=["date"], keep="first")
-    if d.empty:
+    return None if d.empty else d
+
+
+def outlook_live_stats(log: pd.DataFrame, fuel: str, hours: int, ref_hhmm: str = "20:30"):
+    """ผลทดสอบเดินหน้าของแนวโน้มจาก OutlookLog : {tier: {n, right10, wrong10, avg_move}} เฉพาะวันที่มีผลแล้ว ; None ถ้ายังไม่มี"""
+    d = _outlook_scored(log, fuel, hours, ref_hhmm)
+    if d is None:
         return None
     out = {}
     for tier in M.OUTLOOK_TIERS:
@@ -505,3 +517,49 @@ def outlook_live_stats(log: pd.DataFrame, fuel: str, hours: int, ref_hhmm: str =
         out[tier] = {"n": int(len(t)), "right10": float((mv >= M.OUTLOOK_SMALL).mean()), "wrong10": float((mv <= -M.OUTLOOK_SMALL).mean()),
                      "avg_move": float(mv.mean())}
     return {"n_days": int(len(d)), "tiers": out}
+
+
+# เกณฑ์ความพร้อมแจ้งเตือนของ "แนวโน้ม" — ดัดแปลงจากเกณฑ์ที่ตกลงไว้กับแผนส่งรถ (ใช้ตัวเลขชุดเดียวกัน ALERT_*) โดย
+#   "เร่ง/ชะลอ" → ทิศขึ้น (ขึ้น+ขึ้นแรง) / ทิศลง (ลง+ลงแรง) ; "ถูกจริง" → ขยับตามทิศ >= 10 สต. ; อัตราปกติ → สัดส่วนวันที่ขยับทิศนั้นจริง >= 10 สต.
+#   "กำไรเฉลี่ยต่อวัน" → ผลรวมการขยับตามทิศที่ทายในวันที่ทาย หารด้วยจำนวนวันที่มีผลทั้งหมด (วันที่ไม่ทาย = 0)
+def _bt_gain_per_day(summary, key: str):
+    tiers = ((summary or {}).get("outlook_results", {}).get(key) or {}).get("tiers")
+    if not tiers:
+        return None
+    return sum(t["share"] * t["avg_move"] for code, t in tiers.items() if code != "UNCLEAR" and t.get("n"))
+
+
+def outlook_alert_status(log: pd.DataFrame, summary, fuel: str, ref_hhmm: str = "20:30", hours: int = 24) -> dict:
+    """ชนิด/รอบ/ขอบฟ้านี้ผ่านเกณฑ์แจ้งเตือนหรือยัง — {eligible:{UP,DOWN}, n, reasons[]} ไม่ส่งข้อความใด ๆ แค่ตัดสินว่า 'อนุญาตหรือยัง'"""
+    out = {"fuel": fuel, "ref": ref_hhmm, "hours": hours, "n": 0, "eligible": {"UP": False, "DOWN": False}, "reasons": []}
+    d = _outlook_scored(log, fuel, hours, ref_hhmm)
+    if d is None:
+        out["reasons"].append("ยังไม่มีบันทึกแนวโน้มที่มีผลจริง")
+        return out
+    n = len(d)
+    out["n"] = n
+    if n < ALERT_MIN_DAYS:
+        out["reasons"].append(f"มีผลจริง {n}/{ALERT_MIN_DAYS} วัน")
+        return out
+    sign = d["tier"].map(lambda t: 1.0 if t.startswith("UP") else (-1.0 if t.startswith("DOWN") else 0.0))
+    signed = d["outcome_delta"] * sign
+    avg = float(signed.sum() / n)
+    if avg < ALERT_MIN_GAIN:
+        out["reasons"].append(f"กำไรเฉลี่ยจริง {avg:.3f} ต่ำกว่า {ALERT_MIN_GAIN} บาท/ลิตร/วัน")
+        return out
+    key = f"{fuel}_{'P_' if ref_hhmm == '15:30' else ''}H{hours}"
+    bt = _bt_gain_per_day(summary, key)
+    if bt is not None and bt > 0 and avg < bt * ALERT_BACKTEST_KEEP:
+        out["reasons"].append(f"กำไรจริง {avg:.3f} แย่กว่า backtest ({bt:.3f}) เกินหนึ่งในสาม")
+        return out
+    for code, prefix, label, hit in (("UP", "UP", "ขึ้น", d["outcome_delta"] >= M.OUTLOOK_SMALL), ("DOWN", "DOWN", "ลง", d["outcome_delta"] <= -M.OUTLOOK_SMALL)):
+        m = d["tier"].str.startswith(prefix)
+        if int(m.sum()) < ALERT_MIN_ACTION_N:
+            out["reasons"].append(f"คำแนะนำทิศ{label}มีน้อยกว่า {ALERT_MIN_ACTION_N} ครั้ง ยังประเมินไม่ได้")
+            continue
+        rate, base = float(hit[m].mean()), float(hit.mean())
+        if rate - base >= ALERT_MIN_LIFT:
+            out["eligible"][code] = True
+        else:
+            out["reasons"].append(f"ทิศ{label}: ถูกจริง {rate:.0%} สูงกว่าปกติ {base:.0%} แค่ {(rate - base) * 100:.0f} จุด (ต้อง ≥ {ALERT_MIN_LIFT * 100:.0f})")
+    return out

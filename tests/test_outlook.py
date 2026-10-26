@@ -130,5 +130,64 @@ class LogRowsTest(unittest.TestCase):
         self.assertEqual(engine.outlook_live_stats(log, "B7", 24)["n_days"], 1)
 
 
+def _log(rows):
+    """rows = [(date, tier, outcome)] รอบ 20:30 ของ B7 24 ชม. ออกหลังรอบ 1 ชม."""
+    return pd.DataFrame([{"asof": f"{d} 21:30", "ref": f"{d} 20:30", "date": d, "fuel": "B7", "hours": 24, "tier": t, "outcome_delta": str(o)} for d, t, o in rows])
+
+
+def _days(n):
+    return [str(x.date()) for x in pd.date_range("2026-01-01", periods=n)]
+
+
+class OutlookAlertTest(unittest.TestCase):
+    SUMMARY = {"outlook_results": {"B7_H24": {"tiers": {"UP": {"n": 100, "share": 0.2, "avg_move": 0.25}, "DOWN": {"n": 100, "share": 0.2, "avg_move": 0.25},
+                                                    "UP_STRONG": {"n": 0}, "UNCLEAR": {"n": 300, "share": 0.6}}}}}   # backtest กำไร/วัน = 0.2*0.25*2 = 0.10
+
+    def test_no_data_and_too_few_days(self):
+        self.assertIn("ยังไม่มีบันทึก", engine.outlook_alert_status(pd.DataFrame(), self.SUMMARY, "B7")["reasons"][0])
+        few = _log([(d, "UP", 0.3) for d in _days(10)])
+        s = engine.outlook_alert_status(few, self.SUMMARY, "B7")
+        self.assertEqual(s["n"], 10)
+        self.assertFalse(any(s["eligible"].values()))
+        self.assertIn("10/40", s["reasons"][0])
+
+    def test_eligible_when_hit_rate_and_gain_ok(self):
+        days = _days(60)
+        rows = []
+        for i, d in enumerate(days):
+            if i % 5 == 0:
+                rows.append((d, "UP", 0.30 if i % 10 else -0.05))        # ทายขึ้น 12 ครั้ง ถูก 6
+            elif i % 5 == 1:
+                rows.append((d, "DOWN", -0.30))                          # ทายลง 12 ครั้ง ถูกหมด
+            else:
+                rows.append((d, "UNCLEAR", 0.0))
+        s = engine.outlook_alert_status(_log(rows), self.SUMMARY, "B7")
+        self.assertEqual(s["n"], 60)
+        self.assertTrue(s["eligible"]["DOWN"], s)
+        self.assertTrue(s["eligible"]["UP"], s)
+
+    def test_weak_lift_blocks_that_side(self):
+        days = _days(60)
+        rows = []
+        for i, d in enumerate(days):
+            if i % 5 == 0:
+                rows.append((d, "UP", 0.0))                              # ทายขึ้นแต่ไม่ขยับ → ไม่ถูก
+            elif i % 5 == 1:
+                rows.append((d, "DOWN", -0.45))
+            elif i % 5 == 2:
+                rows.append((d, "UNCLEAR", 0.30))                        # วันอื่นขึ้นบ่อย → อัตราปกติของทิศขึ้นสูง
+            else:
+                rows.append((d, "UNCLEAR", 0.0))
+        s = engine.outlook_alert_status(_log(rows), self.SUMMARY, "B7")
+        self.assertFalse(s["eligible"]["UP"])
+        self.assertTrue(s["eligible"]["DOWN"], s)
+
+    def test_gain_below_floor_blocks_everything(self):
+        rows = [(d, "UP" if i % 5 == 0 else "UNCLEAR", 0.02) for i, d in enumerate(_days(60))]
+        s = engine.outlook_alert_status(_log(rows), self.SUMMARY, "B7")
+        self.assertFalse(any(s["eligible"].values()))
+        self.assertIn("ต่ำกว่า", s["reasons"][0])
+
+
 if __name__ == "__main__":
     unittest.main()

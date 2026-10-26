@@ -112,6 +112,68 @@ class GateTests(unittest.TestCase):
         self.assertFalse(R.gate(self.old_summary, s, p)["results:B7_EVE"]["ok"])
 
 
+def omodels(rise_trend=0.5, fall_trend=-0.5):
+    """โมเดลแนวโน้มสังเคราะห์ (r10/f10/r40/f40)"""
+    one = lambda tr: {"w": [tr] + [0.0] * 7, "b": 0, "mu": [0] * 8, "sd": [1] * 8}
+    return {"r10": one(rise_trend), "f10": one(fall_trend), "r40": one(rise_trend), "f40": one(fall_trend)}
+
+
+def ores(auc_r, auc_f, tiers=None):
+    return {"auc_r10": auc_r, "auc_f10": auc_f, "tiers": tiers or {}}
+
+
+class OutlookGateTests(unittest.TestCase):
+    def new(self, res_new, models_new=None):
+        return ({"outlook_results": {"B7_H24": res_new}}, {"outlook": {"models": {"B7_H24": models_new or omodels()}}})
+
+    def test_passes_when_not_worse(self):
+        old = {"outlook_results": {"B7_H24": ores(0.77, 0.75)}}
+        s, p = self.new(ores(0.76, 0.75))
+        self.assertTrue(R.gate(old, s, p)["outlook_results:B7_H24"]["ok"])
+
+    def test_auc_drop_rejected(self):
+        old = {"outlook_results": {"B7_H24": ores(0.77, 0.75)}}
+        s, p = self.new(ores(0.70, 0.75))
+        g = R.gate(old, s, p)["outlook_results:B7_H24"]
+        self.assertFalse(g["ok"])
+        self.assertIn("AUC", " ".join(g["reasons"]))
+
+    def test_wrong_sign_rejected(self):
+        old = {"outlook_results": {"B7_H24": ores(0.77, 0.75)}}
+        s, p = self.new(ores(0.77, 0.75), omodels(rise_trend=-0.5))
+        self.assertFalse(R.gate(old, s, p)["outlook_results:B7_H24"]["ok"])
+
+    def test_tier_regression_rejected_only_with_enough_samples(self):
+        tier = lambda n, right, wrong: {"UP_STRONG": {"n": n, "right10": right, "wrong10": wrong, "share": 0.1, "avg_move": 0.4}}
+        old = {"outlook_results": {"B7_H24": ores(0.77, 0.75, tier(50, 0.82, 0.08))}}
+        s, p = self.new(ores(0.77, 0.75, tier(50, 0.70, 0.20)))
+        g = R.gate(old, s, p)["outlook_results:B7_H24"]
+        self.assertFalse(g["ok"])
+        self.assertIn("ผิดทิศแย่ลง", " ".join(g["reasons"]))
+        s2, p2 = self.new(ores(0.77, 0.75, tier(10, 0.30, 0.50)))            # ตัวอย่างใหม่น้อยกว่า 15 → ไม่เทียบ
+        self.assertTrue(R.gate(old, s2, p2)["outlook_results:B7_H24"]["ok"])
+
+    def test_afternoon_keys_skip_evening_only_signs(self):
+        bad_evening = omodels()
+        bad_evening["r10"]["w"][list(M.FEATURES).index("up_n")] = -0.4
+        self.assertTrue(R.sign_issues_outlook(bad_evening, "B7_H24"))        # รอบ 20:30 ตรวจ
+        self.assertEqual(R.sign_issues_outlook(bad_evening, "B7_P_H24"), [])  # รอบบ่ายไม่ตรวจ
+
+
+class OutlookMergeTests(unittest.TestCase):
+    def test_accepted_outlook_key_replaced_others_kept(self):
+        old_p = {"trained_at": "2026-10-01", "models": {}, "thresholds": {}, "outlook": {"trained_at": "2026-10-01", "models": {"B7_H24": "old", "G95_H24": "old"}}}
+        new_p = {"trained_at": "2026-11-09", "data_through": "2026-11-08", "models": {}, "thresholds": {},
+                 "outlook": {"trained_at": "2026-11-09", "models": {"B7_H24": "new", "G95_H24": "new"}}}
+        old_s = {"generated": "x", "outlook_results": {"B7_H24": "old", "G95_H24": "old"}}
+        new_s = {"generated": "y", "outlook_results": {"B7_H24": "new", "G95_H24": "new"}}
+        p, s = R.merge_models(old_p, old_s, new_p, new_s, ["outlook_results:B7_H24"])
+        self.assertEqual(p["outlook"]["models"], {"B7_H24": "new", "G95_H24": "old"})
+        self.assertEqual(s["outlook_results"], {"B7_H24": "new", "G95_H24": "old"})
+        self.assertEqual(p["outlook"]["trained_at"], "2026-11-09")
+        self.assertEqual(old_p["outlook"]["models"]["B7_H24"], "old")
+
+
 class MergeModelsTests(unittest.TestCase):
     def test_only_accepted_keys_replaced(self):
         old_p = {"trained_at": "2026-10-01", "models": {"A": "old", "B": "old"}, "thresholds": {"A": 1, "B": 1}, "dispatch": {"hour_profile": "old"}}
