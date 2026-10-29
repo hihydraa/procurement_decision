@@ -529,6 +529,25 @@ def load_fund_settings(tok):
     return out
 
 
+def to_float(v):
+    """ค่าจากชีทเป็น float ; ว่าง/ข้อความที่แปลงไม่ได้ = None"""
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def last_numeric(rows: list, key: str):
+    """ค่าตัวเลขล่าสุดของคอลัมน์ key ย้อนจากท้ายตาราง ; None ถ้าไม่มีเลย"""
+    for r in reversed(rows):
+        v = to_float(r.get(key))
+        if v is not None:
+            return v
+    return None
+
+
 def ingest_oilfund(tok, today: date, eppo_result):
     existing = col_to_dicts(sheets_get(tok, SHEET_ID, f"{TABS['ENTRY_OILFUND_SUSTAINABILITY']}!A1:H5000"))
     if not existing:
@@ -571,10 +590,15 @@ def ingest_oilfund(tok, today: date, eppo_result):
     official_date = report_end + timedelta(days=1) if report_end else None
 
     new_rows = []
-    balance = float(last["Total_Balance (ล้านบาท)"])
-    cash = float(last["Cash_Remaining (ล้านบาท)"])
-    prev_subsidy = float(last["Daily_Subsidy (ล้านบาท/วัน)"])
-    prev_net_impact = float(last["Net_Fund_Impact (ล้านบาท/วัน)"])
+    balance = to_float(last["Total_Balance (ล้านบาท)"])
+    cash = to_float(last["Cash_Remaining (ล้านบาท)"])
+    if balance is None or cash is None:
+        print("[OILFUND] last row has no balance/cash — needs manual entry, skipping")
+        return
+    # แถวล่าสุดมักมี Daily_Subsidy/Net_Fund_Impact ว่าง (วันหยุด/EPPO ยังไม่ออก) — ใช้ค่าล่าสุดที่เป็นตัวเลขย้อนขึ้นไป
+    # (เดิม float("") ล้มทุกรอบหลังแถวว่างแรก ทำให้ฐานะกองทุนค้างหลายวัน) ถ้าไม่มีเลยใช้ 0 = ไม่ขยับยอดโดยเดา
+    prev_subsidy = last_numeric(existing, "Daily_Subsidy (ล้านบาท/วัน)") or 0.0
+    prev_net_impact = last_numeric(existing, "Net_Fund_Impact (ล้านบาท/วัน)") or 0.0
 
     # ถ้าห่างจากแถวล่าสุดเกิน 7 วัน (เช่น สคริปต์นี้ไม่เคยรันมานาน) อย่า backfill ทุกวันด้วยอัตรา
     # เก่าๆ ซ้ำๆ (ประมาณการเพี้ยนสะสม) — ข้ามช่วงที่ไม่มีข้อมูลไปเลย แล้วเริ่มนับใหม่จาก
