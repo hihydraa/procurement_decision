@@ -548,11 +548,59 @@ def last_numeric(rows: list, key: str):
     return None
 
 
+def eppo_daily_totals(eppo_dicts):
+    """รวมเงินอุดหนุน/เงินไหลเข้าต่อวันจากแถว Entry_Eppo แยกตามวัน -> {date: (subsidy, collection)}"""
+    out = {}
+    for r in eppo_dicts:
+        d = excel_serial_to_date(r.get("Date"))
+        if d is None:
+            continue
+        sub = to_float(r.get("Estimated Subsidy (mn baht/day)")) or 0.0
+        col = to_float(r.get("Estimated Collection (mn baht/day)")) or 0.0
+        a, b = out.get(d, (0.0, 0.0))
+        out[d] = (a + sub, b + col)
+    return out
+
+
+def oilfund_blank_fills(existing, totals, settings):
+    """แถวกองทุนที่ Daily_Subsidy ว่างแต่ Entry_Eppo มีข้อมูลของวันนั้น -> [(เลขแถวในชีท, [D..H])]
+    ไม่แตะยอดคงเหลือ (B,C) ; คำนวณเฉพาะเงินอุดหนุน/ไหลเข้า/ผลกระทบสุทธิ/Runway/สถานะ"""
+    fills = []
+    for i, r in enumerate(existing):
+        if to_float(r.get("Daily_Subsidy (ล้านบาท/วัน)")) is not None:
+            continue
+        d = excel_serial_to_date(r.get("Date"))
+        cash = to_float(r.get("Cash_Remaining (ล้านบาท)"))
+        if d is None or cash is None or d not in totals:
+            continue
+        sub, col = totals[d]
+        runway = round(cash / sub, 2) if sub else None
+        fills.append((i + 2, [round(sub, 2), round(col, 2), round(col - sub, 2),
+                               runway if runway is not None else "", runway_status(runway, settings)]))
+    return fills
+
+
+def backfill_oilfund_blanks(tok, existing):
+    """เติมช่องเงินอุดหนุน/Runway ที่ว่างค้างจากข้อมูล EPPO ในชีท (ไม่พึ่งผลของ ingest_eppo รอบนี้ ซึ่งเป็น None เมื่อบันทึกวันนั้นไปแล้ว)"""
+    if not any(to_float(r.get("Daily_Subsidy (ล้านบาท/วัน)")) is None for r in existing):
+        return 0
+    eppo = col_to_dicts(sheets_get(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!A1:S5000"))
+    fills = oilfund_blank_fills(existing, eppo_daily_totals(eppo), load_fund_settings(tok))
+    keys = ["Daily_Subsidy (ล้านบาท/วัน)", "Daily_Collection (ล้านบาท/วัน)", "Net_Fund_Impact (ล้านบาท/วัน)", "Runway_Days", "Status"]
+    for row_num, vals in fills:
+        sheets_update(tok, SHEET_ID, f"{TABS['ENTRY_OILFUND_SUSTAINABILITY']}!D{row_num}:H{row_num}", [vals])
+        existing[row_num - 2].update(dict(zip(keys, vals)))
+    if fills:
+        print(f"[OILFUND] filled blank subsidy/runway for {len(fills)} rows from Entry_Eppo")
+    return len(fills)
+
+
 def ingest_oilfund(tok, today: date, eppo_result):
     existing = col_to_dicts(sheets_get(tok, SHEET_ID, f"{TABS['ENTRY_OILFUND_SUSTAINABILITY']}!A1:H5000"))
     if not existing:
         print("[OILFUND] no existing rows to roll forward from, skipping")
         return
+    backfill_oilfund_blanks(tok, existing)
     last = existing[-1]
     last_date = excel_serial_to_date(last["Date"])
     if last_date is None:
