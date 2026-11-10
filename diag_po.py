@@ -10,6 +10,7 @@
 ใช้: python diag_po.py   (ต้องมี SA_EMAIL / SA_PRIVATE_KEY ; บัญชีบริการต้องเปิดไฟล์ PO ได้)
 """
 import re
+import time
 from collections import defaultdict
 
 import numpy as np
@@ -139,6 +140,18 @@ def cost_report(b: pd.DataFrame) -> list:
     return out
 
 
+def batch_get(tok, sid, ranges, tries=5):
+    """อ่านหลายช่วงในคำขอเดียว (Sheets API จำกัดจำนวนคำขออ่านต่อนาที) ; 429 → รอแล้วลองใหม่"""
+    for k in range(tries):
+        r = requests.get(f"https://sheets.googleapis.com/v4/spreadsheets/{sid}/values:batchGet",
+                         params={"ranges": ranges, "valueRenderOption": "UNFORMATTED_VALUE"}, headers={"Authorization": f"Bearer {tok}"})
+        if r.status_code == 429 and k < tries - 1:
+            time.sleep(20 * (k + 1))
+            continue
+        r.raise_for_status()
+        return [v.get("values", []) for v in r.json()["valueRanges"]]
+
+
 def load_po() -> pd.DataFrame:
     tok = get_token()
     rows = []
@@ -147,8 +160,10 @@ def load_po() -> pd.DataFrame:
                             headers={"Authorization": f"Bearer {tok}"})
         meta.raise_for_status()
         tabs = [s["properties"]["title"] for s in meta.json()["sheets"] if re.match(r"^\d{1,2}", s["properties"]["title"])]
-        for tab in tabs:
-            rows.extend(parse_tab(sheets_get(tok, sid, f"'{tab}'!A1:Z120"), label, tab))
+        for i in range(0, len(tabs), 15):
+            chunk = tabs[i:i + 15]
+            for tab, vals in zip(chunk, batch_get(tok, sid, [f"'{t}'!A1:Z120" for t in chunk])):
+                rows.extend(parse_tab(vals, label, tab))
         print(f"[PO] {label}: {len(tabs)} แท็บวัน")
     return pd.DataFrame(rows)
 
