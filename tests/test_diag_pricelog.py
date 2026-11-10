@@ -149,15 +149,29 @@ class EpisodeTest(unittest.TestCase):
         self.assertIn("05:00-07:59:1", lines)
         self.assertIn("ไม่ระบุ   1: 08:00-08:59:1", lines)
 
-    def test_shift_report_flags_morning_posts(self):
+    def test_shift_report_counts_rule_change(self):
         rows = [HEAD,
-                row("ศรีพลัง", "ไออาร์", "ระยอง", "B7", 40.0, 40.0, date="2026-11-10", time="08:22", eff="05:00", msg="a"),    # โพสต์เช้า ระบุ 05:00 → ถูกเลื่อน
-                row("ศรีพลัง", "ไออาร์", "ระยอง", "B7", 39.0, 39.0, date="2026-11-09", time="17:05", eff="05:00", msg="b"),    # ประกาศล่วงหน้า (เย็น) ถูกเลื่อนถูกต้อง
+                row("ศรีพลัง", "ไออาร์", "ระยอง", "B7", 40.0, 40.0, date="2026-11-10", time="08:22", eff="05:00", msg="a"),    # โพสต์เช้า ระบุ 05:00 → เดิมเลื่อนผิด
+                row("ศรีพลัง", "ไออาร์", "ระยอง", "B7", 39.0, 39.0, date="2026-11-09", time="17:05", eff="05:00", msg="b"),    # ประกาศล่วงหน้า (เย็น) เลื่อนถูกต้อง
                 row("ต้องบุญ", "ไออาร์", "ระยอง", "B7", 38.0, 38.0, date="2026-11-09", time="10:30", eff="10:25", msg="c")]    # ไม่เลื่อน
         lines = "\n".join(P.shift_report(P.build_frame(rows)))
-        self.assertIn("3 รายการ ถูกเลื่อนเป็นวันถัดไป 2", lines)
-        self.assertIn("IRPC       1 รายการ (50% ของที่ถูกเลื่อน)", lines)
-        self.assertIn("08น.→05:00:1", lines)
+        self.assertIn("3 รายการ : เลื่อนเป็นวันถัดไปตามกติกาเดิม 2 ; ตามกติกาปัจจุบัน 1 ; เวลามีผลต่างกันระหว่างกติกา 1 รายการ", lines)
+        self.assertIn("IRPC       1 รายการ ย้ายจากวันถัดไปมาวันเดียวกัน โพสต์→เวลาที่ระบุ: 08น.→05:00:1", lines)
+
+    def test_rule_impact_report(self):
+        rows = [HEAD]
+        for i in range(12):
+            d = (pd.Timestamp("2026-11-01") + pd.Timedelta(days=i)).strftime("%Y-%m-%d")
+            rows.append(row("ต้องบุญ", "ไออาร์", "ระยอง", "B7", 40.0 if i >= 5 else 39.0, 39.0, date=d, time="10:30", eff="10:25"))
+        # วันที่ 6 : ราคาย้อนหลังโพสต์ 08:22 ระบุ 05:00 (ขึ้นเป็น 40.0) ก่อนที่ 10:25 จะยืนยัน 40.0
+        rows.append(row("ศรีพลัง", "ไออาร์", "ระยอง", "B7", 40.0, 40.0, date="2026-11-06", time="08:22", eff="05:00"))
+        lines = "\n".join(P.rule_impact_report(P.build_frame(rows)))
+        self.assertIn("07:00", lines)
+        line = {ln.split()[0]: ln for ln in lines.splitlines()[1:]}
+        self.assertIn("1/", line["07:00"])
+        self.assertIn("เฉลี่ย +1.00", line["07:00"])
+        self.assertIn(" 0/", line["20:30"])                                          # 10:25 ยืนยันราคาเดียวกัน → จุดวัด 20:30 ไม่เปลี่ยน
+        self.assertIn(" 0/", line["02:00"])
 
 
 if __name__ == "__main__":
