@@ -1,0 +1,23 @@
+name: Diagnose market-min price (read-only)
+
+# รันมือเท่านั้น : ตรวจว่า "ราคาต่ำสุดของตลาด" ถูกถือโดยใคร และให้คะแนน OutlookLog ใหม่ด้วยคลังหลัก — ไม่เขียนอะไรลงชีท
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Diagnose
+        run: python diag_price_min.py
+        env:
+          SA_EMAIL: ${{ secrets.SA_EMAIL }}
+          SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
