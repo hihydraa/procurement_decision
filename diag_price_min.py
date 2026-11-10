@@ -17,14 +17,23 @@ MAX_AGE_DAYS = 3                      # เท่ากับ signals.MARKET_MAX
 # คลังหลัก = (ข้อความในชื่อผู้ขาย, ข้อความในชื่อคลัง) ; "" = ไม่จำกัด — สมมติฐานที่ต้องยืนยัน (ดูรายการที่จับคู่ได้จริงในผลรัน)
 #   เอกสาร 07 : ไออาร์ ระยอง/อยุธยา, ดาว สระบุรี/ระยอง ; เจ้าของระบบเพิ่ม : บางจาก บางปะอิน, แท็ปไลน์
 #   "แท็ปไลน์" ตีความว่าเป็นคลังสระบุรีทุกผู้ขาย (ดาว/ปตท/บางจาก BSRC) + ชื่อที่มีคำว่า แท็ปไลน์ ถ้ามีในฟีด
-CORE = [("ไออาร์", "ระยอง"), ("ไออาร์", "อยุธยา"), ("สตาร์ฟูเอลส์", "สระบุรี"), ("สตาร์ฟูเอลส์", "ระยอง"),
-        ("บางจาก", "บางปะอิน"), ("", "สระบุรี"), ("แท็ปไลน์", "")]
+CORE07 = [("ไออาร์", "ระยอง"), ("ไออาร์", "อยุธยา"), ("สตาร์ฟูเอลส์", "สระบุรี"), ("สตาร์ฟูเอลส์", "ระยอง")]   # เฉพาะที่เอกสาร 07 ระบุ
+CORE = CORE07 + [("บางจาก", "บางปะอิน"), ("", "สระบุรี"), ("แท็ปไลน์", "")]
+FRESH_H = 24                          # ตัวเลือก "ราคาสด" : ไม่นับราคาที่เก่ากว่านี้
 SMALL = 0.10                          # ขยับ >= 10 สต. นับว่าขึ้น/ลง (เท่ากับ model.OUTLOOK_SMALL)
 
 
-def is_core(key: str) -> bool:
+def _match(key: str, entries) -> bool:
     provider, _, warehouse = key.partition("|")
-    return any(p in provider and w in warehouse for p, w in CORE)
+    return any(p in provider and w in warehouse for p, w in entries)
+
+
+def is_core(key: str) -> bool:
+    return _match(key, CORE)
+
+
+def is_core07(key: str) -> bool:
+    return _match(key, CORE07)
 
 
 def core_matches(p: pd.DataFrame) -> dict:
@@ -46,13 +55,14 @@ def clean_prices(prices: pd.DataFrame) -> pd.DataFrame:
     return p
 
 
-def quote_table(p: pd.DataFrame, fuel: str, times, only_core: bool = False) -> pd.DataFrame:
-    """ต่อเวลา t : ราคาต่ำสุด, ผู้ถือราคา (provider|warehouse), เวลาโพสต์ของราคานั้น, อายุ (ชม.) — วิธีเดียวกับ PriceBook.min_at"""
+def quote_table(p: pd.DataFrame, fuel: str, times, key_ok=None, max_age_h: float = None) -> pd.DataFrame:
+    """ต่อเวลา t : ราคาต่ำสุด, ผู้ถือราคา (provider|warehouse), เวลาโพสต์ของราคานั้น, อายุ (ชม.) — วิธีเดียวกับ PriceBook.min_at
+    key_ok = ฟังก์ชันเลือกคลัง (None = ทุกผู้ขาย) ; max_age_h = ไม่นับราคาที่เก่ากว่านี้ (None = ตามปกติ 3 วัน)"""
     times = pd.DatetimeIndex(times)
     grid = pd.DataFrame({"t": times}).sort_values("t")
     cols, keys = [], []
     for (f, key), g in p[p.fuel == fuel].groupby(["fuel", "key"]):
-        if only_core and not is_core(key):
+        if key_ok is not None and not key_ok(key):
             continue
         g = g.sort_values("effective")[["effective", "price"]].drop_duplicates("effective", keep="last")
         m = pd.merge_asof(grid, g, left_on="t", right_on="effective", tolerance=pd.Timedelta(days=MAX_AGE_DAYS))
@@ -62,6 +72,9 @@ def quote_table(p: pd.DataFrame, fuel: str, times, only_core: bool = False) -> p
     if cols:
         price = np.stack([c[:, 0].astype(float) for c in cols])
         qt = np.stack([pd.to_datetime(c[:, 1]).to_numpy() for c in cols])
+        if max_age_h is not None:
+            age = (grid.t.to_numpy()[None, :] - qt) / np.timedelta64(1, "h")
+            price = np.where(age > max_age_h, np.nan, price)
         filled = np.where(np.isnan(price), np.inf, price)
         idx = filled.argmin(axis=0)
         ok = np.isfinite(filled[idx, np.arange(len(grid))])
@@ -70,6 +83,10 @@ def quote_table(p: pd.DataFrame, fuel: str, times, only_core: bool = False) -> p
         out.loc[ok, "quote_time"] = pd.to_datetime(qt[idx, np.arange(len(grid))])[ok]
         out["age_h"] = (out["t"] - pd.to_datetime(out["quote_time"])).dt.total_seconds() / 3600
     return out.set_index("t").reindex(times)
+
+
+# เกณฑ์ที่ให้คะแนนเทียบกัน : all = เดิม ; fresh24 = ทุกผู้ขายแต่ไม่นับราคาเก่ากว่า 24 ชม. ; core = คลังหลักตามที่เจ้าของระบบกำหนด ; doc07 = 4 คลังตามเอกสาร 07
+BASES = [("all", {}), ("fresh24", {"max_age_h": FRESH_H}), ("core", {"key_ok": is_core}), ("doc07", {"key_ok": is_core07})]
 
 
 def signed(tier: str) -> int:
@@ -85,8 +102,8 @@ def rescore(rows: pd.DataFrame, p: pd.DataFrame, now: pd.Timestamp) -> pd.DataFr
         for hz in sorted(sub["hours"].unique()):
             s = sub[sub["hours"] == hz]
             r0, r1 = pd.DatetimeIndex(s["ref"]), pd.DatetimeIndex(s["ref"]) + pd.Timedelta(hours=int(hz))
-            for name, only_core in (("all", False), ("core", True)):
-                a, b = quote_table(p, fuel, r0, only_core)["price"].to_numpy(), quote_table(p, fuel, r1, only_core)["price"].to_numpy()
+            for name, kw in BASES:
+                a, b = quote_table(p, fuel, r0, **kw)["price"].to_numpy(), quote_table(p, fuel, r1, **kw)["price"].to_numpy()
                 ready = (r1 + pd.Timedelta(minutes=30)) <= now
                 d = np.where(ready, b - a, np.nan)
                 for i, (_, row) in enumerate(s.iterrows()):
@@ -111,6 +128,21 @@ def summarize(df: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
+def load_outlook(values: list) -> pd.DataFrame:
+    """แท็บ OutlookLog จาก Sheets API (อ่านแบบ UNFORMATTED จึงได้เลข serial สำหรับวันเวลา) → แถวรอบ 20:30 ที่ออกตรงเวลา ไม่ใช่ backfill
+    1 แถวต่อ (วัน, ชนิด, ขอบฟ้า) รอบแรกเท่านั้น"""
+    head = values[0]
+    d = pd.DataFrame([r + [""] * (len(head) - len(r)) for r in values[1:]], columns=head)
+    d["asof"], d["ref"] = d["asof"].map(to_ts), d["ref"].map(to_ts)
+    d["hours"] = pd.to_numeric(d["hours"], errors="coerce")
+    d = d.dropna(subset=["asof", "ref", "hours"])
+    d = d[(d["ref"].dt.strftime("%H:%M") == "20:30") & ((d["asof"] - d["ref"]) <= pd.Timedelta(hours=3))]
+    if "backfilled" in d.columns:
+        d = d[pd.to_numeric(d["backfilled"], errors="coerce").fillna(0) == 0]
+    d = d.assign(date=d["ref"].dt.strftime("%Y-%m-%d")).sort_values("asof").drop_duplicates(["date", "fuel", "hours"], keep="first")
+    return d
+
+
 def main():
     now = pd.Timestamp(datetime.now(ZoneInfo(TZ_NAME)).replace(tzinfo=None))
     tok = get_token()
@@ -126,7 +158,7 @@ def main():
     days = pd.date_range("2026-10-23", now.normalize(), freq="D")
     refs = pd.DatetimeIndex([d + pd.Timedelta(hours=20.5) for d in days if d + pd.Timedelta(hours=20.5) <= now])
     for fuel in ("G95", "B7"):
-        a, c = quote_table(p, fuel, refs), quote_table(p, fuel, refs, only_core=True)
+        a, c = quote_table(p, fuel, refs), quote_table(p, fuel, refs, key_ok=is_core)
         print(f"[DIAG] {fuel} 20:30 : date | ทุกผู้ขาย (ราคา, ผู้ถือ, อายุชม.) | คลังหลัก (ราคา, ผู้ถือ) | ส่วนต่าง all-core")
         for t in refs:
             x, y = a.loc[t], c.loc[t]
@@ -140,27 +172,22 @@ def main():
             tgt = refs + pd.Timedelta(hours=hz)
             ok = (tgt + pd.Timedelta(minutes=30)) <= now
             da = quote_table(p, fuel, tgt[ok])["price"].to_numpy() - a.loc[refs[ok], "price"].to_numpy()
-            dc = quote_table(p, fuel, tgt[ok], only_core=True)["price"].to_numpy() - c.loc[refs[ok], "price"].to_numpy()
+            dc = quote_table(p, fuel, tgt[ok], key_ok=is_core)["price"].to_numpy() - c.loc[refs[ok], "price"].to_numpy()
             both = ~np.isnan(da) & ~np.isnan(dc)
             same = int((np.sign(da[both]) == np.sign(dc[both])).sum())
             print(f"[DIAG] {fuel} H{hz}: ขยับของ all vs core วันที่ทิศตรงกัน {same}/{int(both.sum())} ; all ไม่ขยับ(0.00) แต่ core ขยับ≥10สต "
                   f"{int(((np.abs(da[both]) < 0.005) & (np.abs(dc[both]) >= SMALL)).sum())} วัน ; correlation {float(np.corrcoef(da[both], dc[both])[0, 1]):.2f}")
 
     ol = sheets_get(tok, SHEET_ID, f"{TABS['OUTLOOK_LOG']}!A1:R50000")
-    d = pd.DataFrame([r + [""] * (len(ol[0]) - len(r)) for r in ol[1:]], columns=ol[0])
-    d["asof"], d["ref"] = pd.to_datetime(d["asof"], errors="coerce"), pd.to_datetime(d["ref"], errors="coerce")
-    d["hours"] = pd.to_numeric(d["hours"], errors="coerce")
-    d = d[(d["ref"].dt.strftime("%H:%M") == "20:30") & ((d["asof"] - d["ref"]) <= pd.Timedelta(hours=3))]
-    if "backfilled" in d.columns:
-        d = d[pd.to_numeric(d["backfilled"], errors="coerce").fillna(0) == 0]
-    d = d.sort_values("asof").drop_duplicates(["date", "fuel", "hours"], keep="first")
+    d = load_outlook(ol)
+    print(f"[DIAG] แถว OutlookLog ที่ใช้ให้คะแนน (20:30 ตรงเวลา) = {len(d)}")
     res = rescore(d[["date", "ref", "fuel", "hours", "tier", "outcome_delta"]], p, now)
     mism = res[(res.basis == "all") & res.delta.notna()]
     lg = pd.to_numeric(mism["logged"], errors="coerce")
     print(f"[DIAG] ตรวจความตรงกับค่าที่บันทึกไว้เดิม: ต่างจาก outcome_delta ใน OutlookLog เกิน 0.02 บาท {int(((mism.delta - lg).abs() > 0.02).sum())}/{len(mism)} แถว")
-    print("[DIAG] ให้คะแนนใหม่ (รอบ 20:30 ตรงเวลา, ถูก/ผิดนับเมื่อขยับ ≥10 สต.) — all = เกณฑ์เดิม, core = เฉพาะคลังหลัก:")
+    print("[DIAG] ให้คะแนนใหม่ (รอบ 20:30 ตรงเวลา, ถูก/ผิดนับเมื่อขยับ ≥10 สต.) — all = เกณฑ์เดิม, fresh24 = ทุกผู้ขายไม่นับราคาเก่ากว่า 24 ชม., core = คลังหลักที่เจ้าของระบบกำหนด, doc07 = 4 คลังตามเอกสาร 07:")
     print(summarize(res))
-    print("[DIAG] คลังหลักที่ใช้:", "; ".join(f"{p_ or '*'}/{w_ or '*'}" for p_, w_ in CORE))
+    print("[DIAG] core =", "; ".join(f"{p_ or '*'}/{w_ or '*'}" for p_, w_ in CORE), "| doc07 =", "; ".join(f"{p_}/{w_}" for p_, w_ in CORE07))
 
 
 if __name__ == "__main__":
