@@ -37,16 +37,22 @@ def to_num(v):
         return np.nan
 
 
-def effective_ts(date_s: str, time_s: str, eff_s: str):
-    """เวลามีผลของราคา — กติกาเดียวกับ ingest._prices_feed : ใช้ effective_time ถ้าระบุ ; ถ้าน้อยกว่าเวลาโพสต์เกิน 2 ชม. ถือเป็นของวันถัดไป"""
+def effective_parts(date_s: str, time_s: str, eff_s: str):
+    """(เวลามีผล, ถูกเลื่อนเป็นวันถัดไปหรือไม่, เวลาโพสต์) — กติกาเดียวกับ ingest._prices_feed : ใช้ effective_time ถ้าระบุ ;
+    ถ้าน้อยกว่าเวลาโพสต์เกิน 2 ชม. ถือเป็นของวันถัดไป"""
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_s):
-        return pd.NaT
+        return pd.NaT, False, pd.NaT
     posted = datetime.strptime(f"{date_s} {time_s or '00:00'}", "%Y-%m-%d %H:%M")
-    eff = posted
+    eff, shifted = posted, False
     if re.match(r"^\d{1,2}:\d{2}$", eff_s):
         cand = datetime.strptime(f"{date_s} {eff_s.zfill(5)}", "%Y-%m-%d %H:%M")
-        eff = cand + timedelta(days=1) if cand < posted - timedelta(hours=2) else cand
-    return pd.Timestamp(eff)
+        shifted = cand < posted - timedelta(hours=2)
+        eff = cand + timedelta(days=1) if shifted else cand
+    return pd.Timestamp(eff), shifted, pd.Timestamp(posted)
+
+
+def effective_ts(date_s: str, time_s: str, eff_s: str):
+    return effective_parts(date_s, time_s, eff_s)[0]
 
 
 def first_line(text) -> str:
@@ -77,13 +83,14 @@ def build_frame(values: list) -> pd.DataFrame:
             continue
         d, t = cell_date(g("update_date")), cell_time(g("update_time"))
         eff_t = cell_time(g("effective_time"))
-        eff = effective_ts(d, t, eff_t)
+        eff, shifted, posted = effective_parts(d, t, eff_t)
         if pd.isna(eff):
             continue
         dirn, when = stated(first_line(g("raw_text")))
         rows.append((str(g("message_id")), str(g("jobber")), str(g("provider")), str(g("warehouse_name")), str(g("fuel_type")), price, ann, eff, d,
-                     bool(re.match(r"^\d{1,2}:\d{2}$", eff_t)), dirn, when))
-    df = pd.DataFrame(rows, columns=["msg", "jobber", "provider", "warehouse", "fuel", "price", "announced", "effective", "date", "has_eff", "dir", "stated"])
+                     bool(re.match(r"^\d{1,2}:\d{2}$", eff_t)), dirn, when, shifted, posted))
+    df = pd.DataFrame(rows, columns=["msg", "jobber", "provider", "warehouse", "fuel", "price", "announced", "effective", "date", "has_eff", "dir", "stated",
+                                     "shifted", "posted"])
     df["group"] = df["provider"].map(provider_group)
     df["discount"] = (df["announced"] - df["price"]).round(2)
     return df
@@ -171,13 +178,66 @@ def announce_time_report(df: pd.DataFrame, top: int = 10) -> list:
     return out
 
 
+def _hist(x: pd.DataFrame, col: str = "time") -> str:
+    parts = []
+    for name, lo, hi in BUCKETS:
+        n = int(((x[col].dt.hour * 60 + x[col].dt.minute >= lo) & (x[col].dt.hour * 60 + x[col].dt.minute < hi)).sum())
+        if n:
+            parts.append(f"{name}:{n}")
+    return ", ".join(parts) or "-"
+
+
+def episodes(df: pd.DataFrame, sign: int = 1, gap_h: float = 14) -> pd.DataFrame:
+    """เหตุการณ์เปลี่ยนราคาใหญ่ (ขึ้น sign=+1 / ลง sign=-1, ≥ BIG) รวมสองจ๊อบเบอร์ : 1 เหตุการณ์ต่อ (ผู้ขาย, คลัง, ชนิด) ที่เกิดห่างกันไม่เกิน gap_h ชม.
+    เวลา = เวลามีผลที่ระบุเร็วที่สุดจากจ๊อบเบอร์ใดก็ได้ ถ้าไม่มีเลยใช้เวลาที่เห็นราคาใหม่ครั้งแรก (explicit=False)"""
+    d = df.drop_duplicates(["jobber", "provider", "warehouse", "fuel", "effective"], keep="last").sort_values("effective")
+    d = d.assign(delta=d.groupby(["jobber", "provider", "warehouse", "fuel"]).price.diff()).dropna(subset=["delta"])
+    d = d[d.delta * sign >= BIG].sort_values(["provider", "warehouse", "fuel", "effective"])
+    if d.empty:
+        return pd.DataFrame(columns=["group", "time", "explicit", "size"])
+    key = ["provider", "warehouse", "fuel"]
+    step = d.groupby(key).effective.diff()
+    d["ep"] = ((step > pd.Timedelta(hours=gap_h)) | step.isna()).cumsum()
+    rows = []
+    for _, g in d.groupby("ep"):
+        ex = g[g.has_eff]
+        rows.append((g.group.iloc[0], ex.effective.min() if len(ex) else g.effective.min(), bool(len(ex)), float(g.delta.abs().max())))
+    return pd.DataFrame(rows, columns=["group", "time", "explicit", "size"])
+
+
+def episode_timing_report(df: pd.DataFrame) -> list:
+    out = []
+    for sign, name in ((1, "ขึ้นใหญ่"), (-1, "ลงใหญ่")):
+        e = episodes(df, sign)
+        out.append(f"[PRICELOG] {name} ≥{BIG:.2f} บาท รวมสองจ๊อบเบอร์ ({len(e)} เหตุการณ์; 1 เหตุการณ์ = 1 คลัง+ชนิด) — ระบุเวลามีผลจริง: ช่วงเวลา:จำนวน | ไม่ระบุเลย: ช่วงที่เห็นราคาใหม่ครั้งแรก | เวลาที่ระบุบ่อย")
+        for grp, g in e.groupby("group"):
+            if len(g) < 5:
+                continue
+            ex, un = g[g.explicit], g[~g.explicit]
+            exact = ex.time.dt.strftime("%H:%M").value_counts().head(6)
+            out.append(f"   {grp:<7} n={len(g):>4} ระบุ {len(ex):>3} ({len(ex) / len(g):.0%}) : {_hist(ex)} | ไม่ระบุ {len(un):>3}: {_hist(un)} | " + " ".join(f"{k}:{v}" for k, v in exact.items()))
+    return out
+
+
+def shift_report(df: pd.DataFrame) -> list:
+    """แถวที่ระบุ effective_time แล้วถูกเลื่อนเป็นวันถัดไป (เวลาน้อยกว่าเวลาโพสต์เกิน 2 ชม.) — ถ้าโพสต์ตอนเช้าและระบุเวลาก่อนหน้านั้น น่าจะเป็นราคาที่มีผลไปแล้ววันนี้
+    (ประกาศย้อนหลัง) ไม่ใช่วันพรุ่งนี้ ซึ่งกติกาเดิมของฟีดจะวางผิดวัน"""
+    e = df[df.has_eff].drop_duplicates(["msg", "provider", "warehouse", "fuel", "effective"])
+    out = [f"[PRICELOG] ราคาที่ระบุ effective_time {len(e)} รายการ ถูกเลื่อนเป็นวันถัดไป {int(e.shifted.sum())} ({float(e.shifted.mean()):.0%}) ; ที่โพสต์ก่อน 12:00 แล้วถูกเลื่อน (น่าสงสัยว่าเป็นประกาศย้อนหลัง) ต่อกลุ่ม :"]
+    sus = e[e.shifted & (e.posted.dt.hour < 12)]
+    for grp, g in sus.groupby("group"):
+        combos = (g.posted.dt.strftime("%H") + "น.→" + (g.effective - pd.Timedelta(days=1)).dt.strftime("%H:%M")).value_counts().head(5)
+        out.append(f"   {grp:<7} {len(g):>4} รายการ ({len(g) / max(int(e[e.group == grp].shifted.sum()), 1):.0%} ของที่ถูกเลื่อน) โพสต์→เวลาที่ระบุ: " + " ".join(f"{k}:{v}" for k, v in combos.items()))
+    return out
+
+
 def main():
     tok = get_token()
     values = sheets_get(tok, OILBOT_SHEET_ID, "PriceLog!A1:Q200000")
     df = build_frame(values)
     print(f"[PRICELOG] rows={len(df)} {df.date.min()}→{df.date.max()} jobber: " + ", ".join(f"{k}={v}" for k, v in df.jobber.value_counts().head(6).items()))
     for line in (discount_report(df) + jobber_gap_report(df) + coverage_report(df) + announce_time_report(df)
-                 + change_timing_report(df, explicit=True) + change_timing_report(df, explicit=False)):
+                 + episode_timing_report(df) + shift_report(df)):
         print(line)
 
 
