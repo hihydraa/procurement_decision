@@ -26,3 +26,8 @@ jobs:
         env:
           SA_EMAIL: ${{ secrets.SA_EMAIL }}
           SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
+      - name: Retail price vs wholesale lag (Entry_Eppo RETAIL)
+        run: python diag_retail_lag.py
+        env:
+          SA_EMAIL: ${{ secrets.SA_EMAIL }}
+          SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}

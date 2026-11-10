@@ -1,0 +1,31 @@
+name: Log PTT retail price (RetailLog)
+
+# บันทึกราคาปลีก ปตท. (Kapook) ลงแท็บ RetailLog เฉพาะตอนราคาเปลี่ยน เพื่อดูว่าปลีกปรับกี่โมง/ตามราคาส่งช้าแค่ไหน
+# ไม่ส่งข้อความ ไม่กระทบการตัดสินใจ ; cron ของ GitHub อาจมาช้า/ข้ามรอบ จึงเป็นเวลาโดยประมาณ
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: log-retail
+  cancel-in-progress: false
+
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Log retail price
+        run: python log_retail.py
+        env:
+          SA_EMAIL: ${{ secrets.SA_EMAIL }}
+          SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
