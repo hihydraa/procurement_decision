@@ -856,7 +856,9 @@ def build_outlook_live(log: pd.DataFrame, summary=None) -> str:
             for tier, x in st["tiers"].items():
                 lab = M.OUTLOOK_TIERS[tier]
                 parts.append(f"{lab} {x['n']} ครั้ง" + (f" (ถูกทิศ {x['right10']:.0%} ผิดทิศ {x['wrong10']:.0%})" if "right10" in x else ""))
-            rows.append(f"<tr><td>{html_escape(cfg['label_th'])}</td><td>จากข้อมูล {rh} · {hz} ชม.</td><td>{st['n_days']}</td><td>{html_escape(' / '.join(parts))}</td></tr>")
+            late = engine.outlook_late_days(log, engine.FUEL_KEY[fk], hz, rh)
+            late_txt = f" <span class='muted'>(+ล็อกช้า {late} วัน ไม่นับในเกณฑ์)</span>" if late else ""
+            rows.append(f"<tr><td>{html_escape(cfg['label_th'])}</td><td>จากข้อมูล {rh} · {hz} ชม.</td><td>{st['n_days']}{late_txt}</td><td>{html_escape(' / '.join(parts))}</td></tr>")
     if not rows:
         return ("<div class='dispatch-live'><h3>ผลทดสอบจริง</h3><div class='muted'>เริ่มบันทึกแนวโน้มแล้ว "
                 "ผลแรกออกหลังครบ 24 ชม. ของรอบแรก — ยังไม่ส่งข้อความใด ๆ เข้ากลุ่ม</div>" + build_outlook_readiness(log, summary) + "</div>")
@@ -900,7 +902,24 @@ def build_outlook_mini(outlook: dict) -> str:
             "<div class='om-note'>🟢 สูง 🟡 กลาง 🔴 ต่ำ = ความเชื่อมั่น · ยังอยู่ระหว่างทดสอบความแม่นจริง · รายละเอียดด้านล่าง</div></div>")
 
 
-def write_outlook_files(outlook: dict, version: str = "", snap_path: str = "outlook_snapshot.json", pub_path: str = "outlook.json") -> None:
+def outlook_log_extras(tables, params, summary, asof, main_outlook: dict) -> dict:
+    """แนวโน้มของจุดอ้างอิงอื่นที่ผ่านมาแล้วแต่ยังไม่ได้บันทึก (cron มาไม่ทัน) สำหรับบันทึกลง OutlookLog เท่านั้น
+    ฟีเจอร์ใช้เฉพาะข้อมูลที่โพสต์ก่อน ref (decide_outlook ณ เวลา ref) จึงเป็น point-in-time ; asof ของแถว = เวลารันจริง → lag_h"""
+    main_refs = {d["ref"] for d in main_outlook.values()}
+    extras = {}
+    for ref in engine.log_refs(asof):
+        if ref in main_refs:
+            continue
+        for fk in FUEL_CONFIG:
+            d = engine.decide_outlook(fk, ref, tables, params, summary)
+            if d.get("horizons"):
+                d["asof"] = asof
+                extras[f"{fk}@{ref:%Y-%m-%d %H:%M}"] = d
+    return extras
+
+
+def write_outlook_files(outlook: dict, version: str = "", snap_path: str = "outlook_snapshot.json", pub_path: str = "outlook.json",
+                        extras: dict = None) -> None:
     """snapshot ให้ log_outlook.py บันทึกลง OutlookLog ; outlook.json = ข้อความ + ระดับ (ไม่มีข้อมูลดิบ) ให้ส่งต่อเข้าไลน์/หน้าอื่น"""
     clean = lambda v: None if v is None or (isinstance(v, float) and np.isnan(v)) else round(float(v), 4)
     snap, pub = [], {}
@@ -912,6 +931,11 @@ def write_outlook_files(outlook: dict, version: str = "", snap_path: str = "outl
         pub[d["fuel"]] = {"ref": d["ref"].strftime("%Y-%m-%d %H:%M"), "note": d.get("note"),
                           "horizons": [{"hours": h["hours"], "tier": h["tier"], "label": h["label"], "grade": h["grade"],
                                         "until": h["until"].strftime("%Y-%m-%d %H:%M")} for h in d.get("horizons", [])]}
+    for d in (extras or {}).values():                    # เฉพาะบันทึก OutlookLog ไม่ขึ้นข้อความ/ไลน์
+        for h in d.get("horizons", []):
+            snap.append({"asof": d["asof"].strftime("%Y-%m-%d %H:%M"), "ref": d["ref"].strftime("%Y-%m-%d %H:%M"), "fuel": d["fuel"],
+                         "hours": h["hours"], "tier": h["tier"], "p_rise10": clean(h["p"]["r10"]), "p_fall10": clean(h["p"]["f10"]),
+                         "p_rise40": clean(h["p"]["r40"]), "p_fall40": clean(h["p"]["f40"]), "grade": h["grade"], "model_version": version})
     write_text(snap_path, json.dumps(snap, ensure_ascii=False, indent=1))
     write_text(pub_path, json.dumps({"generated": datetime.now().strftime("%Y-%m-%d %H:%M"), "text": engine.outlook_text(outlook), "fuels": pub},
                                     ensure_ascii=False, indent=1))
@@ -1579,7 +1603,7 @@ def main():
             outlook_log = pd.DataFrame()
     except Exception:
         outlook_log = pd.DataFrame()
-    write_outlook_files(outlook, M.model_version(params))
+    write_outlook_files(outlook, M.model_version(params), extras=outlook_log_extras(tables, params, summary, asof, outlook))
     dispatch_html = build_outlook_section(outlook, asof, build_outlook_live(outlook_log, summary)) + dispatch_html
 
     trend_snaps = {fuel: trend_snapshot(tables, fuel, asof) for fuel in S.FUELS}

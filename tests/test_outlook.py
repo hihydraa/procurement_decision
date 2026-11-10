@@ -191,3 +191,64 @@ class OutlookAlertTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class LagLedgerTest(unittest.TestCase):
+    """S1: คำพยากรณ์ที่ cron มาไม่ทันยังถูกบันทึก (ติด lag_h) แต่ไม่นับในเกณฑ์ ; แถวย้อนหลังไม่นับเลย"""
+
+    def _snap(self, asof, ref="2026-11-03 20:30"):
+        return [{"asof": asof, "ref": ref, "fuel": "B7", "hours": 24, "tier": "UP", "grade": "กลาง", "model_version": "v"}]
+
+    def test_late_row_is_kept_with_lag_h(self):
+        add = log_outlook.new_rows([], self._snap("2026-11-03 23:32"))               # ช้า 3 ชม. 2 นาที: เดิมถูกทิ้ง
+        self.assertEqual(len(add), 1)
+        self.assertAlmostEqual(add[0]["lag_h"], 3.03, places=2)
+        self.assertEqual(add[0]["backfilled"], 0)
+
+    def test_row_older_than_cap_is_dropped(self):
+        self.assertEqual(log_outlook.new_rows([], self._snap("2026-11-04 08:40")), [])   # 12 ชม. 10 นาที
+
+    def test_earliest_row_wins_when_logged_twice(self):
+        first = log_outlook.new_rows([], self._snap("2026-11-03 21:10"))
+        self.assertEqual(log_outlook.new_rows(first, self._snap("2026-11-03 23:32")), [])
+
+    def test_header_and_row_width_match(self):
+        row = log_outlook.new_rows([], self._snap("2026-11-03 21:00"))[0]
+        self.assertEqual(list(row), log_outlook.COLUMNS)
+        self.assertEqual(log_outlook.COLUMNS[-2:], ["lag_h", "backfilled"])
+        self.assertEqual(log_outlook.LAST_COL, "R")
+
+    def test_on_time_and_late_counted_separately(self):
+        log = pd.DataFrame([
+            {"asof": "2026-11-02 21:30", "ref": "2026-11-02 20:30", "date": "2026-11-02", "fuel": "B7", "hours": 24, "tier": "UP", "outcome_delta": "0.30"},
+            {"asof": "2026-11-03 23:32", "ref": "2026-11-03 20:30", "date": "2026-11-03", "fuel": "B7", "hours": 24, "tier": "UP", "outcome_delta": "0.20"},
+            {"asof": "2026-11-05 23:50", "ref": "2026-11-05 20:30", "date": "2026-11-05", "fuel": "B7", "hours": 24, "tier": "DOWN", "outcome_delta": "-0.10", "backfilled": 1},
+        ])
+        self.assertEqual(engine.outlook_live_stats(log, "B7", 24)["n_days"], 1)          # ตรงเวลา = 2 พ.ย. เท่านั้น
+        self.assertEqual(engine.outlook_late_days(log, "B7", 24), 1)                      # ล็อกช้า = 3 พ.ย. ; แถว backfilled ไม่นับ
+        self.assertEqual(engine.outlook_alert_status(log, None, "B7")["n"], 1)            # เกณฑ์ความพร้อมนับเฉพาะตรงเวลา
+
+    def test_old_rows_without_new_columns_still_work(self):
+        log = pd.DataFrame([{"asof": "2026-10-22 21:00", "ref": "2026-10-22 20:30", "date": "2026-10-22", "fuel": "B7", "hours": 24, "tier": "UP", "outcome_delta": "0.30"}])
+        self.assertEqual(engine.outlook_live_stats(log, "B7", 24)["n_days"], 1)
+        self.assertEqual(engine.outlook_late_days(log, "B7", 24), 0)
+
+
+class LogRefsTest(unittest.TestCase):
+    def refs(self, ts):
+        return [r.strftime("%m-%d %H:%M") for r in engine.log_refs(pd.Timestamp(ts))]
+
+    def test_late_evening_run_gets_both_refs(self):
+        self.assertEqual(self.refs("2026-11-03 23:32"), ["11-03 15:30", "11-03 20:30"])
+
+    def test_after_midnight_run_gets_previous_day(self):
+        self.assertEqual(self.refs("2026-11-04 00:39"), ["11-03 15:30", "11-03 20:30"])
+
+    def test_afternoon_run_gets_only_pm(self):
+        self.assertEqual(self.refs("2026-11-05 16:50"), ["11-05 15:30"])
+
+    def test_morning_run_gets_nothing(self):
+        self.assertEqual(self.refs("2026-11-05 10:00"), [])
+
+    def test_cap_boundary(self):
+        self.assertEqual(self.refs("2026-11-04 03:30"), ["11-03 15:30", "11-03 20:30"])    # 15:30 ช้า 12 ชม. พอดี ยังนับ
+        self.assertEqual(self.refs("2026-11-04 03:31"), ["11-03 20:30"])                    # เกิน 12 ชม. แล้ว

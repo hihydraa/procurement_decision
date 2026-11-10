@@ -485,19 +485,52 @@ def outlook_text(per_fuel: dict, now: pd.Timestamp = None) -> str:
     return "\n".join(lines)
 
 
-def _outlook_scored(log: pd.DataFrame, fuel: str, hours: int, ref_hhmm: str = "20:30"):
-    """แถวทดสอบเดินหน้าของแนวโน้มที่มีผลจริงแล้ว: 1 แถวต่อวัน (รอบแรก) เฉพาะรอบ ref_hhmm และที่ออกภายใน 3 ชม. หลังเวลาอ้างอิง ; None ถ้าไม่มี"""
+ON_TIME_LAG_H = 3.0     # แถวที่นับในเกณฑ์ : ออกภายใน 3 ชม. หลังจุดอ้างอิง (ตรงกับ log_outlook.ON_TIME_LAG_H)
+MAX_LOG_LAG_H = 12.0    # แถวที่ออกช้ากว่านี้ไม่ถูกบันทึกเลย
+
+
+def _outlook_scored(log: pd.DataFrame, fuel: str, hours: int, ref_hhmm: str = "20:30", late: bool = False):
+    """แถวทดสอบเดินหน้าของแนวโน้มที่มีผลจริงแล้ว: 1 แถวต่อวัน (รอบแรก) เฉพาะรอบ ref_hhmm ; None ถ้าไม่มี
+    late=False (ค่าเริ่มต้น) = เฉพาะที่ออกภายใน ON_TIME_LAG_H หลังจุดอ้างอิง (นับในเกณฑ์) ; late=True = ที่ออกช้ากว่านั้น (แยกรายงาน ไม่นับในเกณฑ์)
+    แถวที่สร้างย้อนหลัง (backfilled=1) ไม่นับทั้งสองกรณี"""
     if log is None or log.empty or "outcome_delta" not in log.columns:
         return None
     d = log[(log["fuel"].astype(str) == fuel) & (pd.to_numeric(log["hours"], errors="coerce") == hours)].copy()
+    if "backfilled" in d.columns:
+        d = d[pd.to_numeric(d["backfilled"], errors="coerce").fillna(0) == 0]
     if "ref" in d.columns:                                           # แยกรอบ 20:30 กับ 15:30 (คนละโมเดล ห้ามปนกัน)
         d = d[pd.to_datetime(d["ref"], errors="coerce").dt.strftime("%H:%M").fillna(ref_hhmm) == ref_hhmm]
-    if "asof" in d.columns and "ref" in d.columns:                    # นับเฉพาะแนวโน้มที่ออกภายใน 3 ชม. หลังรอบอ้างอิง (แถวที่ออกช้ากว่านั้นไม่ใช่การทดสอบเดินหน้า)
+    if "asof" in d.columns and "ref" in d.columns:
         lag = pd.to_datetime(d["asof"], errors="coerce") - pd.to_datetime(d["ref"], errors="coerce")
-        d = d[lag.isna() | (lag <= pd.Timedelta(hours=3))]
+        on_time = lag.isna() | (lag <= pd.Timedelta(hours=ON_TIME_LAG_H))
+        d = d[~on_time & (lag <= pd.Timedelta(hours=MAX_LOG_LAG_H))] if late else d[on_time]
+    elif late:
+        return None
     d["outcome_delta"] = pd.to_numeric(d["outcome_delta"], errors="coerce")
     d = d.dropna(subset=["outcome_delta"]).drop_duplicates(subset=["date"], keep="first")
     return None if d.empty else d
+
+
+def outlook_late_days(log: pd.DataFrame, fuel: str, hours: int, ref_hhmm: str = "20:30") -> int:
+    """จำนวนวันที่มีผลจริงแต่ล็อกช้า (ไม่นับในเกณฑ์ความพร้อม) — เพื่อรายงานแยก"""
+    d = _outlook_scored(log, fuel, hours, ref_hhmm, late=True)
+    return 0 if d is None else int(len(d))
+
+
+def _latest_ref(asof: pd.Timestamp, hour: float) -> pd.Timestamp:
+    r = asof.normalize() + pd.Timedelta(hours=hour)
+    return r if r <= asof else r - pd.Timedelta(days=1)
+
+
+def log_refs(asof: pd.Timestamp, max_lag_h: float = MAX_LOG_LAG_H) -> list:
+    """จุดอ้างอิง (20:30 / 15:30) ล่าสุดที่ผ่านมาแล้วและไม่เก่าเกิน max_lag_h — ใช้สร้างแถวบันทึกของรอบที่ cron มาไม่ทัน
+    (เช่นรันตอน 23:32 ได้ทั้ง 20:30 วันนี้ และ 15:30 วันนี้ ; รันตอน 10:00 ไม่ได้อะไร)"""
+    refs = []
+    for hour in (M.OUTLOOK_REF_HOUR, M.OUTLOOK_REF_PM):
+        r = _latest_ref(asof, hour)
+        if asof - r <= pd.Timedelta(hours=max_lag_h):
+            refs.append(r)
+    return sorted(refs)
 
 
 def outlook_live_stats(log: pd.DataFrame, fuel: str, hours: int, ref_hhmm: str = "20:30"):
