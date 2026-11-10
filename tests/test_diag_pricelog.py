@@ -8,8 +8,8 @@ HEAD = ["timestamp_logged", "message_id", "group_id", "jobber", "provider", "war
         "update_date", "update_time", "effective_time", "confidence", "raw_oil_type_line", "raw_price_line", "raw_text", "announced_price"]
 
 
-def row(jobber, provider, wh, fuel, price, ann, date="2026-11-09", time="10:30", eff="10:25"):
-    return ["", "", "", jobber, provider, "", wh, fuel, price, date, time, eff, 0.95, "", "", "", ann]
+def row(jobber, provider, wh, fuel, price, ann, date="2026-11-09", time="10:30", eff="10:25", text="", msg=""):
+    return [date, msg, "", jobber, provider, "", wh, fuel, price, date, time, eff, 0.95, "", "", text, ann]
 
 
 class EffectiveTest(unittest.TestCase):
@@ -73,6 +73,41 @@ class TimingTest(unittest.TestCase):
         self.assertIn("IRPC    n=   29", lines)
         self.assertIn("00:00-00:59 14/0 (14/0)", lines)         # ขึ้นใหญ่ที่เที่ยงคืน 14 ครั้ง (ครั้งแรกของชุดไม่มีราคาก่อนหน้า จึงไม่นับ)
         self.assertIn("09:00-12:59 0/15 (0/0)", lines)          # ลงเล็กช่วงสาย 15 ครั้ง ไม่ถึงเกณฑ์ใหญ่
+
+
+class AnnouncementTest(unittest.TestCase):
+    def test_stated_parses_first_line(self):
+        self.assertEqual(P.stated("9/11/69 : ปรับลง 10.25 น."), ("ลง", "10:25"))
+        self.assertEqual(P.stated("22/09/69 : ปรับลง บางตัว 15.10 น. **ยกเว้น บ้านไผ่"), ("ลง", "15:10"))
+        self.assertEqual(P.stated("10/11/69 ปรับขึ้น 23.59 น."), ("ขึ้น", "23:59"))
+        self.assertEqual(P.stated("ปรับขึ้น เที่ยงคืน"), ("ขึ้น", "เที่ยงคืน"))
+        self.assertEqual(P.stated("ราคาไออาร์ 10.25 น."), ("?", "10:25"))
+        self.assertEqual(P.stated("ราคาวันนี้"), ("?", ""))
+
+    def test_coverage_and_announce_reports(self):
+        rows = [HEAD,
+                row("ต้องบุญ", "ไออาร์", "ระยอง", "B7", 39.55, 39.59, msg="m1", text="9/11/69 : ปรับขึ้น 23.59 น.\nไออาร์"),
+                row("ต้องบุญ", "ไออาร์", "อยุธยา", "B7", 39.78, 39.82, msg="m1", text="9/11/69 : ปรับขึ้น 23.59 น.\nไออาร์"),     # ข้อความเดียวกัน นับครั้งเดียว
+                row("ต้องบุญ", "ไออาร์", "ระยอง", "B7", 40.1, 40.14, msg="m2", eff="", text="ปรับขึ้น เที่ยงคืน"),
+                row("ศรีพลัง", "ไออาร์", "ระยอง", "B7", 39.6, 39.6, msg="m3", text="ราคาไออาร์ 10.25 น.")]
+        df = P.build_frame(rows)
+        cov = "\n".join(P.coverage_report(df))
+        self.assertIn("IRPC    แถว=    4 มี effective_time 75%", cov)
+        self.assertIn("ข้อความ=   3", cov)
+        ann = "\n".join(P.announce_time_report(df))
+        self.assertIn("ต้องบุญ, 2 ข้อความ", ann)
+        self.assertIn("ขึ้น23:59:1", ann)
+        self.assertIn("ขึ้นเที่ยงคืน:1", ann)
+        self.assertIn("กลางคืน (22:00-06:59 หรือ เที่ยงคืน) 2 ข้อความ", ann)
+
+    def test_timing_split_by_explicit_effective_time(self):
+        rows = [HEAD]
+        for i in range(12):
+            d = (pd.Timestamp("2026-11-01") + pd.Timedelta(days=i)).strftime("%Y-%m-%d")
+            rows.append(row("ต้องบุญ", "ไออาร์", "ระยอง", "B7", 39.0 + 0.5 * i, 39.0, date=d, time="08:10", eff=""))      # ไม่ระบุ → เวลาโพสต์ 08:10
+        df = P.build_frame(rows)
+        self.assertIn("08:00-08:59 11/0 (11/0)", "\n".join(P.change_timing_report(df, explicit=False)))
+        self.assertNotIn("IRPC", "\n".join(P.change_timing_report(df, explicit=True)))               # ไม่มีแถวที่ระบุเวลา
 
 
 if __name__ == "__main__":
