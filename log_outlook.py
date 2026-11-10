@@ -17,29 +17,37 @@ import pandas as pd
 import signals as S
 from common import SHEET_ID, TABS, TZ_NAME, ensure_tab, get_token, sheets_get, sheets_append, sheets_update, to_ts
 
+# asof = เวลาที่ระบบออกคำพยากรณ์ (created_at) ; ref = จุดอ้างอิงที่ตั้งใจ (as_of: ฟีเจอร์ใช้เฉพาะข้อมูลที่โพสต์ก่อน/เท่ากับเวลานี้)
+# lag_h = asof - ref (ชม.) ; backfilled = 1 ถ้าสร้างย้อนหลัง (ไม่นับในเกณฑ์) — สองคอลัมน์ท้ายเพิ่มทีหลัง แถวเก่าเป็นค่าว่าง
 COLUMNS = ["asof", "date", "ref", "fuel", "hours", "tier", "p_rise10", "p_fall10", "p_rise40", "p_fall40", "grade",
-           "price_ref", "price_target", "outcome_delta", "outcome_filled_at", "model_version"]
+           "price_ref", "price_target", "outcome_delta", "outcome_filled_at", "model_version", "lag_h", "backfilled"]
+LAST_COL = "R"
 OUTCOME_FROM = COLUMNS.index("price_ref")
 OUTCOME_COLS = COLUMNS[OUTCOME_FROM:OUTCOME_FROM + 4]
-MAX_LAG_H = 3          # บันทึก/นับเฉพาะแนวโน้มที่ออกภายใน 3 ชม. หลังรอบ 20:30
+ON_TIME_LAG_H = 3      # "ตรงเวลา" = ออกภายใน 3 ชม. หลังจุดอ้างอิง (นับในเกณฑ์) ; ช้ากว่านี้บันทึกไว้แต่แยกรายงาน
+MAX_LOG_LAG_H = 12     # ช้าเกินนี้ไม่บันทึก (ตรงกับ stale ของ decide_outlook)
 
 
 def new_rows(existing: list, snapshot: list) -> list:
-    """แถวใหม่ที่ยังไม่เคยบันทึก (คีย์ = ref + ชนิด + ขอบฟ้า ; ref = รอบ 20:30 ที่ใช้ประเมิน) — รอบแรกของ ref นั้นเท่านั้น"""
+    """แถวใหม่ที่ยังไม่เคยบันทึก (คีย์ = ref + ชนิด + ขอบฟ้า ; ref = รอบ 20:30/15:30 ที่ใช้ประเมิน) — รอบแรกของ ref นั้นเท่านั้น
+    ออกช้าหลัง ref ไม่เกิน MAX_LOG_LAG_H ก็บันทึก (ฟีเจอร์ใช้เฉพาะข้อมูลที่โพสต์ก่อน ref จึงไม่รั่วข้อมูลอนาคต) พร้อม lag_h"""
     def k(v):
         t = to_ts(v)
         return str(v) if pd.isna(t) else t.strftime("%Y-%m-%d %H:%M")
     seen = {(k(r.get("ref")), str(r.get("fuel")), str(r.get("hours"))) for r in existing}
     out = []
     for s in snapshot:
-        if pd.Timestamp(s["asof"]) - pd.Timestamp(s["ref"]) > pd.Timedelta(hours=MAX_LAG_H):
-            continue                                   # ออกหลังรอบ 20:30 นานเกินไป: ช่วงราคาบางส่วนรู้แล้ว ไม่นับเป็นการทดสอบเดินหน้า
+        lag = pd.Timestamp(s["asof"]) - pd.Timestamp(s["ref"])
+        if lag > pd.Timedelta(hours=MAX_LOG_LAG_H):
+            continue                                   # ข้อมูลเก่าเกินไป (เช่นเช้าวันถัดไป): ไม่ใช่คำพยากรณ์ของรอบนั้น
         key = (k(s["ref"]), str(s["fuel"]), str(s["hours"]))
         if key in seen:
             continue
         seen.add(key)
         row = {c: s.get(c, "") for c in COLUMNS}
         row["date"] = pd.Timestamp(s["ref"]).strftime("%Y-%m-%d")
+        row["lag_h"] = round(lag.total_seconds() / 3600, 2)
+        row["backfilled"] = int(bool(s.get("backfilled", 0)))
         for c in OUTCOME_COLS:
             row[c] = ""
         out.append(row)
@@ -66,12 +74,16 @@ def main():
     if ensure_tab(tok, SHEET_ID, tab):
         sheets_update(tok, SHEET_ID, f"{tab}!A1", [COLUMNS])
         print(f"[OUTLOOK] created tab {tab}")
-    values = sheets_get(tok, SHEET_ID, f"{tab}!A1:P50000")
+    values = sheets_get(tok, SHEET_ID, f"{tab}!A1:{LAST_COL}50000")
+    if values and len(values[0]) < len(COLUMNS):         # แท็บเดิมมี 16 คอลัมน์ : เติมหัวคอลัมน์ใหม่ต่อท้าย (ไม่แตะแถวข้อมูล)
+        sheets_update(tok, SHEET_ID, f"{tab}!A1", [COLUMNS])
+        values[0] = COLUMNS
+        print("[OUTLOOK] header upgraded (lag_h, backfilled)")
     head = values[0] if values else COLUMNS
     rows = [dict(zip(head, r + [""] * (len(head) - len(r)))) for r in values[1:]]
     add = new_rows(rows, snapshot)
     if add:
-        sheets_append(tok, SHEET_ID, f"{tab}!A1:P1", [[r.get(c, "") for c in COLUMNS] for r in add])
+        sheets_append(tok, SHEET_ID, f"{tab}!A1:{LAST_COL}1", [[r.get(c, "") for c in COLUMNS] for r in add])
         rows += add
     print(f"[OUTLOOK] snapshot rows: +{len(add)} new")
 
