@@ -17,6 +17,8 @@ class Names(unittest.TestCase):
         self.assertEqual(dp.po_depot("IR ระยอง"), "ไออาร์ ระยอง")
         self.assertEqual(dp.po_depot("ดาว สระบุรี"), "ดาว สระบุรี")
         self.assertIsNone(dp.po_depot("TPN บ้านไผ่"))
+        self.assertEqual(dp.po_depot("IR นครหลวง"), "ไออาร์ อยุธยา")
+        self.assertEqual(dp.po_depot("ไออาร์ ระยอง"), "ไออาร์ ระยอง")
 
     def test_transport(self):
         self.assertEqual(dp.transport("ดาว สระบุรี", "ยางตลาด"), 0.63)

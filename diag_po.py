@@ -34,7 +34,7 @@ TRANSPORT = {("สระบุรี/นครหลวง", "ยางตลา
              ("บางปะอิน", "ยางตลาด"): 0.67, ("บางปะอิน", "มุกดาหาร"): 0.80, ("บางปะอิน", "วานรนิวาส"): 0.85}
 PROV = (("ไออาร์", "ไออาร์"), ("iRPC", "ไออาร์"), ("IR", "ไออาร์"), ("SFL", "ดาว"), ("สตาร์", "ดาว"), ("ดาว", "ดาว"), ("ปตท", "ปตท"), ("PTT", "ปตท"),
         ("บางจาก", "บางจาก"), ("BCP", "บางจาก"))
-PLACES = ("ระยอง", "สระบุรี", "อยุธยา", "บางปะอิน")
+PLACES = (("ระยอง", "ระยอง"), ("สระบุรี", "สระบุรี"), ("อยุธยา", "อยุธยา"), ("นครหลวง", "อยุธยา"), ("บางปะอิน", "บางปะอิน"))   # นครหลวง = อำเภอในอยุธยา (คลังไออาร์ อยุธยา)
 STD_START_H, LONG_START_H, END_H, STEP_H = -3.5, -18.0, 22.0, 0.5
 MISMATCH = -0.10               # จ่ายต่ำกว่าราคาต่ำสุดใน PriceLog เกินนี้ = ข้อมูลไม่ตรง/ไม่ครบ ไม่นับเป็นผลลัพธ์
 
@@ -42,7 +42,7 @@ MISMATCH = -0.10               # จ่ายต่ำกว่าราคา�
 def po_depot(depot: str):
     """'IR ระยอง' → 'ไออาร์ ระยอง' (ชื่อคลังหลักใน tap_policy.DEPOTS) ; ไม่ใช่คลังหลัก → None"""
     prov = next((p for k, p in PROV if k in depot), None)
-    place = next((pl for pl in PLACES if pl in depot), None)
+    place = next((pl for k, pl in PLACES if k in depot), None)
     key = f"{prov} {place}" if prov and place else None
     return key if key in DEPOTS else None
 
@@ -107,7 +107,7 @@ def coverage_report(po: pd.DataFrame) -> list:
     out = [f"[PO] {len(po)} แถว (ใบสั่ง × ชนิด) {po['date'].nunique()} วัน {po['date'].min()}–{po['date'].max()} ; รวม {po['liters'].sum():,.0f} ลิตร"]
     by = po.groupby("fuel")["liters"].sum().sort_values(ascending=False)
     out.append("   ตามชนิด : " + " ".join(f"{k} {v:,.0f}" for k, v in by.items()))
-    dep = po.groupby("depot")["liters"].sum().sort_values(ascending=False)
+    dep = po.groupby(po["depot"].map(lambda x: po_depot(x) or x))["liters"].sum().sort_values(ascending=False)
     out.append("   ตามคลัง : " + " | ".join(f"{k or '?'} {v / po['liters'].sum():.0%}" for k, v in dep.head(8).items()))
     jb = po.groupby("seller")["liters"].sum().sort_values(ascending=False)
     out.append("   ตามผู้ขาย : " + " | ".join(f"{k or '?'} {v / po['liters'].sum():.0%}" for k, v in jb.head(5).items()))
