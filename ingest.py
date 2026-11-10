@@ -383,10 +383,24 @@ def _feed_rows(tok, src_tab, columns, conv=None):
     return out
 
 
+def effective_datetime(d: str, t: str, eff_t: str) -> datetime:
+    """เวลาที่ราคามีผล จากวันที่โพสต์ d (YYYY-MM-DD), เวลาโพสต์ t (HH:MM) และ effective_time ที่ระบุในข้อความ eff_t (HH:MM หรือว่าง)
+    - ไม่ระบุ effective_time = เวลาโพสต์
+    - ระบุและไม่น้อยกว่าเวลาโพสต์เกิน 2 ชม. = เวลานั้นของวันเดียวกัน
+    - ระบุและน้อยกว่าเวลาโพสต์เกิน 2 ชม. : โพสต์ตั้งแต่ 12:00 = ประกาศล่วงหน้าของเช้าวันถัดไป (วันถัดไป) ;
+      โพสต์ก่อน 12:00 = ราคาย้อนหลังที่มีผลไปแล้วเช้าวันนี้ (วันเดียวกัน) — เดิมเลื่อนเป็นวันถัดไปทั้งสองกรณี ทำให้ราคาตอนเช้าผิดวัน 24 ชม."""
+    posted = datetime.strptime(f"{d} {t or '00:00'}", "%Y-%m-%d %H:%M")
+    if not re.match(r"^\d{1,2}:\d{2}$", eff_t):
+        return posted
+    cand = datetime.strptime(f"{d} {eff_t.zfill(5)}", "%Y-%m-%d %H:%M")
+    if cand < posted - timedelta(hours=2) and posted.hour >= 12:
+        return cand + timedelta(days=1)
+    return cand
+
+
 def _prices_feed(tok):
     """PriceLog -> Entry_Prices (provider, warehouse, fuel, price, effective) เฉพาะ FEED_DAYS_PRICES วันล่าสุด
-    effective = วัน/เวลาที่ราคามีผล: ใช้ effective_time ถ้าระบุ (เช่น ปรับขึ้น 23:59 / เที่ยงคืน) โดยถ้าเวลาที่มีผลน้อยกว่าเวลาโพสต์เกิน 2 ชม.
-    ถือว่าเป็นของวันถัดไป ไม่งั้นใช้เวลาที่โพสต์"""
+    effective = วัน/เวลาที่ราคามีผล (ดู effective_datetime)"""
     rows = col_to_dicts(sheets_get(tok, OILBOT_SHEET_ID, "PriceLog!A1:Q200000"))
     cutoff = (datetime.now(TZ) - timedelta(days=FEED_DAYS_PRICES)).strftime("%Y-%m-%d")
     out = [["provider", "warehouse", "fuel", "price", "effective"]]
@@ -395,12 +409,7 @@ def _prices_feed(tok):
         price = r.get("price")
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", d) or d < cutoff or not isinstance(price, (int, float)):
             continue
-        posted = datetime.strptime(f"{d} {t or '00:00'}", "%Y-%m-%d %H:%M")
-        eff_t = cell_time(r.get("effective_time"))
-        eff = posted
-        if re.match(r"^\d{1,2}:\d{2}$", eff_t):
-            cand = datetime.strptime(f"{d} {eff_t.zfill(5)}", "%Y-%m-%d %H:%M")
-            eff = cand + timedelta(days=1) if cand < posted - timedelta(hours=2) else cand
+        eff = effective_datetime(d, t, cell_time(r.get("effective_time")))
         out.append([r.get("provider"), r.get("warehouse_name"), r.get("fuel_type"), price, eff.strftime("%Y-%m-%d %H:%M")])
     return out
 

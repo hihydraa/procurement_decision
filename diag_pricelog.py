@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from common import OILBOT_SHEET_ID, get_token, sheets_get
-from ingest import cell_date, cell_time
+from ingest import cell_date, cell_time, effective_datetime
 
 TBP, SPL = "ต้องบุญ", "ศรีพลัง"
 BIG = 0.30                                   # การเปลี่ยนราคา ≥ 30 สต. นับว่า "ใหญ่"
@@ -37,18 +37,22 @@ def to_num(v):
         return np.nan
 
 
-def effective_parts(date_s: str, time_s: str, eff_s: str):
-    """(เวลามีผล, ถูกเลื่อนเป็นวันถัดไปหรือไม่, เวลาโพสต์) — กติกาเดียวกับ ingest._prices_feed : ใช้ effective_time ถ้าระบุ ;
-    ถ้าน้อยกว่าเวลาโพสต์เกิน 2 ชม. ถือเป็นของวันถัดไป"""
-    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_s):
-        return pd.NaT, False, pd.NaT
+def effective_old(date_s: str, time_s: str, eff_s: str) -> datetime:
+    """กติกาเดิมของฟีด (ก่อนแก้) : ระบุเวลาน้อยกว่าเวลาโพสต์เกิน 2 ชม. = วันถัดไปเสมอ — ไว้เทียบก่อน/หลัง"""
     posted = datetime.strptime(f"{date_s} {time_s or '00:00'}", "%Y-%m-%d %H:%M")
-    eff, shifted = posted, False
-    if re.match(r"^\d{1,2}:\d{2}$", eff_s):
-        cand = datetime.strptime(f"{date_s} {eff_s.zfill(5)}", "%Y-%m-%d %H:%M")
-        shifted = cand < posted - timedelta(hours=2)
-        eff = cand + timedelta(days=1) if shifted else cand
-    return pd.Timestamp(eff), shifted, pd.Timestamp(posted)
+    if not re.match(r"^\d{1,2}:\d{2}$", eff_s):
+        return posted
+    cand = datetime.strptime(f"{date_s} {eff_s.zfill(5)}", "%Y-%m-%d %H:%M")
+    return cand + timedelta(days=1) if cand < posted - timedelta(hours=2) else cand
+
+
+def effective_parts(date_s: str, time_s: str, eff_s: str):
+    """(เวลามีผลตามกติกาปัจจุบันของฟีด, ถูกเลื่อนเป็นวันถัดไปหรือไม่ (ตามกติกาปัจจุบัน), เวลาโพสต์, เวลามีผลตามกติกาเดิม)"""
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_s):
+        return pd.NaT, False, pd.NaT, pd.NaT
+    posted = datetime.strptime(f"{date_s} {time_s or '00:00'}", "%Y-%m-%d %H:%M")
+    eff = effective_datetime(date_s, time_s, eff_s)
+    return pd.Timestamp(eff), eff.date() > posted.date(), pd.Timestamp(posted), pd.Timestamp(effective_old(date_s, time_s, eff_s))
 
 
 def effective_ts(date_s: str, time_s: str, eff_s: str):
@@ -83,14 +87,14 @@ def build_frame(values: list) -> pd.DataFrame:
             continue
         d, t = cell_date(g("update_date")), cell_time(g("update_time"))
         eff_t = cell_time(g("effective_time"))
-        eff, shifted, posted = effective_parts(d, t, eff_t)
+        eff, shifted, posted, eff_old = effective_parts(d, t, eff_t)
         if pd.isna(eff):
             continue
         dirn, when = stated(first_line(g("raw_text")))
         rows.append((str(g("message_id")), str(g("jobber")), str(g("provider")), str(g("warehouse_name")), str(g("fuel_type")), price, ann, eff, d,
-                     bool(re.match(r"^\d{1,2}:\d{2}$", eff_t)), dirn, when, shifted, posted))
+                     bool(re.match(r"^\d{1,2}:\d{2}$", eff_t)), dirn, when, shifted, posted, eff_old))
     df = pd.DataFrame(rows, columns=["msg", "jobber", "provider", "warehouse", "fuel", "price", "announced", "effective", "date", "has_eff", "dir", "stated",
-                                     "shifted", "posted"])
+                                     "shifted", "posted", "eff_old"])
     df["group"] = df["provider"].map(provider_group)
     df["discount"] = (df["announced"] - df["price"]).round(2)
     return df
@@ -220,14 +224,41 @@ def episode_timing_report(df: pd.DataFrame) -> list:
 
 
 def shift_report(df: pd.DataFrame) -> list:
-    """แถวที่ระบุ effective_time แล้วถูกเลื่อนเป็นวันถัดไป (เวลาน้อยกว่าเวลาโพสต์เกิน 2 ชม.) — ถ้าโพสต์ตอนเช้าและระบุเวลาก่อนหน้านั้น น่าจะเป็นราคาที่มีผลไปแล้ววันนี้
-    (ประกาศย้อนหลัง) ไม่ใช่วันพรุ่งนี้ ซึ่งกติกาเดิมของฟีดจะวางผิดวัน"""
+    """กติกาวันของ effective_time : เทียบกติกาเดิม (เลื่อนเป็นวันถัดไปเสมอเมื่อเวลาที่ระบุน้อยกว่าเวลาโพสต์เกิน 2 ชม.) กับกติกาปัจจุบัน
+    (เลื่อนเฉพาะที่โพสต์ตั้งแต่ 12:00) — นับรายการที่เวลามีผลเปลี่ยน ต่อกลุ่มผู้ขาย พร้อมชุด 'ชั่วโมงโพสต์→เวลาที่ระบุ'"""
     e = df[df.has_eff].drop_duplicates(["msg", "provider", "warehouse", "fuel", "effective"])
-    out = [f"[PRICELOG] ราคาที่ระบุ effective_time {len(e)} รายการ ถูกเลื่อนเป็นวันถัดไป {int(e.shifted.sum())} ({float(e.shifted.mean()):.0%}) ; ที่โพสต์ก่อน 12:00 แล้วถูกเลื่อน (น่าสงสัยว่าเป็นประกาศย้อนหลัง) ต่อกลุ่ม :"]
-    sus = e[e.shifted & (e.posted.dt.hour < 12)]
-    for grp, g in sus.groupby("group"):
-        combos = (g.posted.dt.strftime("%H") + "น.→" + (g.effective - pd.Timedelta(days=1)).dt.strftime("%H:%M")).value_counts().head(5)
-        out.append(f"   {grp:<7} {len(g):>4} รายการ ({len(g) / max(int(e[e.group == grp].shifted.sum()), 1):.0%} ของที่ถูกเลื่อน) โพสต์→เวลาที่ระบุ: " + " ".join(f"{k}:{v}" for k, v in combos.items()))
+    changed = e[e.effective != e.eff_old]
+    out = [f"[PRICELOG] ราคาที่ระบุ effective_time {len(e)} รายการ : เลื่อนเป็นวันถัดไปตามกติกาเดิม {int((e.eff_old.dt.date > e.posted.dt.date).sum())} ; "
+           f"ตามกติกาปัจจุบัน {int(e.shifted.sum())} ; เวลามีผลต่างกันระหว่างกติกา {len(changed)} รายการ ({len(changed) / max(len(e), 1):.1%})"]
+    for grp, g in changed.groupby("group"):
+        combos = (g.posted.dt.strftime("%H") + "น.→" + g.effective.dt.strftime("%H:%M")).value_counts().head(5)
+        out.append(f"   {grp:<7} {len(g):>4} รายการ ย้ายจากวันถัดไปมาวันเดียวกัน โพสต์→เวลาที่ระบุ: " + " ".join(f"{k}:{v}" for k, v in combos.items()))
+    return out
+
+
+def rule_impact_report(df: pd.DataFrame) -> list:
+    """ราคาต่ำสุดของตลาด (ทุกผู้ขาย) ณ จุดเวลาต่าง ๆ ต่างกันหรือไม่เมื่อใช้กติกาเดิมเทียบกับกติกาปัจจุบัน — ยืนยันว่าจุดวัด 20:30/15:30 ไม่เปลี่ยน"""
+    import diag_price_min as M
+
+    def frame(col):
+        p = df[["provider", "warehouse", "fuel", "price"]].copy()
+        p["effective"] = df[col]
+        p["key"] = p.provider + "|" + p.warehouse
+        p["_ord"] = range(len(p))
+        return p
+    old_p, new_p = frame("eff_old"), frame("effective")
+    days = pd.date_range(df.effective.min().normalize() + pd.Timedelta(days=4), df.effective.max().normalize() - pd.Timedelta(days=3), freq="D")
+    spots = {"20:30": 20.5, "15:30": 15.5, "20:30+24ชม.": 44.5, "20:30+48ชม.": 68.5, "02:00": 2.0, "05:00": 5.0, "07:00": 7.0, "09:00": 9.0, "16:30": 16.5}
+    out = [f"[PRICELOG] ราคาต่ำสุดของตลาด เทียบกติกาเดิม/ปัจจุบัน ({len(days)} วัน × G95, B7) : จุดเวลา → จำนวนที่ต่างกัน (≥0.01 บาท) / ทั้งหมด ; ส่วนต่างเฉลี่ยที่ต่าง"]
+    for name, hr in spots.items():
+        diffs, n = [], 0
+        for fuel in ("G95", "B7"):
+            t = pd.DatetimeIndex([d + pd.Timedelta(hours=hr) for d in days])
+            a, b = M.quote_table(old_p, fuel, t).price.to_numpy(), M.quote_table(new_p, fuel, t).price.to_numpy()
+            ok = ~(np.isnan(a) | np.isnan(b))
+            n += int(ok.sum())
+            diffs += list((b[ok] - a[ok])[np.abs(b[ok] - a[ok]) >= 0.01])
+        out.append(f"   {name:<12} {len(diffs):>3}/{n}" + (f" ; เฉลี่ย {float(np.mean(diffs)):+.2f} (ช่วง {min(diffs):+.2f}..{max(diffs):+.2f})" if diffs else ""))
     return out
 
 
@@ -237,7 +268,7 @@ def main():
     df = build_frame(values)
     print(f"[PRICELOG] rows={len(df)} {df.date.min()}→{df.date.max()} jobber: " + ", ".join(f"{k}={v}" for k, v in df.jobber.value_counts().head(6).items()))
     for line in (discount_report(df) + jobber_gap_report(df) + coverage_report(df) + announce_time_report(df)
-                 + episode_timing_report(df) + shift_report(df)):
+                 + episode_timing_report(df) + shift_report(df) + rule_impact_report(df)):
         print(line)
 
 
