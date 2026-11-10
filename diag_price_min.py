@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from common import SHEET_ID, TABS, TZ_NAME, get_token, sheets_get, to_ts
+from tap_policy import load_outlook  # noqa: F401
 
 MAX_AGE_DAYS = 3                      # เท่ากับ signals.MARKET_MAX_AGE_DAYS
 # คลังหลัก = (ข้อความในชื่อผู้ขาย, ข้อความในชื่อคลัง) ; "" = ไม่จำกัด — สมมติฐานที่ต้องยืนยัน (ดูรายการที่จับคู่ได้จริงในผลรัน)
@@ -182,21 +183,6 @@ def summarize(df: pd.DataFrame) -> str:
         lines.append(f"  {fuel:>3} H{hz:<2} {basis:<4} วัน={len(g):>2} ฟันธง={int(calls.sum()):>2} ถูก={right:>2} ผิด={wrong:>2} ใกล้เดิม={int(calls.sum()) - right - wrong:>2}"
                      f" กำไร/วัน={mv.sum() / len(g):+.3f} | ไม่ชัดแต่ขยับ≥10สต={unc_moved}/{int((sg == 0).sum())} | ราคาไม่ขยับเลย(0.00)={int((g['delta'].abs() < 0.005).sum())}")
     return "\n".join(lines)
-
-
-def load_outlook(values: list) -> pd.DataFrame:
-    """แท็บ OutlookLog จาก Sheets API (อ่านแบบ UNFORMATTED จึงได้เลข serial สำหรับวันเวลา) → แถวรอบ 20:30 ที่ออกตรงเวลา ไม่ใช่ backfill
-    1 แถวต่อ (วัน, ชนิด, ขอบฟ้า) รอบแรกเท่านั้น"""
-    head = values[0]
-    d = pd.DataFrame([r + [""] * (len(head) - len(r)) for r in values[1:]], columns=head)
-    d["asof"], d["ref"] = d["asof"].map(to_ts), d["ref"].map(to_ts)
-    d["hours"] = pd.to_numeric(d["hours"], errors="coerce")
-    d = d.dropna(subset=["asof", "ref", "hours"])
-    d = d[(d["ref"].dt.strftime("%H:%M") == "20:30") & ((d["asof"] - d["ref"]) <= pd.Timedelta(hours=3))]
-    if "backfilled" in d.columns:
-        d = d[pd.to_numeric(d["backfilled"], errors="coerce").fillna(0) == 0]
-    d = d.assign(date=d["ref"].dt.strftime("%Y-%m-%d")).sort_values("asof").drop_duplicates(["date", "fuel", "hours"], keep="first")
-    return d
 
 
 def main():

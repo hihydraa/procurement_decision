@@ -29,6 +29,7 @@ TABS = {
     "DECISION_LOG": "DecisionLog",
     "DISPATCH_LOG": "DispatchLog",
     "OUTLOOK_LOG": "OutlookLog",
+    "TAPREC_LOG": "TapRecLog",
 }
 
 TZ_NAME = "Asia/Bangkok"
