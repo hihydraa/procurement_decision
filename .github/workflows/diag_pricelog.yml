@@ -21,3 +21,8 @@ jobs:
         env:
           SA_EMAIL: ${{ secrets.SA_EMAIL }}
           SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
+      - name: Tap-time price profile
+        run: python diag_tap_profile.py
+        env:
+          SA_EMAIL: ${{ secrets.SA_EMAIL }}
+          SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
