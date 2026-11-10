@@ -36,3 +36,13 @@ jobs:
         env:
           SA_EMAIL: ${{ secrets.SA_EMAIL }}
           SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
+      - name: Plan evaluation (Forecast Log Plan/Backtest vs PriceLog)
+        run: python diag_plan_eval.py
+        env:
+          SA_EMAIL: ${{ secrets.SA_EMAIL }}
+          SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
+      - name: PriceLog gaps (pipeline stop vs quiet)
+        run: python diag_pricelog_gaps.py
+        env:
+          SA_EMAIL: ${{ secrets.SA_EMAIL }}
+          SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
