@@ -110,5 +110,55 @@ class AnnouncementTest(unittest.TestCase):
         self.assertNotIn("IRPC", "\n".join(P.change_timing_report(df, explicit=True)))               # ไม่มีแถวที่ระบุเวลา
 
 
+class EpisodeTest(unittest.TestCase):
+    def _df(self):
+        rows = [HEAD]
+        # วัน 1 : ทั้งสองจ๊อบเบอร์ที่ 39.0 ; วัน 2 : ขึ้น +0.5 — ต้องบุญโพสต์ 08:10 ไม่ระบุเวลา, ศรีพลังโพสต์ 17:00 วันก่อนหน้าระบุมีผล 05:00 ของวันนั้น
+        rows.append(row("ต้องบุญ", "ไออาร์", "ระยอง", "B7", 39.0, 39.0, date="2026-11-01", time="10:30", eff="10:25"))
+        rows.append(row("ศรีพลัง", "ไออาร์", "ระยอง", "B7", 39.0, 39.0, date="2026-11-01", time="10:35", eff="10:25"))
+        rows.append(row("ศรีพลัง", "ไออาร์", "ระยอง", "B7", 39.5, 39.5, date="2026-11-01", time="17:00", eff="05:00"))   # เลื่อนเป็น 11-02 05:00
+        rows.append(row("ต้องบุญ", "ไออาร์", "ระยอง", "B7", 39.5, 39.5, date="2026-11-02", time="08:10", eff=""))
+        # ขึ้นอีกครั้งอีกวัน ไม่มีใครระบุเวลา
+        rows.append(row("ต้องบุญ", "ไออาร์", "ระยอง", "B7", 40.0, 40.0, date="2026-11-05", time="08:20", eff=""))
+        rows.append(row("ศรีพลัง", "ไออาร์", "ระยอง", "B7", 40.0, 40.0, date="2026-11-05", time="08:25", eff=""))
+        return P.build_frame(rows)
+
+    def test_episodes_merge_jobbers_and_prefer_explicit_time(self):
+        e = P.episodes(self._df(), sign=1)
+        self.assertEqual(len(e), 2)                                                    # 11-02 (ต้องบุญ+ศรีพลัง รวมเป็นเหตุการณ์เดียว) และ 11-05
+        e = e.sort_values("time").reset_index(drop=True)
+        self.assertTrue(e.explicit[0])
+        self.assertEqual(e.time[0], pd.Timestamp("2026-11-02 05:00"))
+        self.assertFalse(e.explicit[1])
+        self.assertEqual(e.time[1], pd.Timestamp("2026-11-05 08:20"))                 # ไม่มีใครระบุ = เวลาแรกที่เห็น
+
+    def test_episode_report_lines(self):
+        df = self._df()
+        rows = [HEAD]
+        # เพิ่มเหตุการณ์ให้ถึงเกณฑ์แสดง (≥5) : ขึ้น 23:30 ระบุเวลา 4 วัน
+        for i in range(4):
+            d = (pd.Timestamp("2026-11-10") + pd.Timedelta(days=i * 3)).strftime("%Y-%m-%d")
+            rows.append(row("ต้องบุญ", "ไออาร์", "ระยอง", "B7", 39.0, 39.0, date=d, time="10:30", eff="10:25"))
+            nxt = (pd.Timestamp(d) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+            rows.append(row("ต้องบุญ", "ไออาร์", "ระยอง", "B7", 39.6, 39.6, date=nxt, time="17:00", eff="23:30"))
+        more = P.build_frame(rows[1:] and [HEAD] + rows[1:])
+        lines = "\n".join(P.episode_timing_report(pd.concat([df, more], ignore_index=True)))
+        self.assertIn("ขึ้นใหญ่", lines)
+        self.assertIn("IRPC    n=   6", lines)
+        self.assertIn("23:30-23:59:4", lines)
+        self.assertIn("05:00-07:59:1", lines)
+        self.assertIn("ไม่ระบุ   1: 08:00-08:59:1", lines)
+
+    def test_shift_report_flags_morning_posts(self):
+        rows = [HEAD,
+                row("ศรีพลัง", "ไออาร์", "ระยอง", "B7", 40.0, 40.0, date="2026-11-10", time="08:22", eff="05:00", msg="a"),    # โพสต์เช้า ระบุ 05:00 → ถูกเลื่อน
+                row("ศรีพลัง", "ไออาร์", "ระยอง", "B7", 39.0, 39.0, date="2026-11-09", time="17:05", eff="05:00", msg="b"),    # ประกาศล่วงหน้า (เย็น) ถูกเลื่อนถูกต้อง
+                row("ต้องบุญ", "ไออาร์", "ระยอง", "B7", 38.0, 38.0, date="2026-11-09", time="10:30", eff="10:25", msg="c")]    # ไม่เลื่อน
+        lines = "\n".join(P.shift_report(P.build_frame(rows)))
+        self.assertIn("3 รายการ ถูกเลื่อนเป็นวันถัดไป 2", lines)
+        self.assertIn("IRPC       1 รายการ (50% ของที่ถูกเลื่อน)", lines)
+        self.assertIn("08น.→05:00:1", lines)
+
+
 if __name__ == "__main__":
     unittest.main()
