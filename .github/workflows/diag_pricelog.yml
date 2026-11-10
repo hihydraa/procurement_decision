@@ -1,0 +1,23 @@
+name: Diagnose PriceLog (discounts, jobber gaps, change timing; read-only)
+
+# รันมือเท่านั้น : ตรวจส่วนลดต้องบุญ, ส่วนต่างต้องบุญ/ศรีพลัง และเวลาที่ราคาเปลี่ยนจริงจาก PriceLog — ไม่เขียนอะไรลงชีท
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Diagnose
+        run: python diag_pricelog.py
+        env:
+          SA_EMAIL: ${{ secrets.SA_EMAIL }}
+          SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
