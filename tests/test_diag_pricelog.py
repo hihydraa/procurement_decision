@@ -71,8 +71,8 @@ class TimingTest(unittest.TestCase):
         df = P.build_frame(rows)
         lines = "\n".join(P.change_timing_report(df))
         self.assertIn("IRPC    n=   29", lines)
-        self.assertIn("00:00-00:59 15/0 (15/0)", lines)         # ขึ้น 15 ครั้ง ทั้งหมดเป็นการขึ้นใหญ่ ที่เที่ยงคืน
-        self.assertIn("09:00-12:59 0/14 (0/0)", lines)          # ลงเล็ก 14 ครั้งช่วงสาย (ครั้งแรกไม่มีค่าก่อนหน้า)
+        self.assertIn("00:00-00:59 14/0 (14/0)", lines)         # ขึ้นใหญ่ที่เที่ยงคืน 14 ครั้ง (ครั้งแรกของชุดไม่มีราคาก่อนหน้า จึงไม่นับ)
+        self.assertIn("09:00-12:59 0/15 (0/0)", lines)          # ลงเล็กช่วงสาย 15 ครั้ง ไม่ถึงเกณฑ์ใหญ่
 
 
 if __name__ == "__main__":
