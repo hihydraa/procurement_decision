@@ -47,6 +47,7 @@ def core_matches(p: pd.DataFrame) -> dict:
 
 def clean_prices(prices: pd.DataFrame) -> pd.DataFrame:
     p = prices.copy()
+    p["_ord"] = np.arange(len(p))                       # ลำดับแถวในชีท (ไว้ตัดสินราคาที่ซ้ำเวลาเดียวกัน)
     p["effective"] = pd.to_datetime(p["effective"], errors="coerce")
     p["price"] = pd.to_numeric(p["price"], errors="coerce")
     p = p.dropna(subset=["effective", "price"])
@@ -55,7 +56,32 @@ def clean_prices(prices: pd.DataFrame) -> pd.DataFrame:
     return p
 
 
-def quote_table(p: pd.DataFrame, fuel: str, times, key_ok=None, max_age_h: float = None) -> pd.DataFrame:
+DUP_MODES = ("last", "first", "min", "max")
+
+
+def resolve_dups(g: pd.DataFrame, dup: str) -> pd.DataFrame:
+    """ราคาที่โพสต์เวลาเดียวกันหลายค่า (ผู้ขาย|คลัง|ชนิด เดียวกัน) : last/first = ตามลำดับแถวในชีท (คงที่) ; min/max = ต่ำ/สูงสุดของเวลานั้น"""
+    g = g.sort_values(["effective", "_ord"], kind="stable")
+    if dup in ("last", "first"):
+        return g.drop_duplicates("effective", keep=dup)[["effective", "price"]]
+    agg = g.groupby("effective").price.min() if dup == "min" else g.groupby("effective").price.max()
+    return agg.reset_index()[["effective", "price"]]
+
+
+def dup_report(p: pd.DataFrame) -> str:
+    """ราคาซ้ำเวลาเดียวกันแต่ราคาต่างกัน : มีกี่กลุ่ม ส่วนต่างเท่าไร และแถวหลังในชีทแพงกว่าหรือไม่"""
+    g = p.groupby(["fuel", "key", "effective"])
+    n_all = g.ngroups
+    spread = g.price.agg(lambda x: round(float(x.max() - x.min()), 2))
+    multi = spread[spread > 0]
+    last_higher = g.apply(lambda x: bool(x.sort_values("_ord").price.iloc[-1] >= x.price.max() - 1e-9) if x.price.nunique() > 1 else np.nan).dropna()
+    top = multi.value_counts().head(4)
+    gaps = ", ".join(f"{k:.2f}:{v}" for k, v in top.items())
+    return (f"[DIAG] ราคาซ้ำเวลาเดียวกันแต่ต่างกัน {len(multi)}/{n_all} กลุ่ม ({len(multi) / max(n_all, 1):.0%}) ; ส่วนต่างที่พบบ่อย (บาท:จำนวน) {gaps} ; "
+            f"แถวหลังสุดในชีทเป็นราคาสูงสุดของกลุ่ม {float(last_higher.mean()):.0%}")
+
+
+def quote_table(p: pd.DataFrame, fuel: str, times, key_ok=None, max_age_h: float = None, dup: str = "last") -> pd.DataFrame:
     """ต่อเวลา t : ราคาต่ำสุด, ผู้ถือราคา (provider|warehouse), เวลาโพสต์ของราคานั้น, อายุ (ชม.) — วิธีเดียวกับ PriceBook.min_at
     key_ok = ฟังก์ชันเลือกคลัง (None = ทุกผู้ขาย) ; max_age_h = ไม่นับราคาที่เก่ากว่านี้ (None = ตามปกติ 3 วัน)"""
     times = pd.DatetimeIndex(times)
@@ -64,7 +90,7 @@ def quote_table(p: pd.DataFrame, fuel: str, times, key_ok=None, max_age_h: float
     for (f, key), g in p[p.fuel == fuel].groupby(["fuel", "key"]):
         if key_ok is not None and not key_ok(key):
             continue
-        g = g.sort_values("effective")[["effective", "price"]].drop_duplicates("effective", keep="last")
+        g = resolve_dups(g, dup)
         m = pd.merge_asof(grid, g, left_on="t", right_on="effective", tolerance=pd.Timedelta(days=MAX_AGE_DAYS))
         cols.append(m[["price", "effective"]].to_numpy())
         keys.append(key)
@@ -110,6 +136,36 @@ def rescore(rows: pd.DataFrame, p: pd.DataFrame, now: pd.Timestamp) -> pd.DataFr
                     out.append({"date": row["date"], "fuel": fuel, "hours": int(hz), "tier": row["tier"], "basis": name,
                                 "logged": row.get("outcome_delta"), "delta": d[i]})
     return pd.DataFrame(out)
+
+
+def to_float(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return np.nan
+
+
+def mismatch_rows(rows: pd.DataFrame, p: pd.DataFrame, now: pd.Timestamp) -> list:
+    """แถว OutlookLog ที่ครบกำหนดแล้ว พร้อมราคา ณ ref/target ที่คำนวณใหม่ในแต่ละโหมดตัดสินราคาซ้ำ เทียบกับค่าที่บันทึกไว้เดิม"""
+    out = []
+    for _, r in rows.iterrows():
+        t0 = pd.Timestamp(r["ref"])
+        t1 = t0 + pd.Timedelta(hours=int(r["hours"]))
+        lg = to_float(r.get("outcome_delta"))
+        if t1 + pd.Timedelta(minutes=30) > now or np.isnan(lg):
+            continue
+        modes = {}
+        for m in DUP_MODES:
+            a = quote_table(p, r["fuel"], pd.DatetimeIndex([t0]), dup=m).iloc[0]
+            b = quote_table(p, r["fuel"], pd.DatetimeIndex([t1]), dup=m).iloc[0]
+            modes[m] = {"a": a.price, "b": b.price, "d": round(float(b.price - a.price), 2), "ha": a.holder, "hb": b.holder}
+        out.append({"date": r["date"], "fuel": r["fuel"], "hours": int(r["hours"]), "lg_a": to_float(r.get("price_ref")), "lg_b": to_float(r.get("price_target")),
+                    "lg_d": lg, "modes": modes})
+    return out
+
+
+def agreement(out: list, tol: float = 0.02) -> dict:
+    return {m: sum(abs(x["modes"][m]["d"] - x["lg_d"]) <= tol for x in out) for m in DUP_MODES}
 
 
 def summarize(df: pd.DataFrame) -> str:
@@ -181,6 +237,16 @@ def main():
     ol = sheets_get(tok, SHEET_ID, f"{TABS['OUTLOOK_LOG']}!A1:R50000")
     d = load_outlook(ol)
     print(f"[DIAG] แถว OutlookLog ที่ใช้ให้คะแนน (20:30 ตรงเวลา) = {len(d)}")
+    print(dup_report(p))
+    mm = mismatch_rows(d, p, now)
+    ag = agreement(mm)
+    print(f"[DIAG] ผลต่างที่คำนวณใหม่ตรงกับที่บันทึก (±0.02) แยกตามวิธีเลือกราคาซ้ำ จาก {len(mm)} แถว : " + " ; ".join(f"{m}={n}" for m, n in ag.items()))
+    bad = [x for x in mm if abs(x["modes"]["last"]["d"] - x["lg_d"]) > 0.02]
+    print(f"[DIAG] แถวที่ไม่ตรง (last) {len(bad)} แถว : วัน ชนิด ขอบฟ้า | บันทึก ref→target (Δ) | last | min | max  (ราคา ref→target, Δ) | ผู้ถือ ref/target (last)")
+    for x in bad:
+        f = lambda m: f"{x['modes'][m]['a']:.2f}→{x['modes'][m]['b']:.2f} ({x['modes'][m]['d']:+.2f})"
+        print(f"  {x['date']} {x['fuel']:>3} H{x['hours']} | {x['lg_a']:.2f}→{x['lg_b']:.2f} ({x['lg_d']:+.2f}) | {f('last')} | {f('min')} | {f('max')} | "
+              f"{str(x['modes']['last']['ha'])[:18]} / {str(x['modes']['last']['hb'])[:18]}")
     res = rescore(d[["date", "ref", "fuel", "hours", "tier", "outcome_delta"]], p, now)
     mism = res[(res.basis == "all") & res.delta.notna()]
     lg = pd.to_numeric(mism["logged"], errors="coerce")
