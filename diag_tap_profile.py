@@ -15,8 +15,9 @@ import warnings
 import numpy as np
 import pandas as pd
 
-from common import OILBOT_SHEET_ID, get_token, sheets_get
+from common import OILBOT_SHEET_ID, SHEET_ID, TABS, get_token, sheets_get
 from diag_pricelog import build_frame
+from diag_price_min import load_outlook
 
 MAX_AGE_H = 30                       # ราคาเก่ากว่านี้ไม่นับ
 FLAT = 0.10                          # ขยับ 24 ชม. < 10 สต. = ทรง (เท่ากับเกณฑ์ขึ้น/ลงของแนวโน้ม)
@@ -104,11 +105,68 @@ def profile_report(rows: pd.DataFrame) -> list:
     return out
 
 
+# นโยบายเลือกจุดแตะจากแนวโน้ม 24 ชม. ที่ออกตอน 20:30 วันก่อน (ขึ้น/ลง/ไม่ชัด → จุดแตะ)
+POLICIES = {
+    "แนวโน้ม A (ขึ้น→ก่อน22:30, ลง→16:30, ไม่ชัด→ก่อน22:30)": {"ขึ้น": "ก่อน22:30", "ลง": "16:30", "ไม่ชัด": "ก่อน22:30"},
+    "แนวโน้ม B (ขึ้น→07:00, ลง→16:30, ไม่ชัด→07:00)": {"ขึ้น": "07:00", "ลง": "16:30", "ไม่ชัด": "07:00"},
+    "แนวโน้ม C (ขึ้น→ก่อน22:30, ลง→16:30, ไม่ชัด→16:30)": {"ขึ้น": "ก่อน22:30", "ลง": "16:30", "ไม่ชัด": "16:30"},
+}
+ORACLE = {"ขึ้น": "ก่อน22:30", "ทรง": "ก่อน22:30", "ลง": "16:30"}      # ทายทิศถูกทุกครั้ง (ใช้ทิศจริงของวัน)
+
+
+def join_outlook(rows: pd.DataFrame, ol: pd.DataFrame, hours: int = 24) -> pd.DataFrame:
+    """ผูกแนวโน้มที่ออก 20:30 ของวัน r (ขอบฟ้า hours) กับวัน D = r+1 ของ day_rows (ช่วง 20:30 r → 20:30 D) ต่อชนิดน้ำมัน"""
+    o = ol[ol.hours == hours].copy()
+    o["day"] = o.ref.dt.normalize() + pd.Timedelta(days=1)
+    m = rows.merge(o[["fuel", "day", "tier"]], on=["fuel", "day"])
+    m["pred"] = m.tier.map(lambda t: "ขึ้น" if str(t).startswith("UP") else "ลง" if str(t).startswith("DOWN") else "ไม่ชัด")
+    return m
+
+
+def policy_regret(m: pd.DataFrame, mapping: dict, key: str = "pred") -> pd.Series:
+    """regret ของแต่ละแถว (คลัง-ชนิด-วัน) เมื่อเลือกจุดแตะตาม mapping[key]"""
+    return m.apply(lambda r: r[mapping[r[key]]], axis=1)
+
+
+def diff_ci(m: pd.DataFrame, a: pd.Series, b: pd.Series, reps: int = 2000, seed: int = 7):
+    """ผลต่างเฉลี่ย (a − b) และช่วงเชื่อมั่น 95% แบบ bootstrap รายวัน (หน่วยอิสระ = วันที่ ไม่ใช่แถว เพราะทุกคลังขยับตามกัน)"""
+    per_day = (a - b).groupby(m.day).mean().to_numpy()
+    rng = np.random.default_rng(seed)
+    boots = rng.choice(per_day, size=(reps, len(per_day)), replace=True).mean(axis=1)
+    return float(per_day.mean()), float(np.percentile(boots, 2.5)), float(np.percentile(boots, 97.5))
+
+
+def policy_report(rows: pd.DataFrame, ol: pd.DataFrame) -> list:
+    m = join_outlook(rows, ol)
+    if m.empty:
+        return ["[POLICY] ไม่มีวันที่ทั้งมีแนวโน้มและมีราคาครบ"]
+    nd = m.day.nunique()
+    out = [f"[POLICY] ประเมินนโยบายด้วยแนวโน้ม 24 ชม. ที่ออกจริง (OutlookLog รอบ 20:30 ตรงเวลา) {nd} วัน ({m.day.min():%d/%m}–{m.day.max():%d/%m}) × {m[['depot', 'fuel']].drop_duplicates().shape[0]} คลัง-ชนิด = {len(m)} แถว ; regret = บาท/ลิตรที่แพงกว่าต่ำสุดของช่วง"]
+    conf = pd.crosstab(m.pred, m.cls).reindex(index=["ขึ้น", "ลง", "ไม่ชัด"], columns=["ขึ้น", "ทรง", "ลง"], fill_value=0)
+    out.append("   แนวโน้มที่ทาย → ทิศจริงของวัน (ขึ้น/ทรง/ลง ต่อแถว): " + " ; ".join(f"{p} → {int(conf.loc[p, 'ขึ้น'])}/{int(conf.loc[p, 'ทรง'])}/{int(conf.loc[p, 'ลง'])}" for p in conf.index))
+    fixed = {k: m[k] for k in ("ก่อน22:30", "07:00", "16:30")}
+    best = min(TAPS, key=lambda k: m[k].mean())
+    out.append("   แตะเวลาคงที่ : " + " | ".join(f"{k} {float(v.mean()):.3f}" for k, v in fixed.items()) + f" | ที่ดีที่สุดในตัวอย่างนี้ {best} {float(m[best].mean()):.3f}")
+    base = m[best]
+    for name, mapping in POLICIES.items():
+        r = policy_regret(m, mapping)
+        d, lo, hi = diff_ci(m, r, base)
+        out.append(f"   {name}: regret {float(r.mean()):.3f} ; เทียบ {best} คงที่ {d:+.3f} (95% {lo:+.3f}..{hi:+.3f})")
+    ro = policy_regret(m, ORACLE, key="cls")
+    out.append(f"   ทายทิศถูกทุกครั้ง (เพดาน): regret {float(ro.mean()):.3f}")
+    out.append("   ตัวเลขลบ = ทำตามแนวโน้มแล้ว regret ต่ำลง ; ถ้าช่วงเชื่อมั่นคร่อม 0 แปลว่ายังแยกจากการแตะเวลาคงที่ไม่ได้ ; ยังไม่หักเงื่อนไขคลัง/เวลาเดินทาง/เวลามีผลที่ไม่ทราบ")
+    return out
+
+
 def main():
     tok = get_token()
     df = build_frame(sheets_get(tok, OILBOT_SHEET_ID, "PriceLog!A1:Q200000")).reset_index(drop=True)
     print(f"[TAP] PriceLog rows={len(df)} {df.date.min()}→{df.date.max()}")
-    for line in profile_report(day_rows(df)):
+    rows = day_rows(df)
+    for line in profile_report(rows):
+        print(line)
+    ol = load_outlook(sheets_get(tok, SHEET_ID, f"{TABS['OUTLOOK_LOG']}!A1:R50000"))
+    for line in policy_report(rows, ol):
         print(line)
 
 

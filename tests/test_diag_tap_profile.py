@@ -64,5 +64,53 @@ class ProfileTest(unittest.TestCase):
         self.assertTrue(((out.delta - 0.5).abs() < 1e-9).all())
 
 
+class PolicyTest(unittest.TestCase):
+    def setUp(self):
+        taps = {k: 0.0 for k in T.TAPS}
+        rows = []
+        # 6 วัน × ดีเซล 1 คลัง : วันขึ้น (แตะก่อน22:30 ได้ 0.0 ; แตะ 16:30 แพง 0.6) / วันลง (แตะ 16:30 ได้ 0.0 ; แตะก่อน22:30 แพง 0.6)
+        for i, cls in enumerate(["ขึ้น", "ลง", "ขึ้น", "ลง", "ขึ้น", "ลง"]):
+            r = {"depot": "ไออาร์ ระยอง", "fuel": "B7", "day": pd.Timestamp("2026-11-02") + pd.Timedelta(days=i), "cls": cls, "delta": 0.5 if cls == "ขึ้น" else -0.5, **taps}
+            for k in T.TAPS:
+                r[k] = 0.3 if k not in ("ก่อน22:30", "16:30") else 0.0
+            if cls == "ขึ้น":
+                r["16:30"] = 0.6
+            else:
+                r["ก่อน22:30"] = 0.6
+            rows.append(r)
+        self.rows = pd.DataFrame(rows)
+        ref = [pd.Timestamp("2026-11-01 20:30") + pd.Timedelta(days=i) for i in range(6)]                 # ออก 20:30 วันก่อนของแต่ละวัน
+        self.ol = pd.DataFrame({"ref": ref, "fuel": "B7", "hours": 24, "tier": ["UP", "DOWN", "UP_STRONG", "UP", "DOWN_STRONG", "UNCLEAR"]})
+        # วันที่ 4 ทายขึ้นแต่จริงเป็นลง ; วันที่ 6 ไม่ชัด
+
+    def test_join_uses_next_day_window(self):
+        m = T.join_outlook(self.rows, self.ol)
+        self.assertEqual(len(m), 6)
+        self.assertEqual(list(m.sort_values("day").pred), ["ขึ้น", "ลง", "ขึ้น", "ขึ้น", "ลง", "ไม่ชัด"])
+
+    def test_policy_regret_and_oracle(self):
+        m = T.join_outlook(self.rows, self.ol).sort_values("day").reset_index(drop=True)
+        r = T.policy_regret(m, T.POLICIES["แนวโน้ม A (ขึ้น→ก่อน22:30, ลง→16:30, ไม่ชัด→ก่อน22:30)"])
+        # ทายถูก 3 ครั้ง (0.0) ; วันที่ 4 ทายขึ้นจริงลง → ก่อน22:30 = 0.6 ; วันที่ 5 ทายลง จริงขึ้น → 16:30 = 0.6 ; วันที่ 6 ไม่ชัด→ก่อน22:30 จริงลง = 0.6
+        self.assertEqual(list(r.round(2)), [0.0, 0.0, 0.0, 0.6, 0.6, 0.6])
+        self.assertAlmostEqual(float(T.policy_regret(m, T.ORACLE, key="cls").mean()), 0.0)
+
+    def test_diff_ci_is_deterministic_and_covers_mean(self):
+        m = T.join_outlook(self.rows, self.ol).sort_values("day").reset_index(drop=True)
+        a = T.policy_regret(m, T.POLICIES["แนวโน้ม A (ขึ้น→ก่อน22:30, ลง→16:30, ไม่ชัด→ก่อน22:30)"])
+        d1 = T.diff_ci(m, a, m["07:00"])
+        d2 = T.diff_ci(m, a, m["07:00"])
+        self.assertEqual(d1, d2)
+        self.assertLessEqual(d1[1], d1[0])
+        self.assertGreaterEqual(d1[2], d1[0])
+
+    def test_report_lines(self):
+        lines = "\n".join(T.policy_report(self.rows, self.ol))
+        self.assertIn("6 วัน", lines)
+        self.assertIn("แนวโน้มที่ทาย → ทิศจริงของวัน", lines)
+        self.assertIn("ไม่ชัด → 0/0/1", lines)
+        self.assertIn("ทายทิศถูกทุกครั้ง (เพดาน): regret 0.000", lines)
+
+
 if __name__ == "__main__":
     unittest.main()
