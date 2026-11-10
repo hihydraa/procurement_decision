@@ -87,6 +87,43 @@ class FreshAndLoaderTest(unittest.TestCase):
         self.assertEqual(d.iloc[0]["date"], "2026-11-05")
 
 
+class DuplicateQuotesTest(unittest.TestCase):
+    def setUp(self):
+        # ไออาร์ ระยอง โพสต์ 2 ราคาเวลาเดียวกัน ห่างกัน 0.05 / 0.02 (เหมือนในฟีดจริง) ; แถวแรกของแต่ละเวลาต่ำกว่า
+        self.p = prices([
+            ["ไออาร์", "ระยอง", "B7", 39.55, "2026-11-09 10:25"],
+            ["ไออาร์", "ระยอง", "B7", 39.60, "2026-11-09 10:25"],
+            ["ไออาร์", "ระยอง", "B7", 39.50, "2026-11-09 14:00"],
+            ["ไออาร์", "ระยอง", "B7", 39.52, "2026-11-09 14:00"],
+        ])
+
+    def test_modes(self):
+        t = pd.DatetimeIndex(["2026-11-09 12:00"])
+        got = {m: D.quote_table(self.p, "B7", t, dup=m).price.iloc[0] for m in D.DUP_MODES}
+        self.assertEqual(got, {"last": 39.60, "first": 39.55, "min": 39.55, "max": 39.60})
+
+    def test_dup_report_counts_groups_and_gap(self):
+        rep = D.dup_report(self.p)
+        self.assertIn("2/2 กลุ่ม", rep)
+        self.assertIn("0.05:1", rep)
+        self.assertIn("0.02:1", rep)
+        self.assertIn("100%", rep)                                                      # แถวหลังเป็นราคาสูงสุดทั้งสองกลุ่ม
+
+    def test_mismatch_rows_and_agreement(self):
+        # ref 12:00 → target 15:00 ; ค่าที่บันทึกไว้ −0.05 = 39.55 → 39.50 ซึ่งตรงกับโหมด first/min ไม่ตรงกับ last/max (39.60 → 39.52 = −0.08)
+        rows = pd.DataFrame([{"date": "2026-11-09", "ref": pd.Timestamp("2026-11-09 12:00"), "fuel": "B7", "hours": 3, "tier": "UP",
+                              "outcome_delta": "-0.05", "price_ref": "39.55", "price_target": "39.50"}])
+        mm = D.mismatch_rows(rows, self.p, pd.Timestamp("2026-11-10 10:00"))
+        self.assertEqual(len(mm), 1)
+        self.assertEqual({m: mm[0]["modes"][m]["d"] for m in D.DUP_MODES}, {"last": -0.08, "first": -0.05, "min": -0.05, "max": -0.08})
+        self.assertEqual(D.agreement(mm, tol=0.02), {"last": 0, "first": 1, "min": 1, "max": 0})
+
+    def test_not_ready_row_is_skipped(self):
+        rows = pd.DataFrame([{"date": "2026-11-09", "ref": pd.Timestamp("2026-11-09 12:00"), "fuel": "B7", "hours": 48, "tier": "UP",
+                              "outcome_delta": "", "price_ref": "", "price_target": ""}])
+        self.assertEqual(D.mismatch_rows(rows, self.p, pd.Timestamp("2026-11-10 10:00")), [])
+
+
 class RescoreTest(unittest.TestCase):
     def test_flat_all_vs_moving_core(self):
         p = prices([
