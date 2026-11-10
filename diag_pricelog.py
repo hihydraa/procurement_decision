@@ -49,9 +49,26 @@ def effective_ts(date_s: str, time_s: str, eff_s: str):
     return pd.Timestamp(eff)
 
 
+def first_line(text) -> str:
+    for ln in str(text or "").split("\n"):
+        if ln.strip():
+            return ln.strip()
+    return ""
+
+
+def stated(line: str) -> tuple:
+    """บรรทัดแรกของประกาศ → (ทิศ 'ขึ้น'/'ลง'/'?', เวลาที่ระบุ 'HH:MM' หรือ 'เที่ยงคืน' หรือ '') เช่น '9/11/69 : ปรับลง 10.25 น.' → ('ลง', '10:25')"""
+    dirn = "ขึ้น" if "ปรับขึ้น" in line else "ลง" if "ปรับลง" in line else "?"
+    m = re.search(r"(\d{1,2})[.:](\d{2})\s*น", line)
+    if m:
+        return dirn, f"{int(m.group(1)):02d}:{m.group(2)}"
+    return dirn, "เที่ยงคืน" if "เที่ยงคืน" in line else ""
+
+
 def build_frame(values: list) -> pd.DataFrame:
     head = [str(h).strip() for h in values[0]]
-    idx = {c: head.index(c) for c in ("jobber", "provider", "warehouse_name", "fuel_type", "price", "update_date", "update_time", "effective_time", "announced_price")}
+    idx = {c: head.index(c) for c in ("message_id", "jobber", "provider", "warehouse_name", "fuel_type", "price", "update_date", "update_time",
+                                      "effective_time", "announced_price", "raw_text")}
     rows = []
     for r in values[1:]:
         g = lambda c: r[idx[c]] if idx[c] < len(r) else ""
@@ -59,11 +76,14 @@ def build_frame(values: list) -> pd.DataFrame:
         if np.isnan(price):
             continue
         d, t = cell_date(g("update_date")), cell_time(g("update_time"))
-        eff = effective_ts(d, t, cell_time(g("effective_time")))
+        eff_t = cell_time(g("effective_time"))
+        eff = effective_ts(d, t, eff_t)
         if pd.isna(eff):
             continue
-        rows.append((str(g("jobber")), str(g("provider")), str(g("warehouse_name")), str(g("fuel_type")), price, ann, eff, d))
-    df = pd.DataFrame(rows, columns=["jobber", "provider", "warehouse", "fuel", "price", "announced", "effective", "date"])
+        dirn, when = stated(first_line(g("raw_text")))
+        rows.append((str(g("message_id")), str(g("jobber")), str(g("provider")), str(g("warehouse_name")), str(g("fuel_type")), price, ann, eff, d,
+                     bool(re.match(r"^\d{1,2}:\d{2}$", eff_t)), dirn, when))
+    df = pd.DataFrame(rows, columns=["msg", "jobber", "provider", "warehouse", "fuel", "price", "announced", "effective", "date", "has_eff", "dir", "stated"])
     df["group"] = df["provider"].map(provider_group)
     df["discount"] = (df["announced"] - df["price"]).round(2)
     return df
@@ -102,15 +122,19 @@ def jobber_gap_report(df: pd.DataFrame) -> list:
     return out
 
 
-def change_timing_report(df: pd.DataFrame, jobber: str = TBP) -> list:
-    """เวลามีผลของการเปลี่ยนราคา (ราคาที่เก็บของต้องบุญ) ต่อช่วงเวลาของวัน : ขึ้น/ลงทั้งหมด และที่ใหญ่ (≥ BIG)"""
+def change_timing_report(df: pd.DataFrame, jobber: str = TBP, explicit=None) -> list:
+    """เวลามีผลของการเปลี่ยนราคา (ราคาที่เก็บของต้องบุญ) ต่อช่วงเวลาของวัน : ขึ้น/ลงทั้งหมด และที่ใหญ่ (≥ BIG)
+    explicit=True นับเฉพาะแถวที่ระบุ effective_time จริง ; False = แถวที่ไม่ระบุ (ใช้เวลาโพสต์แทน) ; None = ทั้งหมด"""
     d = df[df.jobber == jobber].drop_duplicates(["provider", "warehouse", "fuel", "effective"], keep="last").sort_values("effective")
     d = d.assign(delta=d.groupby(["provider", "warehouse", "fuel"]).price.diff()).dropna(subset=["delta"])
     d = d[d.delta.abs() > 0.004]
+    if explicit is not None:
+        d = d[d.has_eff == explicit]
     d["minute"] = d.effective.dt.hour * 60 + d.effective.dt.minute
-    out = [f"[PRICELOG] เวลามีผลของการเปลี่ยนราคา ({jobber}, {len(d)} ครั้ง ; ใหญ่ = ≥{BIG:.2f} บาท) — ต่อกลุ่มผู้ขาย : ช่วงเวลา → ขึ้นทั้งหมด/ลงทั้งหมด (ใหญ่: ขึ้น/ลง)"]
+    label = {None: "ทั้งหมด", True: "ระบุ effective_time จริง", False: "ไม่ระบุ (ใช้เวลาโพสต์แทน)"}[explicit]
+    out = [f"[PRICELOG] เวลาของการเปลี่ยนราคา ({jobber}, {label}, {len(d)} ครั้ง ; ใหญ่ = ≥{BIG:.2f} บาท) — ช่วงเวลา → ขึ้น/ลง (ใหญ่: ขึ้น/ลง)"]
     for grp, g in d.groupby("group"):
-        if len(g) < 20:
+        if len(g) < 10:
             continue
         cells = []
         for name, lo, hi in BUCKETS:
@@ -122,12 +146,38 @@ def change_timing_report(df: pd.DataFrame, jobber: str = TBP) -> list:
     return out
 
 
+def coverage_report(df: pd.DataFrame) -> list:
+    """ต่อกลุ่มผู้ขาย : สัดส่วนแถวที่ระบุ effective_time จริง / ข้อความที่บรรทัดแรกระบุเวลา / พูดว่าเที่ยงคืน (นับต่อข้อความ ไม่ซ้ำ)"""
+    out = ["[PRICELOG] ความครบของเวลามีผล ต่อกลุ่มผู้ขาย : แถวที่ระบุ effective_time | ข้อความที่บรรทัดแรกระบุเวลา | ข้อความที่บอก 'เที่ยงคืน'"]
+    for grp, g in df.groupby("group"):
+        m = g.drop_duplicates("msg")
+        out.append(f"   {grp:<7} แถว={len(g):>5} มี effective_time {float(g.has_eff.mean()):.0%} | ข้อความ={len(m):>4} ระบุเวลา {float(m.stated.str.contains(':').mean()):.0%} "
+                   f"เที่ยงคืน {float((m.stated == 'เที่ยงคืน').mean()):.0%}")
+    return out
+
+
+def announce_time_report(df: pd.DataFrame, top: int = 10) -> list:
+    """เวลาที่ประกาศระบุไว้ในบรรทัดแรกของข้อความ (ทิศ + เวลา) ต่อจ๊อบเบอร์ นับต่อข้อความ — เห็นว่าการปรับตอนกลางคืนประกาศไว้กี่โมง"""
+    out = []
+    m = df.drop_duplicates("msg")
+    m = m[m.stated != ""]
+    for jb in (TBP, SPL):
+        g = m[m.jobber == jb]
+        top_items = g.groupby(["dir", "stated"]).size().sort_values(ascending=False).head(top)
+        out.append(f"[PRICELOG] เวลาที่ประกาศระบุ ({jb}, {len(g)} ข้อความ) ทิศ+เวลา:จำนวน : " + "  ".join(f"{d}{t}:{n}" for (d, t), n in top_items.items()))
+        night = g[g.stated.isin(["เที่ยงคืน"]) | g.stated.str.match(r"^(2[2-3]|0[0-6]):")]
+        by = night.groupby(["dir", "stated"]).size().sort_values(ascending=False).head(top)
+        out.append(f"   กลางคืน (22:00-06:59 หรือ เที่ยงคืน) {len(night)} ข้อความ : " + "  ".join(f"{d}{t}:{n}" for (d, t), n in by.items()))
+    return out
+
+
 def main():
     tok = get_token()
     values = sheets_get(tok, OILBOT_SHEET_ID, "PriceLog!A1:Q200000")
     df = build_frame(values)
     print(f"[PRICELOG] rows={len(df)} {df.date.min()}→{df.date.max()} jobber: " + ", ".join(f"{k}={v}" for k, v in df.jobber.value_counts().head(6).items()))
-    for line in discount_report(df) + jobber_gap_report(df) + change_timing_report(df):
+    for line in (discount_report(df) + jobber_gap_report(df) + coverage_report(df) + announce_time_report(df)
+                 + change_timing_report(df, explicit=True) + change_timing_report(df, explicit=False)):
         print(line)
 
 
