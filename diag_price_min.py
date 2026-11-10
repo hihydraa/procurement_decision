@@ -14,13 +14,26 @@ import pandas as pd
 from common import SHEET_ID, TABS, TZ_NAME, get_token, sheets_get, to_ts
 
 MAX_AGE_DAYS = 3                      # เท่ากับ signals.MARKET_MAX_AGE_DAYS
-CORE = [("ไออาร์", "ระยอง"), ("ไออาร์", "อยุธยา"), ("สตาร์ฟูเอลส์", "สระบุรี"), ("สตาร์ฟูเอลส์", "ระยอง")]   # คลังหลักตามเอกสาร 07 (สมมติฐาน ต้องยืนยัน)
+# คลังหลัก = (ข้อความในชื่อผู้ขาย, ข้อความในชื่อคลัง) ; "" = ไม่จำกัด — สมมติฐานที่ต้องยืนยัน (ดูรายการที่จับคู่ได้จริงในผลรัน)
+#   เอกสาร 07 : ไออาร์ ระยอง/อยุธยา, ดาว สระบุรี/ระยอง ; เจ้าของระบบเพิ่ม : บางจาก บางปะอิน, แท็ปไลน์
+#   "แท็ปไลน์" ตีความว่าเป็นคลังสระบุรีทุกผู้ขาย (ดาว/ปตท/บางจาก BSRC) + ชื่อที่มีคำว่า แท็ปไลน์ ถ้ามีในฟีด
+CORE = [("ไออาร์", "ระยอง"), ("ไออาร์", "อยุธยา"), ("สตาร์ฟูเอลส์", "สระบุรี"), ("สตาร์ฟูเอลส์", "ระยอง"),
+        ("บางจาก", "บางปะอิน"), ("", "สระบุรี"), ("แท็ปไลน์", "")]
 SMALL = 0.10                          # ขยับ >= 10 สต. นับว่าขึ้น/ลง (เท่ากับ model.OUTLOOK_SMALL)
 
 
 def is_core(key: str) -> bool:
     provider, _, warehouse = key.partition("|")
     return any(p in provider and w in warehouse for p, w in CORE)
+
+
+def core_matches(p: pd.DataFrame) -> dict:
+    """แต่ละรายการใน CORE จับคู่กับ (ผู้ขาย|คลัง) อะไรในฟีดบ้าง พร้อมจำนวนราคาและเวลาล่าสุด — ไว้ให้ตรวจว่าตีความคลังถูก"""
+    out = {}
+    for pv, wh in CORE:
+        keys = sorted({k for k in p["key"].unique() if pv in k.partition("|")[0] and wh in k.partition("|")[2]})
+        out[f"{pv or '*'}/{wh or '*'}"] = [(k, int((p.key == k).sum()), p.loc[p.key == k, "effective"].max()) for k in keys]
+    return out
 
 
 def clean_prices(prices: pd.DataFrame) -> pd.DataFrame:
@@ -106,6 +119,9 @@ def main():
     prices["effective"] = prices["effective"].map(to_ts)
     p = clean_prices(prices)
     print(f"[DIAG] price rows={len(p)} last={p.effective.max()} now={now:%Y-%m-%d %H:%M}")
+    print("[DIAG] คลังหลักที่จับคู่ได้จากฟีด (รายการใน CORE → ผู้ขาย|คลัง, จำนวนราคา, ราคาล่าสุด):")
+    for name, ms in core_matches(p).items():
+        print(f"  {name}: " + ("; ".join(f"{k} ({n}, {t:%m-%d %H:%M})" for k, n, t in ms) if ms else "ไม่พบในฟีดเลย"))
 
     days = pd.date_range("2026-10-23", now.normalize(), freq="D")
     refs = pd.DatetimeIndex([d + pd.Timedelta(hours=20.5) for d in days if d + pd.Timedelta(hours=20.5) <= now])
@@ -144,7 +160,7 @@ def main():
     print(f"[DIAG] ตรวจความตรงกับค่าที่บันทึกไว้เดิม: ต่างจาก outcome_delta ใน OutlookLog เกิน 0.02 บาท {int(((mism.delta - lg).abs() > 0.02).sum())}/{len(mism)} แถว")
     print("[DIAG] ให้คะแนนใหม่ (รอบ 20:30 ตรงเวลา, ถูก/ผิดนับเมื่อขยับ ≥10 สต.) — all = เกณฑ์เดิม, core = เฉพาะคลังหลัก:")
     print(summarize(res))
-    print("[DIAG] คลังหลักที่ใช้ (สมมติฐานจากเอกสาร 07):", "; ".join(f"{p_}/{w_}" for p_, w_ in CORE))
+    print("[DIAG] คลังหลักที่ใช้:", "; ".join(f"{p_ or '*'}/{w_ or '*'}" for p_, w_ in CORE))
 
 
 if __name__ == "__main__":

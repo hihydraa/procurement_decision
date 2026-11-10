@@ -40,6 +40,22 @@ class QuoteTableTest(unittest.TestCase):
         self.assertTrue(np.isnan(D.quote_table(self.p, "B7", pd.DatetimeIndex(["2026-11-09 08:00"]), only_core=True).price.iloc[0]))
 
 
+class CoreDepotsTest(unittest.TestCase):
+    def test_membership(self):
+        for k in ("ไออาร์|ระยอง", "ไออาร์|อยุธยา", "สตาร์ฟูเอลส์ (ดาว)|สระบุรี", "สตาร์ฟูเอลส์ (ดาว)|ระยอง",
+                  "บางจาก|บางปะอิน", "บางจาก|บางปะอิน (คลังใน)", "ปตท|สระบุรี-ใหญ่/นอก", "บางจาก (BSRC)|สระบุรี", "แท็ปไลน์ x|ที่ไหนก็ได้"):
+            self.assertTrue(D.is_core(k), k)
+        for k in ("ไออาร์|ชุมพร", "ไออาร์|บางปะอิน", "สตาร์ฟูเอลส์ (ดาว)|ขอนแก่น", "ปตท|บางปะอิน", "บางจาก|ศรีราชา"):
+            self.assertFalse(D.is_core(k), k)
+
+    def test_matches_report_lists_missing_entries(self):
+        p = prices([["ไออาร์", "ระยอง", "G95", 37.0, "2026-11-07 08:00"], ["บางจาก", "บางปะอิน", "G95", 37.5, "2026-11-07 08:00"]])
+        m = D.core_matches(p)
+        self.assertEqual([k for k, _, _ in m["ไออาร์/ระยอง"]], ["ไออาร์|ระยอง"])
+        self.assertEqual(m["แท็ปไลน์/*"], [])                                            # ไม่มีคำนี้ในฟีด → รายงานว่าไม่พบ
+        self.assertEqual(m["*/สระบุรี"], [])
+
+
 class RescoreTest(unittest.TestCase):
     def test_flat_all_vs_moving_core(self):
         p = prices([
