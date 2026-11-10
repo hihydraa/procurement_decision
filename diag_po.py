@@ -126,6 +126,22 @@ def discount_report(po: pd.DataFrame) -> list:
     return out
 
 
+EXPECTED_DISC = {"ไออาร์": 0.04}      # ส่วนลดต้องบุญ : ไออาร์ 0.04 คลังอื่น 0.06 (ยืนยันจาก PriceLog)
+
+
+def discount_outliers(po: pd.DataFrame) -> list:
+    """แถวที่ส่วนต่าง (ราคาประกาศคลัง − ราคาซื้อ) ไม่ตรงส่วนลดที่คาด พร้อมหมายเหตุในใบ — ไว้ไล่ตรวจกับต้นฉบับ"""
+    d = po.dropna(subset=["price", "list_price"]).copy()
+    d["disc"] = (d["list_price"] - d["price"]).round(2)
+    d["exp"] = d["depot"].map(lambda x: EXPECTED_DISC.get((po_depot(x) or "").split(" ")[0], 0.06))
+    odd = d[(d["disc"] - d["exp"]).abs() > 0.005].sort_values(["date", "tab", "row"])
+    out = [f"[PO-ODD] ส่วนลดไม่ตรงที่คาด {len(odd)}/{len(d)} แถว"]
+    for _, r in odd.iterrows():
+        out.append(f"   {r['date']} แท็บ {r['tab']} (แถวชีท {r['row']}) {r['depot']} {r['fuel']} {r['liters']:,.0f}L จ่าย {r['price']:.2f} ประกาศ {r['list_price']:.2f} "
+                   f"ส่วนต่าง {r['disc']:+.2f} (คาด {r['exp']:.2f}) ; ผู้ผลิต: {r['provider']} ; หมายเหตุราคา: {r['price_note'] or '-'} ; ประกาศปรับ: {r['change_note'] or '-'}")
+    return out
+
+
 def cost_report(b: pd.DataFrame) -> list:
     ok = b.dropna(subset=["excess"])
     ok = ok[ok["why"] == ""]
@@ -173,7 +189,7 @@ def main():
     if po.empty:
         print("[PO] ไม่พบรายการซื้อ")
         return
-    for line in coverage_report(po) + discount_report(po):
+    for line in coverage_report(po) + discount_report(po) + discount_outliers(po):
         print(line)
     tok = get_token()
     prices = build_frame(sheets_get(tok, OILBOT_SHEET_ID, "PriceLog!A1:Q200000")).reset_index(drop=True)

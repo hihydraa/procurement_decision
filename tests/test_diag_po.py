@@ -69,6 +69,18 @@ class Bench(unittest.TestCase):
         self.assertAlmostEqual(long_["timing"], 0.0)
 
 
+class Outliers(unittest.TestCase):
+    def test_flags_only_unexpected_discount(self):
+        base = {"date": date(2026, 10, 1), "tab": "01", "row": 5, "fuel": "B7", "liters": 1000.0, "provider": "p", "price_note": "", "change_note": ""}
+        po = pd.DataFrame([{**base, "depot": "ดาว สระบุรี", "price": 39.81, "list_price": 39.87},      # 0.06 ปกติ
+                           {**base, "depot": "ดาว สระบุรี", "price": 40.49, "list_price": 39.87},      # -0.62
+                           {**base, "depot": "ดาว สระบุรี", "price": 39.83, "list_price": 39.87},      # 0.04
+                           {**base, "depot": "IR ระยอง", "price": 39.19, "list_price": 39.23}])      # 0.04 ปกติของไออาร์
+        out = dp.discount_outliers(po)
+        self.assertIn("2/4", out[0])
+        self.assertTrue(any("-0.62" in x for x in out) and any("+0.04" in x for x in out))
+
+
 class Reports(unittest.TestCase):
     def test_wmean_and_cost_report(self):
         b = pd.DataFrame([{"fuel": "B7", "liters": 1000.0, "timing": 0.2, "depot_sel": 0.0, "excess": 0.2, "why": ""},
