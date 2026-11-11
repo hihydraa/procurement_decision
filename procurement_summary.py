@@ -112,49 +112,99 @@ def combine(tier24: str | None, grade: str | None, card: dict | None) -> dict:
     return {"dir": d, "action": action, "level": level, "why": srcs}
 
 
-def _forecast_rows(outlook: dict, cards: pd.DataFrame, asof) -> str:
-    out = []
-    for fk, code, label in FUELS:
-        d = (outlook or {}).get(fk) or {}
-        hz = {h["hours"]: h for h in d.get("horizons", [])}
-        def cell(h):
-            if not h:
-                return "<span class='muted'>ยังไม่มีข้อมูล</span>"
-            g = "" if h["tier"] == "UNCLEAR" else f" <span class='muted'>(ความเชื่อมั่น {_e(h['grade'])})</span>"
-            return f"<strong>{TIER_TH[h['tier']]}</strong>{g}"
-        c = latest_card(cards, code)
-        if c:
-            lo, hi = _num(c.get("lo")), _num(c.get("hi"))
-            rng = f"{lo:+.2f} ถึง {hi:+.2f} บาท/ลิตร" if lo is not None and hi is not None else "-"
-            pd_, pf, pu = (_num(c.get(k)) for k in ("p_down", "p_flat", "p_up"))
-            prob = (f"ลง {pd_:.0%} / นิ่ง {pf:.0%} / ขึ้น {pu:.0%}" if None not in (pd_, pf, pu) else "-")
-            tgt = pd.to_datetime(c["target_dt"]).strftime("%d/%m")
-            card_txt = (f"<strong>{_e(c.get('call', '-'))}</strong> ช่วง {rng}<div class='muted'>{prob} · สำหรับ {tgt} "
-                        f"· ออกเมื่อ {pd.to_datetime(c['asof_dt']).strftime('%d/%m %H:%M')}</div>")
-            timing = f"<div class='muted'>เวลาที่มักปรับ: {_e(c.get('timing', '-'))}</div>" if c.get("timing") else ""
-        else:
-            card_txt, timing = "<span class='muted'>ยังไม่มีการ์ดพยากรณ์ล่วงหน้า (ออกรอบ 21:30)</span>", ""
-        out.append(f"<tr><td><strong>{label}</strong></td><td>{cell(hz.get(24))}</td><td>{cell(hz.get(48))}</td><td>{card_txt}{timing}</td></tr>")
-    return "".join(out)
+# ---------- ภาพประกอบ (ไอคอน/แถบสี) ----------
+# สี: ราคาลง = เขียว (ดีต่อจัดซื้อ), ราคาขึ้น = แดง, นิ่ง/ไม่ชัด = เทา ; ทุกสีมีไอคอนและตัวอักษรกำกับเสมอ ไม่พึ่งสีอย่างเดียว
+DIR_META = {
+    "ลง": ("▼", "ps-down", "ราคาลง"),
+    "ขึ้น": ("▲", "ps-up", "ราคาขึ้น"),
+    "นิ่ง": ("▬", "ps-flat", "ทรงตัว"),
+    None: ("◆", "ps-none", "ไม่ชัดเจน"),
+}
+
+
+def _tier_dir(tier: str):
+    return outlook_direction(tier) if tier and tier != "UNCLEAR" else None
+
+
+def _badge(direction, text: str, strong: bool = False, sub: str = "") -> str:
+    icon, cls, _ = DIR_META[direction]
+    icon = icon * 2 if strong else icon
+    sub_html = f"<span class='ps-badge-sub'>{_e(sub)}</span>" if sub else ""
+    return f"<span class='ps-badge {cls}'><span class='ps-ico'>{icon}</span><span>{_e(text)}{sub_html}</span></span>"
+
+
+def _prob_bar(pd_, pf, pu) -> str:
+    segs = []
+    for v, cls, name in ((pd_, "ps-down", "ลง"), (pf, "ps-flat", "นิ่ง"), (pu, "ps-up", "ขึ้น")):
+        lab = f"{name} {v:.0%}" if v >= 0.14 else ""
+        segs.append(f"<div class='ps-seg {cls}' style='flex:{max(v, 0.001):.4f}' title='{name} {v:.0%}'>{lab}</div>")
+    return f"<div class='ps-prob'>{''.join(segs)}</div>"
+
+
+def _range_bar(lo: float, hi: float) -> str:
+    """แถบช่วงการเปลี่ยนต้นทุนบนเส้นตัวเลข มีเส้น 0 กลาง : ซ้าย = ลง, ขวา = ขึ้น"""
+    half = max(abs(lo), abs(hi), 0.5) * 1.15
+    l = (lo + half) / (2 * half) * 100
+    r = (hi + half) / (2 * half) * 100
+    cls = "ps-down" if hi < 0 else "ps-up" if lo > 0 else "ps-none"
+    return (f"<div class='ps-range' title='ช่วงที่เป็นไปได้ {lo:+.2f} ถึง {hi:+.2f} บาท/ลิตร'><div class='ps-range-zero'></div>"
+            f"<div class='ps-range-fill {cls}' style='left:{l:.1f}%;width:{max(r - l, 1.5):.1f}%'></div></div>"
+            f"<div class='ps-range-axis'><span>ลง {half:.1f}</span><span>0</span><span>ขึ้น {half:.1f}</span></div>")
+
+
+def _forecast_card(label: str, d: dict, card: dict | None) -> str:
+    hz = {h["hours"]: h for h in d.get("horizons", [])}
+
+    def badge(h):
+        if not h:
+            return "<span class='ps-badge ps-none'><span class='ps-ico'>◆</span><span>ไม่มีข้อมูล</span></span>"
+        dr = _tier_dir(h["tier"])
+        sub = "" if dr is None else f"ความเชื่อมั่น {h['grade']}"
+        return _badge(dr, TIER_TH[h["tier"]], strong=h["tier"].endswith("STRONG"), sub=sub)
+
+    market = (f"<div class='ps-row'><div class='ps-key'>ตลาด 24 ชม.</div>{badge(hz.get(24))}</div>"
+              f"<div class='ps-row'><div class='ps-key'>ตลาด 48 ชม.</div>{badge(hz.get(48))}</div>")
+    if card:
+        lo, hi = _num(card.get("lo")), _num(card.get("hi"))
+        pd_, pf, pu = (_num(card.get(k)) for k in ("p_down", "p_flat", "p_up"))
+        call = card.get("call")
+        cd = call if call in ("ลง", "ขึ้น") else None
+        body = _badge(cd, f"ต้นทุนส่ง {'ไม่ชัดเจน' if cd is None else call}", sub=f"ความเชื่อมั่น {card.get('confidence', '-')}")
+        if None not in (pd_, pf, pu):
+            body += f"<div class='ps-cap'>โอกาส ลง / นิ่ง / ขึ้น</div>{_prob_bar(pd_, pf, pu)}"
+        if lo is not None and hi is not None:
+            body += f"<div class='ps-cap'>ต้นทุนเปลี่ยนประมาณ <strong>{lo:+.2f} ถึง {hi:+.2f}</strong> บาท/ลิตร</div>{_range_bar(lo, hi)}"
+        if card.get("timing"):
+            body += f"<div class='ps-cap'>🕒 เวลาที่มักปรับ: {_e(card['timing'])}</div>"
+        body += (f"<div class='ps-cap muted'>สำหรับ {pd.to_datetime(card['target_dt']).strftime('%d/%m')} · ออกเมื่อ "
+                 f"{pd.to_datetime(card['asof_dt']).strftime('%d/%m %H:%M')}</div>")
+    else:
+        body = "<div class='ps-cap muted'>ยังไม่มีการ์ดต้นทุนส่งล่วงหน้า (ออกรอบ 21:30)</div>"
+    return (f"<div class='ps-fcard'><div class='ps-fuel'>{label}</div>{market}<div class='ps-sep'></div>{body}</div>")
 
 
 def build_forecast_and_advice(outlook: dict, cards: pd.DataFrame, asof) -> str:
-    adv = []
+    fc, adv = [], []
     for fk, code, label in FUELS:
         d = (outlook or {}).get(fk) or {}
+        card = latest_card(cards, code)
+        fc.append(_forecast_card(label, d, card))
         h24 = next((h for h in d.get("horizons", []) if h["hours"] == 24), None)
-        res = combine(h24["tier"] if h24 else None, h24["grade"] if h24 else None, latest_card(cards, code))
-        color = {"ลง": "#0f766e", "ขึ้น": "#b91c1c", None: "#475569"}[res["dir"]]
-        adv.append(f"<div class='ps-advice' style='border-left:6px solid {color}'><div class='ps-adv-fuel'>{label}</div>"
-                   f"<div class='ps-adv-action'>{_e(res['action'])}</div>"
-                   f"<div class='muted'>ระดับสัญญาณ: {_e(res['level'])} · {_e(res['why'])}</div></div>")
+        res = combine(h24["tier"] if h24 else None, h24["grade"] if h24 else None, card)
+        icon, cls, _ = DIR_META[res["dir"]]
+        dots = {"สูง": "●●●", "กลาง": "●●○", "ต่ำ": "●○○", "ไม่ชัด": "○○○"}[res["level"]]
+        adv.append(f"<div class='ps-advice {cls}-b'><div class='ps-adv-ico {cls}'>{icon}</div><div>"
+                   f"<div class='ps-adv-fuel'>{label}</div><div class='ps-adv-action'>{_e(res['action'])}</div>"
+                   f"<div class='muted'><span class='ps-dots'>{dots}</span> ระดับสัญญาณ: {_e(res['level'])} · {_e(res['why'])}</div></div></div>")
+    legend = ("<div class='ps-legend'><span class='ps-down-t'>▼ ราคาลง (ดีต่อการซื้อ: รอได้)</span>"
+              "<span class='ps-up-t'>▲ ราคาขึ้น (ควรซื้อก่อน)</span><span class='ps-none-t'>◆ ไม่ชัดเจน (ซื้อตามปกติ)</span>"
+              "<span class='muted'>▼▼ ▲▲ = แรง (ขยับ ≥ 40 สต.)</span></div>")
     return f"""
     <section class="ps-block">
       <h2>1. ผลพยากรณ์</h2>
-      <div class="muted">ดู ณ {asof.strftime('%d/%m/%Y %H:%M')} · "ขึ้น/ลง" = ราคาตลาดขยับตั้งแต่ 10 สต./ลิตร</div>
-      <div style="overflow-x:auto"><table class="acc-table ps-table">
-        <thead><tr><th>ชนิด</th><th>แนวโน้มตลาด 24 ชม.</th><th>แนวโน้มตลาด 48 ชม.</th><th>ต้นทุนส่งวันถัดไป (การ์ด)</th></tr></thead>
-        <tbody>{_forecast_rows(outlook, cards, asof)}</tbody></table></div>
+      <div class="muted">ดู ณ {asof.strftime('%d/%m/%Y %H:%M')} · "ขึ้น/ลง" = ราคาขยับตั้งแต่ 10 สต./ลิตร</div>
+      {legend}
+      <div class="ps-fgrid">{''.join(fc)}</div>
     </section>
     <section class="ps-block">
       <h2>2. คำแนะนำ</h2>
@@ -169,11 +219,18 @@ def _bt_key(code: str, hours: int, ref_code: str) -> str:
     return f"{code}_{'P_' if ref_code == 'P' else ''}H{hours}"
 
 
+def _pair_bars(right: float, wrong: float) -> str:
+    return (f"<div class='ps-pair'><div class='ps-pbar'><div class='ps-right' style='width:{right * 100:.0f}%'></div></div>"
+            f"<span class='ps-pval'>ถูกทิศ <strong>{right:.0%}</strong></span></div>"
+            f"<div class='ps-pair'><div class='ps-pbar'><div class='ps-wrong' style='width:{wrong * 100:.0f}%'></div></div>"
+            f"<span class='ps-pval'>ผิดทิศ <strong>{wrong:.0%}</strong></span></div>")
+
+
 def build_backtest(summary: dict, outlook: dict) -> str:
     res = (summary or {}).get("outlook_results") or {}
     if not res:
         return "<section class='ps-block'><h2>3. Backtest (ทดสอบย้อนหลัง)</h2><div class='muted'>ยังไม่มีผลทดสอบย้อนหลัง</div></section>"
-    rows = []
+    cols = []
     n_days = None
     for fk, code, label in FUELS:
         d = (outlook or {}).get(fk) or {}
@@ -181,73 +238,118 @@ def build_backtest(summary: dict, outlook: dict) -> str:
         if not r:
             continue
         n_days = r.get("n_oos_days", n_days)
+        rows = []
         for tier in ("DOWN_STRONG", "DOWN", "UP", "UP_STRONG"):
             t = r["tiers"].get(tier)
             if not t:
                 continue
-            rows.append(f"<tr><td>{label}</td><td>{TIER_TH[tier]}</td><td>{t['n']} วัน ({t['share']:.0%})</td>"
-                        f"<td>{t['right10']:.0%}</td><td>{t['wrong10']:.0%}</td><td>{t['avg_move']:.2f}</td></tr>")
+            dr = _tier_dir(tier)
+            rows.append(f"<div class='ps-btrow'><div class='ps-bthead'>{_badge(dr, 'ระบบทาย' + TIER_TH[tier], strong=tier.endswith('STRONG'))}"
+                        f"<span class='muted'>{t['n']} ครั้ง ({t['share']:.0%} ของวัน)</span></div>{_pair_bars(t['right10'], t['wrong10'])}</div>")
         u = r["tiers"].get("UNCLEAR")
         if u:
-            rows.append(f"<tr><td>{label}</td><td>ยังไม่ชัดเจน</td><td>{u['n']} วัน ({u['share']:.0%})</td><td colspan='3' class='muted'>ไม่ฟันธง</td></tr>")
+            rows.append(f"<div class='ps-btrow muted'>◆ ไม่ฟันธง {u['n']} วัน ({u['share']:.0%} ของวัน)</div>")
+        cols.append(f"<div class='ps-fcard'><div class='ps-fuel'>{label}</div>{''.join(rows)}</div>")
     gen = _e((summary or {}).get("generated", "-"))
     return f"""
     <section class="ps-block">
       <h2>3. Backtest (ทดสอบย้อนหลัง)</h2>
       <div class="muted">แนวโน้มตลาด 24 ชม. ทดสอบแบบเดินหน้า (ฝึกจากอดีตเท่านั้น) กับ {n_days or '-'} วันที่ไม่เคยใช้ฝึก · ผลเมื่อ {gen}<br>
-      อ่านว่า: เมื่อระบบทาย "ลง" ในวันที่ผ่านมา ราคาลงจริงตั้งแต่ 10 สต. กี่ % และกลับขึ้นผิดทิศกี่ %</div>
-      <div style="overflow-x:auto"><table class="acc-table ps-table">
-        <thead><tr><th>ชนิด</th><th>ระบบทายว่า</th><th>จำนวนครั้ง</th><th>ถูกทิศ</th><th>ผิดทิศ</th><th>ขยับเฉลี่ยตามทิศที่ทาย (บาท/ลิตร)</th></tr></thead>
-        <tbody>{''.join(rows)}</tbody></table></div>
-      <div class="muted">การ์ดต้นทุนส่งที่เพิ่งเริ่มใช้ยังไม่มีผลทดสอบเดินหน้าเพียงพอ จึงยังไม่แสดงในตารางนี้</div>
+      อ่านว่า: เมื่อระบบทายทิศนั้นในอดีต ราคาไปตามที่ทายตั้งแต่ 10 สต. กี่ % และไปผิดทิศกี่ % (แถบน้ำเงิน = ถูกทิศ, แถบส้ม = ผิดทิศ)</div>
+      <div class="ps-fgrid">{''.join(cols)}</div>
+      <div class="muted">การ์ดต้นทุนส่งที่เพิ่งเริ่มใช้ยังไม่มีผลทดสอบเดินหน้าเพียงพอ จึงยังไม่แสดงในส่วนนี้</div>
     </section>"""
 
 
 # ---------- ส่วนที่ 4: ความแม่นยำจริง ----------
+def _progress(n: int, goal: int = MIN_LIVE_DAYS) -> str:
+    pct = min(n / goal, 1.0) * 100
+    done = n >= goal
+    return (f"<div class='ps-prog' title='สะสม {n} จาก {goal}'><div class='ps-pbar'><div class='{'ps-right' if done else 'ps-none'}' style='width:{pct:.0f}%'></div></div>"
+            f"<span class='ps-pval'>{n}/{goal} {'✔ พอสรุปได้' if done else 'ยังน้อยเกินไป'}</span></div>")
+
+
 def build_live_accuracy(outlook_log: pd.DataFrame, cards: pd.DataFrame, engine_mod) -> str:
-    rows = []
+    cols = []
     for fk, code, label in FUELS:
+        rows = []
         fuel_key = engine_mod.FUEL_KEY[fk]
         st = engine_mod.outlook_live_stats(outlook_log, fuel_key, 24, "20:30") if outlook_log is not None and not outlook_log.empty else None
+        rows.append("<div class='ps-btrow'><div class='ps-bthead'><strong>แนวโน้มตลาด 24 ชม.</strong></div>")
         if st:
-            parts = []
+            rows.append(_progress(st["n_days"]))
             for tier in ("DOWN_STRONG", "DOWN", "UP", "UP_STRONG"):
                 x = st["tiers"].get(tier)
                 if x and "right10" in x:
-                    parts.append(f"{TIER_TH[tier]} {x['n']} ครั้ง (ถูก {x['right10']:.0%} / ผิด {x['wrong10']:.0%})")
-            enough = "" if st["n_days"] >= MIN_LIVE_DAYS else f" <span class='muted'>· ยังน้อยเกินไป (ต้องการ ≥{MIN_LIVE_DAYS} วัน)</span>"
-            rows.append(f"<tr><td>{label}</td><td>แนวโน้มตลาด 24 ชม.</td><td>{st['n_days']} วัน{enough}</td><td>{_e(' · '.join(parts)) or '-'}</td></tr>")
+                    rows.append(f"<div class='ps-bthead'>{_badge(_tier_dir(tier), TIER_TH[tier], strong=tier.endswith('STRONG'))}"
+                                f"<span class='muted'>{x['n']} ครั้ง</span></div>{_pair_bars(x['right10'], x['wrong10'])}")
         else:
-            rows.append(f"<tr><td>{label}</td><td>แนวโน้มตลาด 24 ชม.</td><td>0 วัน</td><td class='muted'>ยังไม่มีผลที่ครบ 24 ชม.</td></tr>")
+            rows.append("<div class='muted'>ยังไม่มีผลที่ครบ 24 ชม.</div>")
+        rows.append("</div>")
         cs = card_live_stats(cards, code)
+        rows.append("<div class='ps-btrow'><div class='ps-bthead'><strong>การ์ดต้นทุนส่ง</strong></div>")
         if cs["n_cards"]:
-            enough = "" if cs["n_cards"] >= MIN_LIVE_DAYS else f" <span class='muted'>· ยังน้อยเกินไป (ต้องการ ≥{MIN_LIVE_DAYS})</span>"
-            hit = f"ฟันธง {cs['n_called']} ครั้ง ถูก {cs['n_right']}" + (f" ({cs['n_right'] / cs['n_called']:.0%})" if cs["n_called"] else "")
-            rows.append(f"<tr><td>{label}</td><td>การ์ดต้นทุนส่ง</td><td>{cs['n_cards']} ใบ{enough}</td><td>{hit}</td></tr>")
+            rows.append(_progress(cs["n_cards"]))
+            if cs["n_called"]:
+                rows.append(_pair_bars(cs["n_right"] / cs["n_called"], 1 - cs["n_right"] / cs["n_called"])
+                            + f"<div class='muted'>ฟันธง {cs['n_called']} ครั้ง ถูก {cs['n_right']}</div>")
+            else:
+                rows.append("<div class='muted'>ยังไม่เคยฟันธงทิศ</div>")
         else:
-            rows.append(f"<tr><td>{label}</td><td>การ์ดต้นทุนส่ง</td><td>0 ใบ</td><td class='muted'>ยังไม่มีการ์ดล่วงหน้าที่รู้ผลแล้ว</td></tr>")
+            rows.append("<div class='muted'>ยังไม่มีการ์ดล่วงหน้าที่รู้ผลแล้ว</div>")
+        rows.append("</div>")
+        cols.append(f"<div class='ps-fcard'><div class='ps-fuel'>{label}</div>{''.join(rows)}</div>")
     hind = sum(card_live_stats(cards, c)["n_hind"] for _, c, _ in FUELS)
     note = (f"<div class='muted'>ไม่นับการ์ด {hind} ใบที่ออกหลังผลวันนั้นทราบแล้ว (ย้อนหลัง ไม่ใช่การพยากรณ์ล่วงหน้า)</div>" if hind else "")
     return f"""
     <section class="ps-block">
       <h2>4. ความแม่นยำจริง (ที่ระบบพยากรณ์ล่วงหน้าแล้วรู้ผล)</h2>
-      <div class="muted">นับเฉพาะที่ออกคำพยากรณ์ก่อนเหตุการณ์จริง · ตัวเลขจะน่าเชื่อถือเมื่อสะสมอย่างน้อย {MIN_LIVE_DAYS} วัน</div>
-      <div style="overflow-x:auto"><table class="acc-table ps-table">
-        <thead><tr><th>ชนิด</th><th>ระบบ</th><th>จำนวนที่รู้ผลแล้ว</th><th>ผล</th></tr></thead>
-        <tbody>{''.join(rows)}</tbody></table></div>{note}
+      <div class="muted">นับเฉพาะที่ออกคำพยากรณ์ก่อนเหตุการณ์จริง · ตัวเลขจะน่าเชื่อถือเมื่อสะสมอย่างน้อย {MIN_LIVE_DAYS} วัน (แถบ "สะสม" ยังไม่เต็ม = ยังสรุปไม่ได้)</div>
+      <div class="ps-fgrid">{''.join(cols)}</div>{note}
     </section>"""
 
 
 CSS = """
     .ps-block { background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:18px 20px; margin:14px 0; }
     .ps-block h2 { margin:0 0 6px; font-size:1.15rem; }
-    .acc-table.ps-table td, .acc-table.ps-table th { white-space:normal; text-align:left; vertical-align:top; }
+    .ps-down { background:#0ca30c; } .ps-up { background:#d03b3b; } .ps-flat { background:#9a9a94; } .ps-none { background:#9a9a94; }
+    .ps-right { background:#2a78d6; } .ps-wrong { background:#eb6834; }
+    .ps-fgrid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:10px 0; }
+    .ps-fcard { background:#f8fafc; border-radius:12px; padding:14px 16px; }
+    .ps-fuel { font-weight:700; font-size:1.05rem; margin-bottom:8px; }
+    .ps-row { display:flex; align-items:center; gap:10px; margin:6px 0; }
+    .ps-key { width:92px; color:#475569; font-size:.9rem; flex:none; }
+    .ps-sep { border-top:1px dashed #cbd5e1; margin:10px 0; }
+    .ps-cap { font-size:.88rem; color:#334155; margin:8px 0 4px; }
+    .ps-badge { display:inline-flex; align-items:center; gap:8px; padding:5px 12px 5px 8px; border-radius:999px; font-weight:600; color:#fff; font-size:.95rem; }
+    .ps-badge.ps-down { background:#006300; } .ps-badge.ps-up { background:#b02a2a; } .ps-badge.ps-flat, .ps-badge.ps-none { background:#64645e; }
+    .ps-ico { font-size:.95rem; letter-spacing:-2px; }
+    .ps-badge-sub { display:block; font-weight:400; font-size:.75rem; opacity:.9; }
+    .ps-prob { display:flex; gap:2px; height:26px; border-radius:6px; overflow:hidden; }
+    .ps-seg { color:#fff; font-size:.78rem; font-weight:600; display:flex; align-items:center; justify-content:center; white-space:nowrap; min-width:3px; }
+    .ps-seg.ps-down { background:#006300; } .ps-seg.ps-up { background:#b02a2a; } .ps-seg.ps-flat { background:#64645e; }
+    .ps-range { position:relative; height:18px; background:#e2e8f0; border-radius:9px; }
+    .ps-range-zero { position:absolute; left:50%; top:-3px; bottom:-3px; width:2px; background:#334155; }
+    .ps-range-fill { position:absolute; top:3px; bottom:3px; border-radius:6px; }
+    .ps-range-axis { display:flex; justify-content:space-between; font-size:.72rem; color:#64748b; margin-top:2px; }
+    .ps-legend { display:flex; flex-wrap:wrap; gap:6px 16px; margin:8px 0 4px; font-size:.88rem; font-weight:600; }
+    .ps-down-t { color:#006300; } .ps-up-t { color:#b02a2a; } .ps-none-t { color:#52514e; }
     .ps-advice-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:8px 0; }
-    .ps-advice { background:#f8fafc; border-radius:10px; padding:12px 14px; }
+    .ps-advice { display:flex; gap:14px; align-items:center; background:#f8fafc; border-radius:12px; padding:14px 16px; border-left:6px solid #9a9a94; }
+    .ps-down-b { border-left-color:#0ca30c; } .ps-up-b { border-left-color:#d03b3b; }
+    .ps-adv-ico { width:48px; height:48px; flex:none; border-radius:50%; color:#fff; display:flex; align-items:center; justify-content:center; font-size:1.4rem; }
+    .ps-adv-ico.ps-down { background:#006300; } .ps-adv-ico.ps-up { background:#b02a2a; } .ps-adv-ico.ps-none, .ps-adv-ico.ps-flat { background:#64645e; }
     .ps-adv-fuel { font-weight:600; color:#334155; }
-    .ps-adv-action { font-size:1.2rem; font-weight:700; margin:4px 0; }
+    .ps-adv-action { font-size:1.2rem; font-weight:700; margin:2px 0 4px; }
+    .ps-dots { letter-spacing:2px; color:#334155; }
+    .ps-btrow { margin:10px 0 14px; }
+    .ps-bthead { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:4px; }
+    .ps-pair, .ps-prog { display:flex; align-items:center; gap:8px; margin:3px 0; }
+    .ps-pbar { flex:1; height:12px; background:#e2e8f0; border-radius:6px; overflow:hidden; }
+    .ps-pbar > div { height:100%; border-radius:6px; }
+    .ps-pval { width:104px; flex:none; font-size:.85rem; }
     details.ps-more > summary { cursor:pointer; font-weight:600; padding:12px 4px; }
-    @media (max-width:680px) { .ps-advice-grid { grid-template-columns:1fr; } }
+    @media (max-width:680px) { .ps-advice-grid, .ps-fgrid { grid-template-columns:1fr; } .ps-key { width:76px; } }
 """
 
 
