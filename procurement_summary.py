@@ -88,8 +88,30 @@ def outlook_direction(tier: str):
     return None
 
 
-def combine(tier24: str | None, grade: str | None, card: dict | None) -> dict:
-    """รวมสัญญาณ 2 แหล่ง (แนวโน้มตลาด 24 ชม. + การ์ดต้นทุน) เป็นคำแนะนำเดียว ; ไม่ตรงกัน = ไม่ฟันธง"""
+def combine(tier24: str | None, grade: str | None, card: dict | None, tier48: str | None = None, grade48: str | None = None) -> dict:
+    """รวมสัญญาณ (แนวโน้มตลาด 24 ชม. + การ์ดต้นทุน) เป็นคำแนะนำเดียว ; ไม่ตรงกัน = ไม่ฟันธง
+    แล้วปรับด้วยแนวโน้ม 48 ชม.: ถ้า 24 ชม./การ์ดไม่ชัดแต่ 48 ชม. ชี้ทิศ ให้บอกเรื่อง 48 ชม. ; ถ้า 48 ชม. สวนทิศคำแนะนำ ให้เตือนและลดระดับ"""
+    r = _combine_base(tier24, grade, card)
+    d48 = outlook_direction(tier48) if tier48 else None
+    if d48 is None:
+        return r
+    g48 = grade48 or "ต่ำ"
+    if r["dir"] is None and r["action"].startswith("สั่งซื้อตามแผนปกติ"):
+        if d48 == "ขึ้น":
+            return {"dir": "ขึ้น", "level": g48, "why": f"จากแนวโน้มตลาด 48 ชม. (24 ชม. ยังไม่ชัด) ความเชื่อมั่น {g48}",
+                    "action": "วันนี้ยังไม่ต้องเร่ง แต่ควรซื้อให้เสร็จก่อนครบ 48 ชม. (ราคามีแนวโน้มขึ้น)"}
+        return {"dir": "ลง", "level": g48, "why": f"จากแนวโน้มตลาด 48 ชม. (24 ชม. ยังไม่ชัด) ความเชื่อมั่น {g48}",
+                "action": "ไม่ต้องรีบซื้อ ราคามีแนวโน้มลงใน 48 ชม."}
+    if r["dir"] and d48 != r["dir"]:
+        r = dict(r)
+        r["why"] += f" · แต่แนวโน้ม 48 ชม. ชี้{d48} (ความเชื่อมั่น {g48})"
+        if r["level"] == "สูง":
+            r["level"] = "กลาง"
+        r["action"] += " (อย่ารอเกิน 24 ชม.)" if r["dir"] == "ลง" else " (ซื้อเฉพาะที่จำเป็นก่อน)"
+    return r
+
+
+def _combine_base(tier24: str | None, grade: str | None, card: dict | None) -> dict:
     d_o = outlook_direction(tier24) if tier24 else None
     c_call = (card or {}).get("call")
     d_c = c_call if c_call in ("ลง", "ขึ้น") else None
@@ -190,7 +212,8 @@ def build_forecast_and_advice(outlook: dict, cards: pd.DataFrame, asof) -> str:
         card = latest_card(cards, code)
         fc.append(_forecast_card(label, d, card))
         h24 = next((h for h in d.get("horizons", []) if h["hours"] == 24), None)
-        res = combine(h24["tier"] if h24 else None, h24["grade"] if h24 else None, card)
+        h48 = next((h for h in d.get("horizons", []) if h["hours"] == 48), None)
+        res = combine(h24["tier"] if h24 else None, h24["grade"] if h24 else None, card, h48["tier"] if h48 else None, h48["grade"] if h48 else None)
         icon, cls, _ = DIR_META[res["dir"]]
         dots = {"สูง": "●●●", "กลาง": "●●○", "ต่ำ": "●○○", "ไม่ชัด": "○○○"}[res["level"]]
         adv.append(f"<div class='ps-advice {cls}-b'><div class='ps-adv-ico {cls}'>{icon}</div><div>"

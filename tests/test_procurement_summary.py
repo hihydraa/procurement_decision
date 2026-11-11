@@ -63,6 +63,28 @@ class Combine(unittest.TestCase):
         self.assertEqual((r["dir"], r["level"]), ("ลง", "ต่ำ"))
 
 
+class Horizon48(unittest.TestCase):
+    def test_diesel_case_24_unclear_48_up_strong(self):
+        r = ps.combine("UNCLEAR", None, None, "UP_STRONG", "ต่ำ")
+        self.assertEqual((r["dir"], r["level"]), ("ขึ้น", "ต่ำ"))
+        self.assertIn("48 ชม.", r["action"])
+
+    def test_48_opposes_24(self):
+        r = ps.combine("DOWN", "กลาง", {"call": "ลง", "confidence": "กลาง", "recommendation": "ชะลอการสั่งซื้อ รอซื้อหลัง 16:00"}, "UP", "กลาง")
+        self.assertEqual((r["dir"], r["level"]), ("ลง", "กลาง"))
+        self.assertIn("อย่ารอเกิน 24 ชม.", r["action"])
+        self.assertIn("48 ชม. ชี้ขึ้น", r["why"])
+
+    def test_48_agrees_or_missing_changes_nothing(self):
+        a = ps.combine("DOWN", "กลาง", None)
+        self.assertEqual(a, ps.combine("DOWN", "กลาง", None, "DOWN", "กลาง"))
+        self.assertEqual(a, ps.combine("DOWN", "กลาง", None, None, None))
+
+    def test_conflict_not_overridden_by_48(self):
+        r = ps.combine("UP", "กลาง", {"call": "ลง", "confidence": "กลาง"}, "UP", "กลาง")
+        self.assertIsNone(r["dir"])
+
+
 class Render(unittest.TestCase):
     def outlook(self):
         h = lambda hrs, tier: {"hours": hrs, "tier": tier, "label": "x", "grade": "กลาง", "until": pd.Timestamp("2026-11-12 20:30")}
