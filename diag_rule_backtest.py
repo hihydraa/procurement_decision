@@ -61,7 +61,7 @@ def wti_daily(values: list) -> pd.DataFrame:
 
 def eppo_daily(values: list) -> pd.DataFrame:
     h = _hdr(values)
-    ix = {c: h.index(c) for c in ("Date", "oil type", "WHOLESALE (WS)", "MARKETING MARGIN", "RETAIL")}
+    ix = {c: h.index(c) for c in ("Date", "oil type", "WHOLESALE (WS)", "MARKETING MARGIN", "RETAIL", "EX-REFIN.", "OIL FUND")}
     src = h.index("Source") if "Source" in h else None
     rows = []
     for r in values[1:]:
@@ -70,10 +70,11 @@ def eppo_daily(values: list) -> pd.DataFrame:
         if f is None or pd.isna(day) or (src is not None and str(g(src)).strip().upper() == "CARRIED"):
             continue
         try:
-            rows.append((day.normalize(), f, float(g(ix["WHOLESALE (WS)"])), float(g(ix["MARKETING MARGIN"])), float(g(ix["RETAIL"]))))
+            rows.append((day.normalize(), f, float(g(ix["WHOLESALE (WS)"])), float(g(ix["MARKETING MARGIN"])), float(g(ix["RETAIL"])),
+                         float(g(ix["EX-REFIN."])), float(g(ix["OIL FUND"]))))
         except (TypeError, ValueError):
             continue
-    d = pd.DataFrame(rows, columns=["day", "fuel", "ws", "mm", "retail"]).drop_duplicates(["day", "fuel"], keep="last")
+    d = pd.DataFrame(rows, columns=["day", "fuel", "ws", "mm", "retail", "exref", "fund"]).drop_duplicates(["day", "fuel"], keep="last")
     return d.sort_values(["fuel", "day"]).reset_index(drop=True)
 
 
@@ -135,11 +136,14 @@ def build_table(mops: pd.DataFrame, wti: pd.DataFrame, eppo: pd.DataFrame, fund:
             if base.empty or (day - base.index[-1]).days > 1:
                 continue
             row = {"day": day, "fuel": fuel, "m1": r.m1, "m3": r.m3, "w1": wv.w1, "w3": wv.w3, "crisis": bool(crisis),
-                   "fund_any": stat != "OK", "fund_crit": stat == "CRITICAL", "mm_gap": float(base.mm.iloc[-1] - MEDIAN_MM[fuel]), "ws0": float(base.ws.iloc[-1]), "rt0": float(base.retail.iloc[-1])}
+                   "fund_any": stat != "OK", "fund_crit": stat == "CRITICAL", "mm_gap": float(base.mm.iloc[-1] - MEDIAN_MM[fuel]), "ws0": float(base.ws.iloc[-1]), "rt0": float(base.retail.iloc[-1]),
+                   "fund_lvl": float(base.fund.iloc[-1]), "ex0": float(base.exref.iloc[-1]), "fd0": float(base.fund.iloc[-1])}
             for k in (1, 3):
                 nxt = e.reindex([day + pd.Timedelta(days=k)])
                 row[f"dws{k}"] = float(nxt.ws.iloc[0] - row["ws0"]) if not nxt.ws.isna().all() else np.nan
                 row[f"drt{k}"] = float(nxt.retail.iloc[0] - row["rt0"]) if not nxt.retail.isna().all() else np.nan
+                row[f"dex{k}"] = float(nxt.exref.iloc[0] - row["ex0"]) if not nxt.exref.isna().all() else np.nan
+                row[f"dfd{k}"] = float(nxt.fund.iloc[0] - row["fd0"]) if not nxt.fund.isna().all() else np.nan
             out.append(row)
     return pd.DataFrame(out)
 
@@ -229,6 +233,25 @@ def margin_report(t: pd.DataFrame) -> list:
     return out
 
 
+def fund_report(t: pd.DataFrame) -> list:
+    """กองทุนต่อลิตร (คอลัมน์ OIL FUND ของ Entry_Eppo ; ลบ = อุดหนุน) : ต้นทุนหน้าคลัง (WS) = ราคาหน้าโรงกลั่น (EX-REFIN.) + ภาษี + กองทุน
+    ดูว่าเมื่อ MOPS ขยับ ส่วนที่ส่งต่อไป WS ผ่านราคาโรงกลั่น และส่วนที่กองทุนดูดซับ (ΔOIL FUND สวนทาง) เป็นเท่าไร"""
+    np.seterr(all="ignore")
+    out = []
+    for fuel, g in t.groupby("fuel"):
+        x = g.dropna(subset=["dws3", "dex3", "dfd3"])
+        if len(x) < 8:
+            continue
+        out.append(f"[RULE-FUND] {fuel}: n={len(x)} ; สหสัมพันธ์ MOPSΔ1D กับ ΔEX-REFIN(3 วัน) {np.corrcoef(x.m1, x.dex3)[0, 1]:+.2f} | กับ ΔOIL FUND {np.corrcoef(x.m1, x.dfd3)[0, 1]:+.2f}"
+                   f" | กับ ΔWS {np.corrcoef(x.m1, x.dws3)[0, 1]:+.2f} ; ΔEX-REFIN เฉลี่ย {x.dex3.mean():+.3f} Δกองทุนเฉลี่ย {x.dfd3.mean():+.3f} ΔWS เฉลี่ย {x.dws3.mean():+.3f}")
+        up = x[(x.m1 > 0) & (x.m3 > 0)]
+        if len(up) >= 9:
+            up = up.assign(tier=pd.qcut(up.fund_lvl, 3, labels=["อุดหนุนมาก", "กลาง", "อุดหนุนน้อย/เก็บ"], duplicates="drop"))
+            for tier, gg in up.groupby("tier", observed=True):
+                out.append(f"   MOPS ขึ้น & กองทุน{tier} ({gg.fund_lvl.min():+.2f}..{gg.fund_lvl.max():+.2f} บาท/ลิตร) : n={len(gg)} ΔEX-REFIN {gg.dex3.mean():+.3f} Δกองทุน {gg.dfd3.mean():+.3f} ΔWS {gg.dws3.mean():+.3f}")
+    return out
+
+
 def main():
     tok = get_token()
     mops = mops_daily(sheets_get(tok, SHEET_ID, "Entry_MOPS!A1:F6000"))
@@ -241,7 +264,7 @@ def main():
     if t.empty:
         print("[RULE] ไม่มีวันที่ฟีเจอร์ครบ")
         return
-    for line in lag_report(t) + class_report(t) + period_report(t) + margin_report(t):
+    for line in lag_report(t) + class_report(t) + period_report(t) + margin_report(t) + fund_report(t):
         print(line)
 
 
