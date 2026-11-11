@@ -51,3 +51,8 @@ jobs:
         env:
           SA_EMAIL: ${{ secrets.SA_EMAIL }}
           SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
+      - name: Walk-forward by components (ex-refinery + known fund vs baselines)
+        run: python diag_wf_components.py
+        env:
+          SA_EMAIL: ${{ secrets.SA_EMAIL }}
+          SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
