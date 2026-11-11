@@ -154,3 +154,28 @@ class Outcome(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MoveTo11(unittest.TestCase):
+    def test_rounds_and_pick(self):
+        self.assertEqual(fc.ROUNDS, ("11:00", "21:30"))
+        self.assertEqual(fc.pick_round(pd.Timestamp("2026-11-12 11:03")), "11:00")
+        self.assertEqual(fc.pick_round(pd.Timestamp("2026-11-12 21:40")), "21:30")
+
+    def test_hindcast_detection(self):
+        self.assertTrue(fc.is_hindcast({"asof": "2026-11-11 16:18", "filled_at": "2026-11-11 16:18"}))
+        self.assertFalse(fc.is_hindcast({"asof": "2026-11-12 11:00", "filled_at": "2026-11-12 21:40"}))
+        self.assertFalse(fc.is_hindcast({"asof": "2026-11-12 11:00", "filled_at": ""}))
+
+    def test_summary_excludes_hindcast(self):
+        rows = [{"card_id": "2026-11-11 21:30 B7", "asof": "2026-11-11 16:18", "filled_at": "2026-11-11 16:18", "call": "ลง", "right": 1, "outcome_cls": "ลง", "outcome_dws": -0.7},
+                {"card_id": "2026-11-12 11:00 B7", "asof": "2026-11-12 11:00", "filled_at": "2026-11-12 21:40", "call": "ลง", "right": 0, "outcome_cls": "นิ่ง", "outcome_dws": 0.0}]
+        text = "\n".join(fc.summary_lines(rows))
+        self.assertIn("ไม่นับการ์ดย้อนหลัง 1 ใบ", text)
+        self.assertIn("เติมผลแล้ว 1 ใบ", text)
+
+    def test_drop_known_target(self):
+        eppo = pd.DataFrame({"fuel": ["B7", "B7"], "day": [pd.Timestamp("2026-11-10"), pd.Timestamp("2026-11-11")], "ws": [40.0, 39.3]})
+        known = {"card_id": "a", "fuel": "B7", "target_day": "2026-11-11", "call": "ลง"}
+        future = {"card_id": "b", "fuel": "B7", "target_day": "2026-11-12", "call": "ลง"}
+        self.assertEqual(fc.drop_known([known, future], eppo), [future])
