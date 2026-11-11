@@ -62,6 +62,9 @@ def load_notices_full(values: list) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["msg_day", "msg_time", "eff_day", "old", "new"]).sort_values(["msg_day", "msg_time"]).reset_index(drop=True)
 
 
+PROB_CAP = 0.75   # เพดานความน่าจะเป็นที่แสดง จนกว่าจะผ่านการทดสอบเดินหน้า
+
+
 def known_fund_change(notices: pd.DataFrame, fuel: str, target: pd.Timestamp):
     """การเปลี่ยนของกองทุน (บาท/ลิตร) ที่มีผลวัน target ตามประกาศล่าสุด ; None = ไม่ทราบ/ไม่มีประกาศ (เบนซินจับคู่ไม่ได้ จึงคืน None เสมอ)"""
     if fuel != "B7" or notices.empty:
@@ -119,8 +122,25 @@ def probabilities(pred: float, resid: np.ndarray) -> dict:
     if len(resid) < MIN_RESID:
         return {}
     s = pred + resid
-    return {"p_down": float((s <= -UP).mean()), "p_up": float((s >= UP).mean()), "p_flat": float(((s > -UP) & (s < UP)).mean()),
-            "lo": float(np.percentile(s, 20)), "hi": float(np.percentile(s, 80))}
+    out = {"p_down": float((s <= -UP).mean()), "p_up": float((s >= UP).mean()), "p_flat": float(((s > -UP) & (s < UP)).mean()),
+           "lo": float(np.percentile(s, 20)), "hi": float(np.percentile(s, 80)), "capped": False}
+    return cap_probs(out)
+
+
+def cap_probs(p: dict, cap: float = None) -> dict:
+    """ยังไม่ผ่านการทดสอบเดินหน้า (lift จริง ~2 เท่า) → ไม่แสดงความน่าจะเป็นเกินเพดาน ; ส่วนเกินกระจายให้ทิศอื่นตามสัดส่วน"""
+    cap = PROB_CAP if cap is None else cap
+    keys = ("p_down", "p_flat", "p_up")
+    for k in keys:
+        if p[k] > cap:
+            excess = p[k] - cap
+            others = [o for o in keys if o != k]
+            tot = sum(p[o] for o in others)
+            for o in others:
+                p[o] += excess * (p[o] / tot if tot > 0 else 0.5)
+            p[k] = cap
+            p["capped"] = True
+    return p
 
 
 def decide(p: dict) -> tuple:
@@ -203,7 +223,9 @@ def build_card(fuel: str, rnd: str, now: pd.Timestamp, f: dict, known, notice_ms
     if p:
         rng = f"{p['lo']:+.2f} ถึง {p['hi']:+.2f}"
         head = (f"ต้นทุน{FUEL_TH[fuel]}: " + (f"มีแนวโน้มปรับ{call} ช่วงประมาณ {rng} บาท/ลิตร" if call != "ไม่ชัด" else f"ไม่ชัดเจน (ช่วงที่เป็นไปได้ {rng} บาท/ลิตร)")
-                + f" · โอกาสลง ≥10 สต. {p['p_down']:.0%} / นิ่ง {p['p_flat']:.0%} / ขึ้น ≥10 สต. {p['p_up']:.0%}")
+                + f" · โอกาสลง ≥10 สต. {p['p_down']:.0%} / นิ่ง {p['p_flat']:.0%} / ขึ้น ≥10 สต. {p['p_up']:.0%}"
+                + (" (จำกัดเพดาน 75% เพราะยังไม่ผ่านการทดสอบเดินหน้า)" if p.get("capped") else "")
+                + (" · ช่วงนี้เป็นการเปลี่ยนสุทธิรวมผลกองทุนที่ประกาศแล้ว" if model == "C" else ""))
     else:
         head = f"ต้นทุน{FUEL_TH[fuel]}: ไม่ชัดเจน (ข้อมูลย้อนหลังไม่พอสำหรับให้ความน่าจะเป็น)"
     reasons = reasons_text(fuel, f, known, notice_msg, rnd)
@@ -211,7 +233,7 @@ def build_card(fuel: str, rnd: str, now: pd.Timestamp, f: dict, known, notice_ms
         reasons += " · หมายเหตุ: MOPS ล่าสุดในชีทซ้ำค่าเดิม (ยังไม่อัปเดต) จึงใช้ของวันก่อนหน้า"
     if oor:
         reasons += f" · ⚠ สัญญาณ {', '.join(oor)} อยู่นอกช่วงที่โมเดลเคยเห็น จึงจำกัดความเชื่อมั่นเป็นต่ำ"
-    text = "\n".join([f"รอบ {rnd} น. · แผนสำหรับ {target:%d/%m/%Y} · ความเชื่อมั่น: {conf}", head, f"เวลาที่ปรับ: {timing}",
+    text = "\n".join([f"รอบ {rnd} น. · แผนสำหรับ {target:%d/%m/%Y} · ความเชื่อมั่น: {conf}", head, f"เวลาที่ปรับ: {timing} [สถิติวันที่ราคาลงโดยทั่วไป ไม่ได้แยกตามสัญญาณวันนี้]",
                       f"ราคาปลีก: {retail_now} ; ยังไม่มีหลักฐานย้อนหลังเพียงพอที่จะพยากรณ์ (โดยทั่วไปปลีกตามราคาส่งช้ากว่า)", f"เหตุผล: {reasons}", f"คำแนะนำ: {rec}",
                       "(โหมดเงา — ยังไม่ผ่านการทดสอบเดินหน้า ไม่ใช่คำสั่งซื้อ)"])
     return {"card_id": f"{target:%Y-%m-%d} {rnd} {fuel}", "asof": now.strftime("%Y-%m-%d %H:%M"), "round": rnd, "fuel": fuel, "target_day": target.strftime("%Y-%m-%d"),

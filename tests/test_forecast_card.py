@@ -36,7 +36,9 @@ class Decide(unittest.TestCase):
     def test_probabilities_need_enough_history(self):
         self.assertEqual(fc.probabilities(-0.5, np.zeros(10)), {})
         p = fc.probabilities(-0.5, np.random.default_rng(1).normal(0, 0.1, 100))
-        self.assertGreater(p["p_down"], 0.9)
+        self.assertAlmostEqual(p["p_down"], fc.PROB_CAP)      # คำทายแรงมาก → ถูกจำกัดเพดาน
+        self.assertTrue(p["capped"])
+        self.assertAlmostEqual(p["p_down"] + p["p_flat"] + p["p_up"], 1.0)
         self.assertAlmostEqual(p["p_down"] + p["p_flat"] + p["p_up"], 1.0)
         self.assertLess(p["lo"], p["hi"])
 
