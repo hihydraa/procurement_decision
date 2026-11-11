@@ -20,9 +20,13 @@ from pricelog_frame import build_frame
 from tap_policy import DEPOTS, FIXED_TAPS, FLAT, POLICY_MAPS, depot_series, diff_ci, load_outlook, pred_of, window_regrets
 
 COLUMNS = ["ref", "day", "fuel", "tier", "pred", "rec_A", "rec_B", "rec_C", "model_version", "logged_at",
-           "n_depots", "delta", "regret_A", "regret_B", "regret_C", "fixed_2230", "fixed_0700", "fixed_1630", "actual_cls", "filled_at"]
+           "n_depots", "delta", "regret_A", "regret_B", "regret_C", "fixed_2230", "fixed_0700", "fixed_1630", "actual_cls", "filled_at",
+           "lag_h", "late"]                                  # lag_h = ชม. ที่แนวโน้มออกช้ากว่า 20:30 ; late = 1 ถ้าเกิน ON_TIME_LAG_H (ไม่ทันใช้จริง)
 OUTCOME_FROM = COLUMNS.index("n_depots")
-LAST_COL = "T"
+OUTCOME_TO = COLUMNS.index("filled_at")
+LAST_COL = "V"
+MAX_LAG_H = 12.0                    # รับแนวโน้มที่ออกช้าได้ถึงกี่ชม. (เท่ากับ MAX_LOG_LAG_H ของ OutlookLog)
+ON_TIME_LAG_H = 3.0                 # ภายในเกณฑ์นี้ = ตรงเวลา (นับในผลหลัก) ; ช้ากว่านี้นับแยก
 SHADOW_START = pd.Timestamp("2026-11-10")          # รอบ 20:30 ตั้งแต่วันนี้เป็นต้นไป
 MIN_DEPOTS = 3                                      # ต้องมีราคาอย่างน้อยกี่คลังจึงเติมผล
 FILL_AFTER_H = 22.5                                 # เติมผลเมื่อเลยเวลานี้ของวัน D (ช่วงวัดสิ้นสุด 22:00)
@@ -35,7 +39,8 @@ def _ts(v):
 
 
 def new_rows(existing: set, outlook: pd.DataFrame, now: pd.Timestamp) -> list:
-    """แถวใหม่จากแนวโน้ม 24 ชม. ที่ออกตรงเวลา (OutlookLog) ที่ยังไม่เคยบันทึก (คีย์ = ref + ชนิด) เฉพาะ ref >= SHADOW_START"""
+    """แถวใหม่จากแนวโน้ม 24 ชม. รอบ 20:30 ใน OutlookLog (ออกช้าได้ถึง MAX_LAG_H) ที่ยังไม่เคยบันทึก (คีย์ = ref + ชนิด) เฉพาะ ref >= SHADOW_START
+    แนวโน้มคำนวณจากข้อมูลถึง ref เสมอ ล็อกช้าจึงไม่รั่วข้อมูล แต่ถ้าช้าเกิน ON_TIME_LAG_H จะติด late=1 (จุดแตะที่แนะนำอาจพ้นเวลาไปแล้ว)"""
     out = []
     for _, r in outlook[outlook.hours == 24].sort_values("ref").iterrows():
         if r["ref"] < SHADOW_START:
@@ -48,6 +53,7 @@ def new_rows(existing: set, outlook: pd.DataFrame, now: pd.Timestamp) -> list:
         row = {c: "" for c in COLUMNS}
         row.update({"ref": key[0], "day": (r["ref"].normalize() + pd.Timedelta(days=1)).strftime("%Y-%m-%d"), "fuel": key[1],
                     "tier": r["tier"], "pred": pred, "model_version": r.get("model_version", ""), "logged_at": now.strftime("%Y-%m-%d %H:%M"),
+                    "lag_h": float(r["lag_h"]), "late": int(float(r["lag_h"]) > ON_TIME_LAG_H),
                     **{f"rec_{k}": m[pred] for k, m in POLICY_MAPS.items()}})
         out.append(row)
     return out
@@ -70,18 +76,17 @@ def fill_outcome(row: dict, prices: pd.DataFrame, now: pd.Timestamp):
     return out
 
 
-def shadow_summary(rows: list) -> list:
-    """สรุปผลสะสมของแถวที่เติมผลแล้ว : regret เฉลี่ยของนโยบายเทียบเวลาคงที่ที่ดีที่สุดในตัวอย่าง พร้อมช่วงเชื่อมั่นเมื่อมี ≥ 8 วัน"""
-    d = pd.DataFrame([r for r in rows if str(r.get("filled_at", "")) != ""])
-    if d.empty:
-        return ["[TAPREC] ยังไม่มีแถวที่เติมผลแล้ว"]
+def _group_lines(d: pd.DataFrame, label: str, with_ci: bool) -> list:
     num = ["regret_A", "regret_B", "regret_C", *FIXED_COLS.values()]
+    d = d.copy()
     d[num] = d[num].apply(pd.to_numeric, errors="coerce")
     days = d.day.map(lambda v: str(_ts(v).date()))
     best = min(FIXED_COLS.values(), key=lambda c: d[c].mean())
-    out = [f"[TAPREC] เติมผลแล้ว {len(d)} แถว ({days.nunique()} วัน) ; regret เฉลี่ย : "
+    out = [f"[TAPREC] {label}: เติมผลแล้ว {len(d)} แถว ({days.nunique()} วัน) ; regret เฉลี่ย : "
            + " | ".join(f"{k} {d[c].mean():.3f}" for k, c in (("A", "regret_A"), ("B", "regret_B"), ("C", "regret_C"))) + " | "
            + " ".join(f"คงที่{t} {d[c].mean():.3f}" for t, c in FIXED_COLS.items())]
+    if not with_ci:
+        return out
     for k in POLICY_MAPS:
         diff = (d[f"regret_{k}"] - d[best]).groupby(days).mean().to_numpy()
         if len(diff) >= 8:
@@ -92,15 +97,32 @@ def shadow_summary(rows: list) -> list:
     return out
 
 
+def shadow_summary(rows: list) -> list:
+    """สรุปผลสะสมของแถวที่เติมผลแล้ว แยก "ตรงเวลา" (ผลหลัก พร้อมช่วงเชื่อมั่นเมื่อ ≥ 8 วัน) กับ "ล็อกช้า" (ไม่ทันใช้จริง แสดงแยกเพื่อเทียบ ไม่ปนผลหลัก)"""
+    d = pd.DataFrame([r for r in rows if str(r.get("filled_at", "")) != ""])
+    if d.empty:
+        return ["[TAPREC] ยังไม่มีแถวที่เติมผลแล้ว"]
+    late = pd.to_numeric(d.get("late", 0), errors="coerce").fillna(0) if "late" in d.columns else pd.Series(0, index=d.index)
+    on_time, late_d = d[late == 0], d[late == 1]
+    out = _group_lines(on_time, "ตรงเวลา", True) if len(on_time) else ["[TAPREC] ตรงเวลา: ยังไม่มีแถวที่เติมผลแล้ว"]
+    if len(late_d):
+        out += _group_lines(late_d, "ล็อกช้า (ไม่ทันใช้จริง)", False)
+    return out
+
+
 def main():
     now = pd.Timestamp(datetime.now(ZoneInfo(TZ_NAME)).replace(tzinfo=None))
     tok = get_token()
-    outlook = load_outlook(sheets_get(tok, SHEET_ID, f"{TABS['OUTLOOK_LOG']}!A1:R50000"))
+    outlook = load_outlook(sheets_get(tok, SHEET_ID, f"{TABS['OUTLOOK_LOG']}!A1:R50000"), MAX_LAG_H)
     tab = TABS["TAPREC_LOG"]
     if ensure_tab(tok, SHEET_ID, tab):
         sheets_update(tok, SHEET_ID, f"{tab}!A1", [COLUMNS])
         print(f"[TAPREC] created tab {tab}")
     values = sheets_get(tok, SHEET_ID, f"{tab}!A1:{LAST_COL}50000")
+    if values and [str(h) for h in values[0]] != COLUMNS and COLUMNS[:len(values[0])] == [str(h) for h in values[0]]:
+        sheets_update(tok, SHEET_ID, f"{tab}!A1", [COLUMNS])          # หัวตารางเก่า (ไม่มี lag_h/late) → ต่อท้ายให้ครบ
+        values[0] = list(COLUMNS)
+        print(f"[TAPREC] header upgraded ({tab})")
     head = values[0] if values else COLUMNS
     rows = [dict(zip(head, r + [""] * (len(head) - len(r)))) for r in values[1:]]
     existing = {(_ts(r["ref"]).strftime("%Y-%m-%d %H:%M"), str(r["fuel"])) for r in rows if _ts(r["ref"]) is not None}
@@ -122,7 +144,7 @@ def main():
             res = fill_outcome(r, prices, now)
             if res:
                 rows[i].update(res)
-                sheets_update(tok, SHEET_ID, f"{tab}!{chr(65 + OUTCOME_FROM)}{i + 2}:{LAST_COL}{i + 2}", [[res.get(c, rows[i].get(c, "")) for c in COLUMNS[OUTCOME_FROM:]]])
+                sheets_update(tok, SHEET_ID, f"{tab}!{chr(65 + OUTCOME_FROM)}{i + 2}:{chr(65 + OUTCOME_TO)}{i + 2}", [[res.get(c, rows[i].get(c, "")) for c in COLUMNS[OUTCOME_FROM:OUTCOME_TO + 1]]])
                 filled += 1
     print(f"[TAPREC] outcomes filled: {filled} (รอผลอีก {len(pending) - filled})")
     for line in shadow_summary(rows):

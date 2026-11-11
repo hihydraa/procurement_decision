@@ -74,15 +74,17 @@ def pred_of(tier) -> str:
     return "ขึ้น" if t.startswith("UP") else "ลง" if t.startswith("DOWN") else "ไม่ชัด"
 
 
-def load_outlook(values: list) -> pd.DataFrame:
-    """แท็บ OutlookLog จาก Sheets API (อ่านแบบ UNFORMATTED จึงได้เลข serial สำหรับวันเวลา) → แถวรอบ 20:30 ที่ออกตรงเวลา ไม่ใช่ backfill
+def load_outlook(values: list, max_lag_h: float = 3.0) -> pd.DataFrame:
+    """แท็บ OutlookLog จาก Sheets API (อ่านแบบ UNFORMATTED จึงได้เลข serial สำหรับวันเวลา) → แถวรอบ 20:30 ที่ไม่ใช่ backfill
+    ออกภายใน max_lag_h ชม. หลังจุดอ้างอิง (ค่าเดิม 3 = "ตรงเวลา") ; คอลัมน์ lag_h = asof − ref (ชม.)
     1 แถวต่อ (วัน, ชนิด, ขอบฟ้า) รอบแรกเท่านั้น"""
     head = values[0]
     d = pd.DataFrame([r + [""] * (len(head) - len(r)) for r in values[1:]], columns=head)
     d["asof"], d["ref"] = d["asof"].map(to_ts), d["ref"].map(to_ts)
     d["hours"] = pd.to_numeric(d["hours"], errors="coerce")
     d = d.dropna(subset=["asof", "ref", "hours"])
-    d = d[(d["ref"].dt.strftime("%H:%M") == "20:30") & ((d["asof"] - d["ref"]) <= pd.Timedelta(hours=3))]
+    d["lag_h"] = ((d["asof"] - d["ref"]).dt.total_seconds() / 3600).round(2)
+    d = d[(d["ref"].dt.strftime("%H:%M") == "20:30") & (d["lag_h"] <= max_lag_h)]
     if "backfilled" in d.columns:
         d = d[pd.to_numeric(d["backfilled"], errors="coerce").fillna(0) == 0]
     d = d.assign(date=d["ref"].dt.strftime("%Y-%m-%d")).sort_values("asof").drop_duplicates(["date", "fuel", "hours"], keep="first")
