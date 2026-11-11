@@ -20,7 +20,7 @@ MEDIAN_MM = {"G95": 3.37, "B7": 1.94}
 EPPO_FUEL = {"GASOHOL95 E10": "G95", "H-DIESEL": "B7"}
 MOPS_FUEL = {"G95": "G95", "DS": "B7"}
 UP = 0.10                       # ขยับ >= 10 สต. = ขึ้น/ลง
-VARIANTS = ("MOPS", "MOPS+WTI", "MOPS+WTI+margin", "ทั้งหมด(+กองทุน)")
+VARIANTS = ("MOPS", "MOPS+WTI", "MOPS+WTI+margin", "ทั้งหมด(+กองทุน:ยอดติดลบ)", "ทั้งหมด(+กองทุน:Status≠OK)", "ทั้งหมด(+กองทุน:CRITICAL)")
 
 
 def _hdr(values):
@@ -110,13 +110,15 @@ def classify(f: dict, variant: str) -> str:
         return "BUY" if m_up and w_ok_up else "WAIT" if m_dn and w_dn else "UNCLEAR"
     if variant == "MOPS+WTI+margin":
         return "BUY" if m_up and w_ok_up and low else "WAIT" if m_dn and w_dn else "UNCLEAR"
-    return "BUY" if m_up and w_ok_up and low and f["crisis"] else "WAIT" if m_dn and w_dn and not f["crisis"] else "UNCLEAR"
+    key = {"ทั้งหมด(+กองทุน:ยอดติดลบ)": "crisis", "ทั้งหมด(+กองทุน)": "crisis", "ทั้งหมด(+กองทุน:Status≠OK)": "fund_any", "ทั้งหมด(+กองทุน:CRITICAL)": "fund_crit"}[variant]
+    return "BUY" if m_up and w_ok_up and low and f[key] else "WAIT" if m_dn and w_dn and not f[key] else "UNCLEAR"
 
 
 def build_table(mops: pd.DataFrame, wti: pd.DataFrame, eppo: pd.DataFrame, fund: pd.DataFrame) -> pd.DataFrame:
     """1 แถวต่อ (วัน, ชนิด) ที่มีฟีเจอร์ครบ : ฟีเจอร์ ณ วัน t และผล ΔWS/ΔRetail ไป t+1 / t+3 (ตามแถว EPPO ที่ไม่ใช่ CARRIED ถัดไป)"""
     w = wti.assign(**{"w1": wti.wti.diff(1), "w3": wti.wti.diff(3)}).set_index("day")
     fd = fund.set_index("day")["crisis"]
+    fs = fund.set_index("day")["status"].str.upper()
     out = []
     for fuel in ("G95", "B7"):
         m = mops[mops.fuel == fuel].set_index("day")["mops"]
@@ -125,14 +127,15 @@ def build_table(mops: pd.DataFrame, wti: pd.DataFrame, eppo: pd.DataFrame, fund:
         for day, r in feats.dropna().iterrows():
             wv = w.reindex([day]).iloc[0]
             crisis = fd.reindex(fd.index.union([day])).sort_index().ffill().get(day, np.nan)
-            if wv.isna().any() or pd.isna(crisis):
+            stat = fs.reindex(fs.index.union([day])).sort_index().ffill().get(day, np.nan)
+            if wv.isna().any() or pd.isna(crisis) or pd.isna(stat):
                 continue
             # ราคาหน้าคลังที่ใช้เทียบ : แถว EPPO ล่าสุดที่ไม่เกินวัน t (ฐาน) และ แถวที่ t+1, t+3 วันปฏิทิน (ต้องมีจริง)
             base = e.loc[:day]
             if base.empty or (day - base.index[-1]).days > 1:
                 continue
             row = {"day": day, "fuel": fuel, "m1": r.m1, "m3": r.m3, "w1": wv.w1, "w3": wv.w3, "crisis": bool(crisis),
-                   "mm_gap": float(base.mm.iloc[-1] - MEDIAN_MM[fuel]), "ws0": float(base.ws.iloc[-1]), "rt0": float(base.retail.iloc[-1])}
+                   "fund_any": stat != "OK", "fund_crit": stat == "CRITICAL", "mm_gap": float(base.mm.iloc[-1] - MEDIAN_MM[fuel]), "ws0": float(base.ws.iloc[-1]), "rt0": float(base.retail.iloc[-1])}
             for k in (1, 3):
                 nxt = e.reindex([day + pd.Timedelta(days=k)])
                 row[f"dws{k}"] = float(nxt.ws.iloc[0] - row["ws0"]) if not nxt.ws.isna().all() else np.nan
@@ -192,6 +195,40 @@ def block_ci(a: pd.DataFrame, b: pd.DataFrame, reps: int = 2000, seed: int = 7):
     return (float(np.percentile(diffs, 2.5)), float(np.percentile(diffs, 97.5))) if diffs else (float("nan"), float("nan"))
 
 
+def _diff(t: pd.DataFrame, variant: str):
+    t = t.assign(cls=[classify(r, variant) for r in t.to_dict("records")]).dropna(subset=["dws3"])
+    buy, rest = t[t.cls == "BUY"], t[t.cls != "BUY"]
+    wait = t[t.cls == "WAIT"]
+    return len(buy), len(wait), (buy.dws3.mean() if len(buy) else np.nan), (wait.dws3.mean() if len(wait) else np.nan), (buy.dws3.mean() - rest.dws3.mean() if len(buy) and len(rest) else np.nan)
+
+
+def period_report(t: pd.DataFrame) -> list:
+    """ความนิ่ง : แบ่งครึ่งตามเวลา (จำนวนวันเท่ากัน) และตัดสัปดาห์ที่ราคาขยับแรงสุด 3 สัปดาห์ออก"""
+    t = t.dropna(subset=["dws3"]).sort_values("day")
+    cut = t.day.sort_values().iloc[len(t) // 2]
+    wk = t.day.dt.to_period("W").astype(str)
+    big = t.assign(w=wk).groupby("w").dws3.apply(lambda x: x.abs().sum()).sort_values(ascending=False).head(3).index
+    parts = {"ครึ่งแรก": t[t.day < cut], "ครึ่งหลัง": t[t.day >= cut], "ตัด 3 สัปดาห์ที่ขยับแรงสุด": t[~wk.isin(big)]}
+    out = [f"[RULE-PERIOD] แบ่งที่ {cut:%d/%m/%y} ; สัปดาห์ที่ตัดออก: {', '.join(big)}"]
+    for name, g in parts.items():
+        for v in ("MOPS", "MOPS+WTI"):
+            nb, nw, mb, mw, d = _diff(g, v)
+            out.append(f"   {name} {v}: n={len(g)} ; BUY n={nb} ΔWS3 {mb:+.3f} | WAIT n={nw} {mw:+.3f} | BUY−ที่เหลือ {d:+.3f}")
+    return out
+
+
+def margin_report(t: pd.DataFrame) -> list:
+    """ค่าการตลาดแบบต่อเนื่อง : ในวันที่ MOPS ขึ้น (Δ1D>0 และ Δ3D>0) ต้นทุน 3 วันต่างกันตามระดับค่าการตลาด (3 กลุ่มเท่ากัน) หรือไม่"""
+    x = t.dropna(subset=["dws3"])
+    up = x[(x.m1 > 0) & (x.m3 > 0)]
+    out = [f"[RULE-MARGIN] ทุกวัน สหสัมพันธ์ ค่าการตลาด−ค่ากลาง กับ ΔWS 3 วัน {np.corrcoef(x.mm_gap, x.dws3)[0, 1]:+.2f} (n={len(x)}) ; เฉพาะวัน MOPS ขึ้น {np.corrcoef(up.mm_gap, up.dws3)[0, 1]:+.2f} (n={len(up)})"]
+    if len(up) >= 9:
+        up = up.assign(tier=pd.qcut(up.mm_gap, 3, labels=["ต่ำ", "กลาง", "สูง"], duplicates="drop"))
+        for tier, g in up.groupby("tier", observed=True):
+            out.append(f"   ค่าการตลาด{tier} ({g.mm_gap.min():+.2f}..{g.mm_gap.max():+.2f}) : n={len(g)} ΔWS3 {g.dws3.mean():+.3f} ขึ้น≥{UP:.2f} {(g.dws3 >= UP).mean():.0%}")
+    return out
+
+
 def main():
     tok = get_token()
     mops = mops_daily(sheets_get(tok, SHEET_ID, "Entry_MOPS!A1:F6000"))
@@ -204,7 +241,7 @@ def main():
     if t.empty:
         print("[RULE] ไม่มีวันที่ฟีเจอร์ครบ")
         return
-    for line in lag_report(t) + class_report(t):
+    for line in lag_report(t) + class_report(t) + period_report(t) + margin_report(t):
         print(line)
 
 

@@ -23,16 +23,24 @@ class Parse(unittest.TestCase):
 
 class Rule(unittest.TestCase):
     def feat(self, **kw):
-        return {"m1": 1.0, "m3": 2.0, "w1": 0.5, "mm_gap": -0.3, "crisis": True, **kw}
+        return {"m1": 1.0, "m3": 2.0, "w1": 0.5, "mm_gap": -0.3, "crisis": True, "fund_any": True, "fund_crit": False, **kw}
+
+    def test_fund_status_variants(self):
+        # WATCH: fund_any จริง แต่ fund_crit เท็จ
+        f = self.feat(fund_any=True, fund_crit=False)
+        self.assertEqual(rb.classify(f, "ทั้งหมด(+กองทุน:Status≠OK)"), "BUY")
+        self.assertEqual(rb.classify(f, "ทั้งหมด(+กองทุน:CRITICAL)"), "UNCLEAR")
+        w = self.feat(m1=-1, m3=-2, w1=-1, fund_any=False, fund_crit=False)                        # Status OK → ชะลอได้
+        self.assertEqual(rb.classify(w, "ทั้งหมด(+กองทุน:Status≠OK)"), "WAIT")
 
     def test_variants(self):
-        self.assertEqual(rb.classify(self.feat(), "ทั้งหมด(+กองทุน)"), "BUY")
-        self.assertEqual(rb.classify(self.feat(crisis=False), "ทั้งหมด(+กองทุน)"), "UNCLEAR")        # ไม่วิกฤติ → ไม่ BUY
+        self.assertEqual(rb.classify(self.feat(), "ทั้งหมด(+กองทุน:ยอดติดลบ)"), "BUY")
+        self.assertEqual(rb.classify(self.feat(crisis=False), "ทั้งหมด(+กองทุน:ยอดติดลบ)"), "UNCLEAR")        # ไม่วิกฤติ → ไม่ BUY
         self.assertEqual(rb.classify(self.feat(crisis=False), "MOPS+WTI+margin"), "BUY")
         self.assertEqual(rb.classify(self.feat(mm_gap=0.4), "MOPS+WTI+margin"), "UNCLEAR")           # ค่าการตลาดสูงกว่าค่ากลาง
         self.assertEqual(rb.classify(self.feat(w1=-0.2), "MOPS+WTI"), "UNCLEAR")                      # WTI ขัดแย้ง
-        self.assertEqual(rb.classify(self.feat(m1=-1, m3=-2, w1=-1, crisis=False), "ทั้งหมด(+กองทุน)"), "WAIT")
-        self.assertEqual(rb.classify(self.feat(m1=-1, m3=-2, w1=-1, crisis=True), "ทั้งหมด(+กองทุน)"), "UNCLEAR")   # กองทุนวิกฤติ → ไม่ WAIT
+        self.assertEqual(rb.classify(self.feat(m1=-1, m3=-2, w1=-1, crisis=False), "ทั้งหมด(+กองทุน:ยอดติดลบ)"), "WAIT")
+        self.assertEqual(rb.classify(self.feat(m1=-1, m3=-2, w1=-1, crisis=True), "ทั้งหมด(+กองทุน:ยอดติดลบ)"), "UNCLEAR")   # กองทุนวิกฤติ → ไม่ WAIT
         self.assertEqual(rb.classify(self.feat(m1=-1, m3=-2), "MOPS"), "WAIT")
 
 
@@ -51,6 +59,18 @@ class Table(unittest.TestCase):
         out = rb.class_report(t)
         self.assertTrue(any("BUY" in x for x in out))
         self.assertTrue(any("[RULE-LAG]" in x for x in rb.lag_report(t)))
+
+    def test_period_and_margin_reports(self):
+        days = pd.date_range("2026-07-01", periods=60)
+        rng = np.random.default_rng(1)
+        t = pd.DataFrame({"day": days, "fuel": "B7", "m1": rng.normal(size=60), "m3": rng.normal(size=60), "w1": rng.normal(size=60), "mm_gap": rng.normal(size=60),
+                          "crisis": True, "fund_any": True, "fund_crit": False, "dws1": rng.normal(size=60), "dws3": rng.normal(size=60)})
+        t["m3"] = t["m1"] + 0.5
+        out = rb.period_report(t)
+        self.assertIn("ครึ่งแรก", " ".join(out))
+        self.assertTrue(any("ตัด 3 สัปดาห์" in x for x in out))
+        m = rb.margin_report(t)
+        self.assertIn("สหสัมพันธ์", m[0])
 
     def test_block_ci_runs(self):
         d = pd.date_range("2026-10-01", periods=40)
