@@ -1432,24 +1432,15 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
           <h1>{DASHBOARD_TITLE}</h1>
           <p>ผสานสัญญาณจากกลุ่ม Jobber (Trend Mops, ประกาศปรับราคา, ประกาศกองทุน), MOPS ปิด และข้อมูลตลาด เพื่อพยากรณ์แนวโน้มราคาและสรุปให้ทีมจัดซื้อ</p>
           <p style="margin-top:4px;">อัปเดตล่าสุด: {updated_at}</p>
+          {outlook_mini_html}
         </div>
+        {snapshot_html}
       </div>
     </section>
 
     {warnings_html}
 
-    {summary_html}
-
-    <details class="ps-more">
-    <summary>รายละเอียดเพิ่มเติม: ข้อมูลตลาด กองทุน แผนส่งรถรายสาขา ข่าว และตารางเดิม (สำหรับผู้ต้องการเจาะลึก)</summary>
-
-    <div class="hero" style="margin-top:8px">{outlook_mini_html}</div>
-
-    {snapshot_html}
-
     {fund_risk_html}
-
-    {dispatch_html}
 
     <section class="top-grid">
       <div class="top-card">
@@ -1473,6 +1464,13 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
         <div class="muted">ล้านบาท/วัน</div>
       </div>
     </section>
+
+    {summary_html}
+
+    <details class="ps-more">
+    <summary>รายละเอียดเพิ่มเติม: แผนส่งรถรายสาขา การวิเคราะห์รายชนิด ตารางความแม่นยำเดิม และข่าว (สำหรับผู้ต้องการเจาะลึก)</summary>
+
+        {dispatch_html}
 
     {sections}
 
