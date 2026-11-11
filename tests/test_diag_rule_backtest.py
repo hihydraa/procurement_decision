@@ -13,9 +13,9 @@ class Parse(unittest.TestCase):
         self.assertEqual(sorted(zip(m.fuel, m.mops)), [("B7", 89.72), ("G95", 77.63)])
         w = rb.wti_daily([["Date", "Price"], ["2/17/2026", "62.33"], ["2/18/2026", "bad"]])
         self.assertEqual(len(w), 1)
-        e = rb.eppo_daily([["Date", "oil type", "WHOLESALE (WS)", "MARKETING MARGIN", "RETAIL", "Source"],
-                           ["10/1/2026", "H-DIESEL", "37.0", "2.0", "42.0", "FRESH"], ["10/2/2026", "H-DIESEL", "37.0", "2.0", "42.0", "CARRIED"],
-                           ["10/1/2026", "GASOHOL95 E10", "35.0", "3.3", "41.0", "FRESH"], ["10/1/2026", "LPG", "1", "1", "1", "FRESH"]])
+        e = rb.eppo_daily([["Date", "oil type", "WHOLESALE (WS)", "MARKETING MARGIN", "RETAIL", "EX-REFIN.", "OIL FUND", "Source"],
+                           ["10/1/2026", "H-DIESEL", "37.0", "2.0", "42.0", "36.0", "-2.5", "FRESH"], ["10/2/2026", "H-DIESEL", "37.0", "2.0", "42.0", "36.0", "-2.5", "CARRIED"],
+                           ["10/1/2026", "GASOHOL95 E10", "35.0", "3.3", "41.0", "30.0", "-8.0", "FRESH"], ["10/1/2026", "LPG", "1", "1", "1", "1", "1", "FRESH"]])
         self.assertEqual(sorted(e.fuel), ["B7", "G95"])
         f = rb.fund_daily([["Date", "Total_Balance (ล้านบาท)", "Status"], ["2026-03-16", "-12605.00", "CRITICAL"], ["2026-06-01", "500", "OK"]])
         self.assertEqual(list(f.crisis), [True, False])
@@ -49,7 +49,8 @@ class Table(unittest.TestCase):
         days = pd.date_range("2026-10-01", periods=14)
         mops = pd.DataFrame({"day": days, "fuel": "B7", "mops": np.arange(14) * 1.0 + 80})          # ขึ้นทุกวัน
         wti = pd.DataFrame({"day": days, "wti": np.arange(14) * 0.5 + 60})
-        eppo = pd.DataFrame({"day": days, "fuel": "B7", "ws": np.arange(14) * 0.2 + 37, "mm": 1.8, "retail": np.arange(14) * 0.2 + 42})
+        eppo = pd.DataFrame({"day": days, "fuel": "B7", "ws": np.arange(14) * 0.2 + 37, "mm": 1.8, "retail": np.arange(14) * 0.2 + 42,
+                             "exref": np.arange(14) * 0.3 + 30, "fund": -np.arange(14) * 0.1 - 2})
         fund = pd.DataFrame({"day": [days[0]], "crisis": [True], "status": ["CRITICAL"]})
         t = rb.build_table(mops, wti, eppo, fund)
         self.assertFalse(t.empty)
@@ -59,6 +60,19 @@ class Table(unittest.TestCase):
         out = rb.class_report(t)
         self.assertTrue(any("BUY" in x for x in out))
         self.assertTrue(any("[RULE-LAG]" in x for x in rb.lag_report(t)))
+
+    def test_fund_decomposition(self):
+        days = pd.date_range("2026-10-01", periods=40)
+        mops = pd.DataFrame({"day": days, "fuel": "B7", "mops": np.cumsum(np.tile([1.0, 2.0, -1.0, 1.5], 10)) + 80})
+        wti = pd.DataFrame({"day": days, "wti": np.arange(40) * 0.1 + 60})
+        ex = np.cumsum(np.tile([0.3, 0.6, -0.3, 0.45], 10)) + 30
+        eppo = pd.DataFrame({"day": days, "fuel": "B7", "ws": ex + 8, "mm": 1.8, "retail": ex + 14, "exref": ex, "fund": -np.arange(40) * 0.02 - 2})
+        fund = pd.DataFrame({"day": [days[0]], "crisis": [True], "status": ["CRITICAL"]})
+        t = rb.build_table(mops, wti, eppo, fund)
+        r = t[t.day == days[10]].iloc[0]
+        self.assertAlmostEqual(r.dfd1, -0.02)
+        out = rb.fund_report(t)
+        self.assertTrue(any("[RULE-FUND] B7" in x for x in out))
 
     def test_period_and_margin_reports(self):
         days = pd.date_range("2026-07-01", periods=60)
