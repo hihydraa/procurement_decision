@@ -74,6 +74,9 @@ def current_features(mops: pd.DataFrame, wti: pd.DataFrame, eppo: pd.DataFrame, 
     m = mops[mops.fuel == fuel].set_index("day")["mops"].sort_index()
     if len(m) < 5:
         return None
+    carried = False
+    if len(m) >= 2 and float(m.iloc[-1]) == float(m.iloc[-2]):          # ราคาปิดซ้ำเท่าเดิมเป๊ะ = แถวที่ลากค่าเดิมมา/ยังไม่อัปเดต → ไม่ใช้
+        m, carried = m.iloc[:-1], True
     f = add_deltas(m).dropna()
     t = f.index[-1]
     w = wti.set_index("day")["wti"].sort_index()
@@ -82,7 +85,7 @@ def current_features(mops: pd.DataFrame, wti: pd.DataFrame, eppo: pd.DataFrame, 
     if len(w) < 4 or e.empty:
         return None
     last = e.iloc[-1]
-    return {"mops_day": t, "m1": float(f.loc[t, "d1"]), "m3": float(f.loc[t, "d3"]), "w1": float(w.diff(1).iloc[-1]), "w3": float(w.diff(3).iloc[-1]),
+    return {"carried": carried, "mops_day": t, "m1": float(f.loc[t, "d1"]), "m3": float(f.loc[t, "d3"]), "w1": float(w.diff(1).iloc[-1]), "w3": float(w.diff(3).iloc[-1]),
             "mm_gap": float(last.mm - MEDIAN_MM[fuel]), "eppo_day": last.day, "ws": float(last.ws), "fund": float(last.fund)}
 
 
@@ -97,6 +100,19 @@ def fit_predict(ds: pd.DataFrame, fuel: str, feats: dict, known):
         return float(ridge_fit(X, g.dws.to_numpy(float))(x)[0]), (wf.actual - wf.DIRECT).to_numpy(float), "DIRECT"
     pred = ridge_fit(np.c_[X, g.dknown.to_numpy(float)], g.dws.to_numpy(float))(np.r_[x, known])[0]
     return float(pred), (wf.actual - wf.C).to_numpy(float), "C"
+
+
+def out_of_range(ds: pd.DataFrame, fuel: str, feats: dict) -> list:
+    """ฟีเจอร์ที่อยู่นอกช่วงที่โมเดลเคยเห็น (|ค่า| เกินค่าสูงสุดในข้อมูลฝึก) — โมเดลเชิงเส้นจะขยายคำทายเกินจริงและความน่าจะเป็นมั่นใจเกิน"""
+    g = ds[ds.fuel == fuel]
+    return [c for c in ("m1", "m3", "w1", "w3") if len(g) and abs(feats[c]) > g[c].abs().max()]
+
+
+def cap_confidence(conf: str, oor: list) -> str:
+    """ยังไม่ผ่านการทดสอบเดินหน้า → สูงสุด 'กลาง' ; ฟีเจอร์นอกช่วงที่เคยเห็น → 'ต่ำ'"""
+    if oor:
+        return "ต่ำ"
+    return "กลาง" if conf == "สูง" else conf
 
 
 def probabilities(pred: float, resid: np.ndarray) -> dict:
@@ -165,23 +181,25 @@ def recommend(call: str, conf: str, top_slot, fuel: str) -> str:
 
 def reasons_text(fuel: str, f: dict, known, notice_msg: str, rnd: str) -> str:
     mname = "MOPS " + ("ดีเซล" if fuel == "B7" else "G95")
-    parts = [f"{mname} {f['m1']:+.2f} (Δ1D) {f['m3']:+.2f} (Δ3D) ณ {f['mops_day']:%d/%m}", f"WTI Δ1D {f['w1']:+.2f}"]
+    parts = [f"{mname} {f['m1'] + 0.0:+.2f} (Δ1D) {f['m3'] + 0.0:+.2f} (Δ3D) ณ {f['mops_day']:%d/%m}", f"WTI Δ1D {f['w1'] + 0.0:+.2f}"]
     if known is not None:
         parts.append(f"ประกาศกองทุนดีเซลมีผลพรุ่งนี้ {known:+.2f} บาท/ลิตร ({'ลดอุดหนุน → ดันต้นทุนขึ้น' if known > 0 else 'เพิ่มอุดหนุน → กดต้นทุน' if known < 0 else 'ไม่เปลี่ยน'})")
     elif fuel == "B7":
         parts.append(notice_msg)
     else:
         parts.append("ประกาศกองทุนเบนซินยังจับคู่กับ G95 ไม่ได้")
-    parts.append(f"ค่าการตลาดเทียบค่ากลาง {f['mm_gap']:+.2f} (EPPO {f['eppo_day']:%d/%m})")
+    parts.append(f"ค่าการตลาดเทียบค่ากลาง {(round(f['mm_gap'], 2) + 0.0):+.2f} (EPPO {f['eppo_day']:%d/%m})")
     return " · ".join(parts)
 
 
-def build_card(fuel: str, rnd: str, now: pd.Timestamp, f: dict, known, notice_msg: str, pred: float, resid: np.ndarray, model: str, profile: dict, retail_now: str) -> dict:
+def build_card(fuel: str, rnd: str, now: pd.Timestamp, f: dict, known, notice_msg: str, pred: float, resid: np.ndarray, model: str, profile: dict, retail_now: str, oor: list = None) -> dict:
     p = probabilities(pred, resid)
     call, conf = decide(p)
+    oor = oor or []
+    conf = cap_confidence(conf, oor)
     timing, top = timing_text(profile, call)
     rec = recommend(call, conf, top, fuel)
-    target = (now.normalize() + pd.Timedelta(days=1))
+    target = f["mops_day"].normalize() + pd.Timedelta(days=1)          # วันที่คำทายใช้ (สอดคล้องกับการฝึก : MOPS วัน t → ราคาหน้าคลัง t+1)
     if p:
         rng = f"{p['lo']:+.2f} ถึง {p['hi']:+.2f}"
         head = (f"ต้นทุน{FUEL_TH[fuel]}: " + (f"มีแนวโน้มปรับ{call} ช่วงประมาณ {rng} บาท/ลิตร" if call != "ไม่ชัด" else f"ไม่ชัดเจน (ช่วงที่เป็นไปได้ {rng} บาท/ลิตร)")
@@ -189,6 +207,10 @@ def build_card(fuel: str, rnd: str, now: pd.Timestamp, f: dict, known, notice_ms
     else:
         head = f"ต้นทุน{FUEL_TH[fuel]}: ไม่ชัดเจน (ข้อมูลย้อนหลังไม่พอสำหรับให้ความน่าจะเป็น)"
     reasons = reasons_text(fuel, f, known, notice_msg, rnd)
+    if f.get("carried"):
+        reasons += " · หมายเหตุ: MOPS ล่าสุดในชีทซ้ำค่าเดิม (ยังไม่อัปเดต) จึงใช้ของวันก่อนหน้า"
+    if oor:
+        reasons += f" · ⚠ สัญญาณ {', '.join(oor)} อยู่นอกช่วงที่โมเดลเคยเห็น จึงจำกัดความเชื่อมั่นเป็นต่ำ"
     text = "\n".join([f"รอบ {rnd} น. · แผนสำหรับ {target:%d/%m/%Y} · ความเชื่อมั่น: {conf}", head, f"เวลาที่ปรับ: {timing}",
                       f"ราคาปลีก: {retail_now} ; ยังไม่มีหลักฐานย้อนหลังเพียงพอที่จะพยากรณ์ (โดยทั่วไปปลีกตามราคาส่งช้ากว่า)", f"เหตุผล: {reasons}", f"คำแนะนำ: {rec}",
                       "(โหมดเงา — ยังไม่ผ่านการทดสอบเดินหน้า ไม่ใช่คำสั่งซื้อ)"])
@@ -242,7 +264,10 @@ def retail_now_text(values: list, fuel: str) -> str:
     for r in values[1:]:
         if len(r) > ix["price"] and str(r[ix["product"]]).strip() == RETAIL_NAME[fuel]:
             best = r
-    return f"ปตท. {float(best[ix['price']]):.2f} บาท/ลิตร (ดึงล่าสุด {best[ix['last_seen_at']]})" if best else "ไม่มีข้อมูล RetailLog"
+    if not best:
+        return "ไม่มีข้อมูล RetailLog"
+    seen = to_ts(best[ix["last_seen_at"]])
+    return f"ปตท. {float(best[ix['price']]):.2f} บาท/ลิตร (ตรวจล่าสุด {seen:%d/%m %H:%M})" if not pd.isna(seen) else f"ปตท. {float(best[ix['price']]):.2f} บาท/ลิตร"
 
 
 def pick_round(now: pd.Timestamp) -> str:
@@ -261,7 +286,6 @@ def main(argv=None):
     ds = build_dataset(mops, wti, eppo)
     prices = build_frame(sheets_get(tok, OILBOT_SHEET_ID, "PriceLog!A1:Q200000")).reset_index(drop=True)
     retail_vals = sheets_get(tok, SHEET_ID, f"{TABS['RETAIL_LOG']}!A1:G5000")
-    target = now.normalize() + pd.Timedelta(days=1)
     days = pd.date_range(prices.effective.max().normalize() - pd.Timedelta(days=50), prices.effective.max().normalize(), freq="D")
     profile_cache = {}
     cards = []
@@ -270,6 +294,7 @@ def main(argv=None):
         if f is None:
             print(f"[CARD] {fuel}: ข้อมูลไม่พอสำหรับสร้างการ์ด")
             continue
+        target = f["mops_day"].normalize() + pd.Timedelta(days=1)
         known = known_fund_change(notices, fuel, target)
         # รอบ 21:30 : ประกาศของพรุ่งนี้ออกครบแล้ว (ถึง ~21:15) ไม่มีประกาศ = กองทุนไม่เปลี่ยน ; รอบ 16:00 : ยังไม่ทราบ
         if known is None and fuel == "B7" and rnd == "21:30":
@@ -278,7 +303,7 @@ def main(argv=None):
             notice_msg = "ประกาศกองทุนดีเซลของพรุ่งนี้ยังไม่ออก (ปกติออก ~19:18–21:14)"
         pred, resid, model = fit_predict(ds, fuel, f, known)
         profile = profile_cache.setdefault(fuel, change_time_profile(prices, fuel, days))
-        cards.append(build_card(fuel, rnd, now, f, known, notice_msg, pred, resid, model, profile, retail_now_text(retail_vals, fuel)))
+        cards.append(build_card(fuel, rnd, now, f, known, notice_msg, pred, resid, model, profile, retail_now_text(retail_vals, fuel), out_of_range(ds, fuel, f)))
     for c in cards:
         print(c["card_text"])
         print("-" * 60)

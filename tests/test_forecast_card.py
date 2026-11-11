@@ -41,6 +41,35 @@ class Decide(unittest.TestCase):
         self.assertLess(p["lo"], p["hi"])
 
 
+class Guards(unittest.TestCase):
+    def test_carried_mops_dropped_and_target_follows_mops_day(self):
+        mops, wti, eppo = synth()
+        last = mops.iloc[-1].copy()
+        carried = pd.DataFrame([{"day": last.day + pd.Timedelta(days=1), "fuel": "B7", "mops": float(last.mops)}])      # ซ้ำค่าปิดล่าสุดเป๊ะ
+        mops2 = pd.concat([mops, carried], ignore_index=True)
+        f = fc.current_features(mops2, wti, eppo, "B7")
+        self.assertTrue(f["carried"])
+        self.assertEqual(f["mops_day"], last.day)
+        card = fc.build_card("B7", "21:30", pd.Timestamp("2026-07-20 21:31"), f, None, "x", 0.0, np.zeros(5), "DIRECT", {"ลง": {}, "ขึ้น": {}, "n": {"ลง": 0, "ขึ้น": 0}}, "-")
+        self.assertEqual(card["target_day"], (last.day + pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
+        self.assertIn("ซ้ำค่าเดิม", card["card_text"])
+
+    def test_out_of_range_caps_confidence(self):
+        mops, wti, eppo = synth()
+        from diag_wf_components import build_dataset
+        ds = build_dataset(mops, wti, eppo)
+        f = fc.current_features(mops, wti, eppo, "B7")
+        f_big = {**f, "m3": float(ds.m3.abs().max()) * 3}
+        self.assertEqual(fc.out_of_range(ds, "B7", f_big), ["m3"])
+        self.assertEqual(fc.out_of_range(ds, "B7", f), [])
+        self.assertEqual(fc.cap_confidence("สูง", ["m3"]), "ต่ำ")
+        self.assertEqual(fc.cap_confidence("สูง", []), "กลาง")             # ยังไม่ผ่านเดินหน้า → ไม่เกิน กลาง
+        resid = np.random.default_rng(2).normal(0, 0.05, 100)
+        card = fc.build_card("B7", "21:30", pd.Timestamp("2026-07-20 21:31"), f_big, 0.0, "x", -1.0, resid, "C", {"ลง": {}, "ขึ้น": {}, "n": {"ลง": 0, "ขึ้น": 0}}, "-", ["m3"])
+        self.assertEqual(card["confidence"], "ต่ำ")
+        self.assertIn("นอกช่วงที่โมเดลเคยเห็น", card["card_text"])
+
+
 class Recommend(unittest.TestCase):
     def test_texts(self):
         self.assertIn("รอซื้อหลัง 07:00", fc.recommend("ลง", "กลาง", "05:00–06:59", "B7"))
@@ -70,7 +99,7 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(model_c, "C")
         prof = {"ลง": {"05:00–06:59": 6, "07:00–08:59": 3}, "ขึ้น": {}, "n": {"ลง": 9, "ขึ้น": 0}}
         card = fc.build_card("B7", "21:30", pd.Timestamp("2026-07-14 21:31"), f, 0.0, "x", pred_c, resid, model_c, prof, "ปตท. 41.79 บาท/ลิตร")
-        self.assertEqual(card["card_id"], "2026-07-15 21:30 B7")
+        self.assertEqual(card["card_id"], f"{(f['mops_day'] + pd.Timedelta(days=1)):%Y-%m-%d} 21:30 B7")
         self.assertEqual(len(fc.COLUMNS), len(card))
         self.assertIn("ราคาปลีก: ปตท. 41.79", card["card_text"])
         self.assertIn("ยังไม่ผ่านการทดสอบเดินหน้า", card["card_text"])
