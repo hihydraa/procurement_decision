@@ -6,7 +6,9 @@ import log_taprec as lt
 
 
 def outlook(rows):
-    return pd.DataFrame(rows, columns=["ref", "fuel", "hours", "tier", "model_version"]).assign(ref=lambda d: pd.to_datetime(d.ref))
+    """rows = (ref, fuel, hours, tier, model_version[, lag_h]) ; lag_h ไม่ระบุ = 1.0"""
+    rows = [r if len(r) == 6 else (*r, 1.0) for r in rows]
+    return pd.DataFrame(rows, columns=["ref", "fuel", "hours", "tier", "model_version", "lag_h"]).assign(ref=lambda d: pd.to_datetime(d.ref))
 
 
 def prices(day, shape):
@@ -36,6 +38,27 @@ class NewRows(unittest.TestCase):
         self.assertTrue(all(len(r) == len(lt.COLUMNS) for r in rows))
 
 
+class LateRows(unittest.TestCase):
+    def test_late_flag(self):
+        o = outlook([("2026-11-10 20:30", "ดีเซล", 24, "DOWN_STRONG", "v1", 3.15), ("2026-11-11 20:30", "ดีเซล", 24, "UP", "v1", 2.5)])
+        rows = lt.new_rows(set(), o, pd.Timestamp("2026-11-11 22:00"))
+        self.assertEqual([(r["lag_h"], r["late"]) for r in rows], [(3.15, 1), (2.5, 0)])
+        self.assertEqual(rows[0]["rec_A"], "16:30")                      # ยังสร้างแถวและแมปนโยบายตามปกติ
+
+    def test_load_outlook_window(self):
+        from tap_policy import load_outlook
+        head = ["asof", "date", "ref", "fuel", "hours", "tier", "model_version", "lag_h", "backfilled"]
+        v = [head,
+             ["2026-11-10 23:39", "2026-11-10", "2026-11-10 20:30", "B7", 24, "UNCLEAR", "v", 3.15, 0],        # ช้า 3.15 ชม.
+             ["2026-11-10 22:00", "2026-11-10", "2026-11-10 20:30", "G95", 24, "DOWN", "v", 1.5, 0],            # ตรงเวลา
+             ["2026-11-11 09:00", "2026-11-10", "2026-11-10 20:30", "G95", 48, "DOWN", "v", 12.5, 0],           # ช้าเกินเพดาน
+             ["2026-11-10 21:00", "2026-11-10", "2026-11-10 20:30", "B7", 48, "UP", "v", 0.5, 1]]               # backfill ตัดทิ้ง
+        strict, wide = load_outlook(v), load_outlook(v, 12.0)
+        self.assertEqual(sorted(zip(strict.fuel, strict.hours)), [("G95", 24)])
+        self.assertEqual(sorted(zip(wide.fuel, wide.hours)), [("B7", 24), ("G95", 24)])
+        self.assertAlmostEqual(float(wide[wide.fuel == "B7"].lag_h.iloc[0]), 3.15)
+
+
 class Fill(unittest.TestCase):
     ROW = {"day": "2026-11-11", "fuel": "ดีเซล", "rec_A": "ก่อน22:30", "rec_B": "07:00", "rec_C": "16:30"}
     # ราคา : 20:30 วันก่อน 30.0 ; ต่ำสุด 29.5 เวลา 04:00 ; 07:00 → 30.2 ; 16:30 → 30.5
@@ -56,6 +79,25 @@ class Fill(unittest.TestCase):
         p = prices("2026-11-11", self.SHAPE)
         self.assertIsNone(lt.fill_outcome(self.ROW, p, pd.Timestamp("2026-11-11 22:00")))
         self.assertIsNone(lt.fill_outcome(self.ROW, p[p.effective < pd.Timestamp("2026-11-11 20:00")], pd.Timestamp("2026-11-12 01:00")))    # ราคายังไม่ถึงเย็นวัน D
+
+
+class SummarySplit(unittest.TestCase):
+    def test_on_time_main_late_separate(self):
+        base = {"filled_at": "x", "regret_B": 0.2, "regret_C": 0.3, "fixed_2230": 0.4, "fixed_0700": 0.5, "fixed_1630": 0.6}
+        rows = [{**base, "day": f"2026-11-{11 + i}", "regret_A": 0.1, "late": 0} for i in range(3)] + \
+               [{**base, "day": "2026-11-20", "regret_A": 0.9, "late": 1}]
+        out = lt.shadow_summary(rows)
+        main = next(x for x in out if "ตรงเวลา" in x)
+        late = next(x for x in out if "ล็อกช้า" in x)
+        self.assertIn("เติมผลแล้ว 3 แถว", main)          # แถวช้าไม่ปนผลหลัก
+        self.assertIn("A 0.100", main)
+        self.assertIn("เติมผลแล้ว 1 แถว", late)
+        self.assertIn("A 0.900", late)
+
+    def test_only_late_rows(self):
+        rows = [{"day": "2026-11-11", "filled_at": "x", "regret_A": 0.1, "regret_B": 0.2, "regret_C": 0.3, "fixed_2230": 0.4, "fixed_0700": 0.5, "fixed_1630": 0.6, "late": 1}]
+        out = lt.shadow_summary(rows)
+        self.assertIn("ตรงเวลา: ยังไม่มีแถวที่เติมผลแล้ว", out[0])
 
 
 class Summary(unittest.TestCase):
