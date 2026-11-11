@@ -10,6 +10,7 @@ import pandas as pd
 
 import engine
 import model as M
+import procurement_summary as PS
 import signals as S
 
 # ============================================================
@@ -1123,7 +1124,7 @@ def build_news_section(news_df: pd.DataFrame, max_items: int = 1) -> str:
 
 
 
-def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str], accuracy_html: str = "", fund_feed: pd.DataFrame = None, dispatch_html: str = "", trend_snaps: dict = None, outlook_mini_html: str = "", outlook: dict = None) -> str:
+def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd.DataFrame, warnings: list[str], accuracy_html: str = "", fund_feed: pd.DataFrame = None, dispatch_html: str = "", trend_snaps: dict = None, outlook_mini_html: str = "", outlook: dict = None, summary_html: str = "") -> str:
     updated_at = datetime.now(TZ).strftime("%d/%m/%Y %H:%M")
     sections = "\n".join(build_fuel_section(r, (outlook or {}).get(r.get("fuel_key"))) for r in results)
     news_html = build_news_section(news_df)
@@ -1417,6 +1418,7 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
       .metric-card {{ min-height: auto; }}
       .news-content {{ font-size: .95rem; }}
     }}
+    {PS.CSS}
     .acc-table {{ width:100%; border-collapse:collapse; font-size:.9rem; }}
     .acc-table th, .acc-table td {{ padding:6px 8px; border-bottom:1px solid #e5e7eb; text-align:right; white-space:nowrap; }}
     .acc-table th:nth-child(-n+3), .acc-table td:nth-child(-n+3) {{ text-align:left; }}
@@ -1430,13 +1432,20 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
           <h1>{DASHBOARD_TITLE}</h1>
           <p>ผสานสัญญาณจากกลุ่ม Jobber (Trend Mops, ประกาศปรับราคา, ประกาศกองทุน), MOPS ปิด และข้อมูลตลาด เพื่อพยากรณ์แนวโน้มราคาและสรุปให้ทีมจัดซื้อ</p>
           <p style="margin-top:4px;">อัปเดตล่าสุด: {updated_at}</p>
-          {outlook_mini_html}
         </div>
-        {snapshot_html}
       </div>
     </section>
 
     {warnings_html}
+
+    {summary_html}
+
+    <details class="ps-more">
+    <summary>รายละเอียดเพิ่มเติม: ข้อมูลตลาด กองทุน แผนส่งรถรายสาขา ข่าว และตารางเดิม (สำหรับผู้ต้องการเจาะลึก)</summary>
+
+    <div class="hero" style="margin-top:8px">{outlook_mini_html}</div>
+
+    {snapshot_html}
 
     {fund_risk_html}
 
@@ -1470,6 +1479,7 @@ def build_html(results: list[dict], wti_snap: dict, fund_snap: dict, news_df: pd
     {accuracy_html}
 
     {news_html}
+    </details>
 
     <div class="footer">Fuel Procurement Decision Dashboard Vol.1</div>
   </div>
@@ -1606,8 +1616,16 @@ def main():
     write_outlook_files(outlook, M.model_version(params), extras=outlook_log_extras(tables, params, summary, asof, outlook))
     dispatch_html = build_outlook_section(outlook, asof, build_outlook_live(outlook_log, summary)) + dispatch_html
 
+    try:
+        cards_raw = load_sheet_by_name("ForecastCardLog")          # การ์ดพยากรณ์ต้นทุนส่ง (ยังไม่มีแท็บ = ไม่ใช่ข้อผิดพลาด)
+        if "card_id" not in cards_raw.columns:
+            cards_raw = pd.DataFrame()
+    except Exception:
+        cards_raw = pd.DataFrame()
+    summary_html = PS.build_summary(outlook, summary, outlook_log, cards_raw, asof, engine)
+
     trend_snaps = {fuel: trend_snapshot(tables, fuel, asof) for fuel in S.FUELS}
-    html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund, dispatch_html, trend_snaps, build_outlook_mini(outlook), outlook)
+    html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund, dispatch_html, trend_snaps, build_outlook_mini(outlook), outlook, summary_html)
     write_text("index.html", html)
     write_decision_snapshot(results)
     print("Dashboard created successfully")
