@@ -12,6 +12,8 @@ from html import escape
 
 import pandas as pd
 
+import live_check as LC
+
 FUELS = [("DIESEL", "B7", "ดีเซล"), ("GASOHOL95", "G95", "แก๊สโซฮอล์ 95")]
 TIER_TH = {"UP_STRONG": "ขึ้นแรง", "UP": "ขึ้น", "UNCLEAR": "ยังไม่ชัดเจน", "DOWN": "ลง", "DOWN_STRONG": "ลงแรง"}
 HIND_MIN = 15              # ผลถูกเติมภายในกี่นาทีหลังออกการ์ด = ย้อนหลัง (ตรงกับ forecast_card.HIND_MIN)
@@ -241,7 +243,75 @@ def build_forecast_and_advice(outlook: dict, cards: pd.DataFrame, asof) -> str:
     </section>"""
 
 
-# ---------- ส่วนที่ 3: Backtest ----------
+
+# ---------- ส่วนที่ 3: เทียบกับราคาจริงตอนนี้ (สด) ----------
+STATUS_META = {
+    "right": ("✔", "ps-right", "ตอนนี้ไปตามที่ทายแล้ว"),
+    "wrong": ("✖", "ps-wrong", "ตอนนี้สวนทิศที่ทาย"),
+    "wait": ("…", "ps-none", "ยังไม่ขยับถึง 10 สต."),
+    "none": ("◆", "ps-none", "ไม่ฟันธง"),
+}
+
+
+def _status_chip(status: str, text: str = "") -> str:
+    icon, cls, label = STATUS_META[status]
+    return f"<span class='ps-chip {cls}'>{icon} {_e(text or label)}</span>"
+
+
+def _card_today(cards: pd.DataFrame, code: str, today: pd.Timestamp):
+    if cards is None or cards.empty:
+        return None
+    c = cards[(cards["fuel"] == code) & cards["valid_forward"] & (cards["target_dt"].dt.normalize() == today.normalize())]
+    return None if c.empty else c.iloc[-1].to_dict()
+
+
+def build_live_check(outlook_log: pd.DataFrame, cards: pd.DataFrame, price_feed: pd.DataFrame, now: pd.Timestamp) -> str:
+    head = ("<h2>3. เทียบกับราคาจริงตอนนี้</h2><div class='muted'>คำพยากรณ์ที่ยังไม่ครบกำหนด เทียบกับราคาต่ำสุดของตลาดที่เกิดขึ้นจริงตั้งแต่ออกคำพยากรณ์ "
+            "(ยังไม่จบ ราคาอาจกลับทิศได้ ไม่ใช่ผลทางการ ผลทางการเติมเมื่อครบกำหนด ดูส่วนที่ 5)</div>")
+    book = LC.make_book(price_feed)
+    if book is None:
+        return f"<section class='ps-block'>{head}<div class='muted'>ยังอ่านราคาจริง (Entry_Prices) ไม่ได้</div></section>"
+    rows = LC.active_rows(outlook_log, now)
+    cols = []
+    for fk, code, label in FUELS:
+        parts = []
+        mine = [r for r in rows if r["fuel"] == code]
+        if not mine:
+            parts.append("<div class='muted'>ยังไม่มีคำพยากรณ์ที่ยังไม่ครบกำหนด (ออกรอบ 20:30)</div>")
+        for r in sorted(mine, key=lambda x: x["hours"]):
+            c = LC.check_one(book, r, now)
+            dr = c["direction"]
+            strong = r["tier"].endswith("STRONG")
+            fc = _badge(dr, f"{r['hours']} ชม.: {TIER_TH[r['tier']]}", strong=strong)
+            if c["delta"] is None:
+                body = "<div class='muted'>ไม่มีราคาเทียบ</div>"
+            else:
+                body = (f"<div class='ps-cap'>ราคาต่ำสุดของตลาด {c['price_ref']:.2f} → <strong>{c['price_now']:.2f}</strong> "
+                        f"(<strong>{c['delta']:+.2f}</strong> บาท/ลิตร) {_status_chip(c['status'])}</div>")
+            bar = (f"<div class='ps-prog' title='ผ่านไป {c['elapsed']:.0%} ของ {r['hours']} ชม.'><div class='ps-pbar'>"
+                   f"<div class='ps-none' style='width:{c['elapsed'] * 100:.0f}%'></div></div>"
+                   f"<span class='ps-pval'>เหลือ {c['left_h']:.0f} ชม.</span></div>")
+            parts.append(f"<div class='ps-btrow'><div class='ps-bthead'>{fc}<span class='muted'>ออก {r['ref'].strftime('%d/%m %H:%M')}</span></div>{body}{bar}</div>")
+        ev = LC.moves_today(book, code, now.normalize(), now)
+        if ev:
+            items = " · ".join(f"{t:%H:%M} {'▼' if d < 0 else '▲'} {d:+.2f}" for t, d in ev)
+            parts.append(f"<div class='ps-cap'>ราคาปรับจริงวันนี้: {items}</div>")
+        else:
+            parts.append("<div class='ps-cap muted'>วันนี้ราคาตลาดยังไม่ปรับ (ตั้งแต่ 10 สต./ลิตร)</div>")
+        ct = _card_today(cards, code, now)
+        if ct:
+            slot = LC.top_slot(ct.get("timing"))
+            v = LC.timing_verdict(ev, ct.get("call"), slot)
+            if slot and v["status"] != "none":
+                txt = {"right": f"ปรับ {v.get('time')} อยู่ในช่วงที่ทาย", "wrong": f"ปรับ {v.get('time')} อยู่นอกช่วงที่ทาย",
+                       "wait": "ยังไม่ปรับในทิศที่ทาย"}[v["status"]]
+                parts.append(f"<div class='ps-cap'>เวลาที่การ์ดทาย {slot[0]}–{slot[1]} ({_e(ct.get('call'))}): {_status_chip(v['status'], txt)}</div>")
+        cols.append(f"<div class='ps-fcard'><div class='ps-fuel'>{label}</div>{''.join(parts)}</div>")
+    return (f"<section class='ps-block'>{head}<div class='muted'>ณ {now.strftime('%d/%m %H:%M')} · "
+            f"✔ น้ำเงิน = ไปตามที่ทาย · ✖ ส้ม = สวนทิศ · … เทา = ยังไม่ขยับ</div><div class='ps-fgrid'>{''.join(cols)}</div></section>")
+
+
+# ---------- ส่วนที่ 4: Backtest ----------
 def _bt_key(code: str, hours: int, ref_code: str) -> str:
     return f"{code}_{'P_' if ref_code == 'P' else ''}H{hours}"
 
@@ -256,7 +326,7 @@ def _pair_bars(right: float, wrong: float) -> str:
 def build_backtest(summary: dict, outlook: dict) -> str:
     res = (summary or {}).get("outlook_results") or {}
     if not res:
-        return "<section class='ps-block'><h2>3. Backtest (ทดสอบย้อนหลัง)</h2><div class='muted'>ยังไม่มีผลทดสอบย้อนหลัง</div></section>"
+        return "<section class='ps-block'><h2>4. Backtest (ทดสอบย้อนหลัง)</h2><div class='muted'>ยังไม่มีผลทดสอบย้อนหลัง</div></section>"
     cols = []
     n_days = None
     for fk, code, label in FUELS:
@@ -280,7 +350,7 @@ def build_backtest(summary: dict, outlook: dict) -> str:
     gen = _e((summary or {}).get("generated", "-"))
     return f"""
     <section class="ps-block">
-      <h2>3. Backtest (ทดสอบย้อนหลัง)</h2>
+      <h2>4. Backtest (ทดสอบย้อนหลัง)</h2>
       <div class="muted">แนวโน้มตลาด 24 ชม. ทดสอบแบบเดินหน้า (ฝึกจากอดีตเท่านั้น) กับ {n_days or '-'} วันที่ไม่เคยใช้ฝึก · ผลเมื่อ {gen}<br>
       อ่านว่า: เมื่อระบบทายทิศนั้นในอดีต ราคาไปตามที่ทายตั้งแต่ 10 สต. กี่ % และไปผิดทิศกี่ % (แถบน้ำเงิน = ถูกทิศ, แถบส้ม = ผิดทิศ)</div>
       <div class="ps-fgrid">{''.join(cols)}</div>
@@ -288,7 +358,7 @@ def build_backtest(summary: dict, outlook: dict) -> str:
     </section>"""
 
 
-# ---------- ส่วนที่ 4: ความแม่นยำจริง ----------
+# ---------- ส่วนที่ 5: ความแม่นยำจริง ----------
 def _progress(n: int, goal: int = MIN_LIVE_DAYS) -> str:
     pct = min(n / goal, 1.0) * 100
     done = n >= goal
@@ -330,7 +400,7 @@ def build_live_accuracy(outlook_log: pd.DataFrame, cards: pd.DataFrame, engine_m
     note = (f"<div class='muted'>ไม่นับการ์ด {hind} ใบที่ออกหลังผลวันนั้นทราบแล้ว (ย้อนหลัง ไม่ใช่การพยากรณ์ล่วงหน้า)</div>" if hind else "")
     return f"""
     <section class="ps-block">
-      <h2>4. ความแม่นยำจริง (ที่ระบบพยากรณ์ล่วงหน้าแล้วรู้ผล)</h2>
+      <h2>5. ความแม่นยำจริง (ที่ระบบพยากรณ์ล่วงหน้าแล้วรู้ผล)</h2>
       <div class="muted">นับเฉพาะที่ออกคำพยากรณ์ก่อนเหตุการณ์จริง · ตัวเลขจะน่าเชื่อถือเมื่อสะสมอย่างน้อย {MIN_LIVE_DAYS} วัน (แถบ "สะสม" ยังไม่เต็ม = ยังสรุปไม่ได้)</div>
       <div class="ps-fgrid">{''.join(cols)}</div>{note}
     </section>"""
@@ -341,6 +411,8 @@ CSS = """
     .ps-block h2 { margin:0 0 6px; font-size:1.15rem; }
     .ps-down { background:#0ca30c; } .ps-up { background:#d03b3b; } .ps-flat { background:#9a9a94; } .ps-none { background:#9a9a94; }
     .ps-right { background:#2a78d6; } .ps-wrong { background:#eb6834; }
+    .ps-chip { display:inline-block; padding:1px 9px; border-radius:999px; color:#fff; font-size:.8rem; font-weight:600; white-space:nowrap; }
+    .ps-chip.ps-right { background:#2a78d6; } .ps-chip.ps-wrong { background:#c4501f; } .ps-chip.ps-none { background:#64645e; }
     .ps-fgrid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:10px 0; }
     .ps-fcard { background:#f8fafc; border-radius:12px; padding:14px 16px; }
     .ps-fuel { font-weight:700; font-size:1.05rem; margin-bottom:8px; }
@@ -380,7 +452,7 @@ CSS = """
 """
 
 
-def build_summary(outlook: dict, summary: dict, outlook_log: pd.DataFrame, cards_raw: pd.DataFrame, asof, engine_mod) -> str:
+def build_summary(outlook: dict, summary: dict, outlook_log: pd.DataFrame, cards_raw: pd.DataFrame, asof, engine_mod, price_feed: pd.DataFrame = None) -> str:
     cards = prep_cards(cards_raw)
-    return (build_forecast_and_advice(outlook, cards, asof) + build_backtest(summary, outlook)
+    return (build_forecast_and_advice(outlook, cards, asof) + build_live_check(outlook_log, cards, price_feed, asof) + build_backtest(summary, outlook)
             + build_live_accuracy(outlook_log, cards, engine_mod))

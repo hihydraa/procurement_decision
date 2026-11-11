@@ -102,7 +102,7 @@ class Render(unittest.TestCase):
     def test_full_page_renders(self):
         cards = pd.DataFrame([card("2026-11-11 21:30", "2026-11-12")])
         html = ps.build_summary(self.outlook(), self.summary(), pd.DataFrame(), cards, pd.Timestamp("2026-11-11 22:00"), engine)
-        for t in ("1. ผลพยากรณ์", "2. คำแนะนำ", "3. Backtest", "4. ความแม่นยำจริง", "ชะลอการสั่งซื้อ", "645 วัน", "60%"):
+        for t in ("1. ผลพยากรณ์", "2. คำแนะนำ", "3. เทียบกับราคาจริงตอนนี้", "4. Backtest", "5. ความแม่นยำจริง", "ชะลอการสั่งซื้อ", "645 วัน", "60%"):
             self.assertIn(t, html)
 
     def test_renders_with_nothing(self):

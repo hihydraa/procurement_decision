@@ -1620,7 +1620,11 @@ def main():
             cards_raw = pd.DataFrame()
     except Exception:
         cards_raw = pd.DataFrame()
-    summary_html = PS.build_summary(outlook, summary, outlook_log, cards_raw, asof, engine)
+    try:
+        price_feed = load_sheet_by_name("Entry_Prices")             # ราคาจอบเบอร์ล่าสุด (ฟีดจาก PriceLog) ใช้ทวนสอบสดกับคำพยากรณ์
+    except Exception:
+        price_feed = pd.DataFrame()
+    summary_html = PS.build_summary(outlook, summary, outlook_log, cards_raw, asof, engine, price_feed)
 
     trend_snaps = {fuel: trend_snapshot(tables, fuel, asof) for fuel in S.FUELS}
     html = build_html(results, wti_snap, fund_snap, df_news, warnings, build_accuracy_section(summary, decision_log), tables.fund, dispatch_html, trend_snaps, build_outlook_mini(outlook), outlook, summary_html)
