@@ -2,13 +2,13 @@
 การ์ดพยากรณ์ประจำรอบ (โหมดเงา) — สร้างรายงาน "ต้นทุนหน้าคลัง / ราคาปลีก / เหตุผล / คำแนะนำ" ต่อชนิดน้ำมัน บันทึกลงแท็บ ForecastCardLog
 แล้วเติมผลจริงของวันถัดไปเพื่อวัดว่าที่เขียนไว้ถูกแค่ไหน — ไม่ส่งข้อความใด ๆ ไม่กระทบการตัดสินใจจริง
 
-รอบ : 16:00 (หลัง MOPS ปิด ก่อนจุดแตะ 16:30 — ประกาศกองทุนของวันถัดไปมักยังไม่ออก) และ 21:30 (หลังประกาศกองทุนที่ออก ~19:18–21:14)
+รอบ : 11:00 (ย้ายจาก 16:00; ก่อนช่วงที่ราคามักลง 09:00–15:59 ส่วนใหญ่) (เดิม: หลัง MOPS ปิด ก่อนจุดแตะ 16:30 — ประกาศกองทุนของวันถัดไปมักยังไม่ออก) และ 21:30 (หลังประกาศกองทุนที่ออก ~19:18–21:14)
 หลักการเขียน : ไม่ฟันธงตัวเลขเดียว — ให้ "ช่วง + โอกาส" จากการกระจายของความคลาดเคลื่อน walk-forward (diag_wf_components) ;
               โอกาสลง/ขึ้น (≥ 10 สต.) < 50% หรือสองฝั่งต่างกันน้อย = "ไม่ชัดเจน" ไม่ฟันธง ; ปลีกยังไม่พยากรณ์ (ไม่มีหลักฐานย้อนหลังเพียงพอ)
 ข้อจำกัด : ต้นทุนหน้าคลังอ้างอิง WHOLESALE ของ EPPO (ขยับเป็นขั้น) ; เวลาปรับมาจากราคารายชั่วโมงของ PriceLog ~50 วัน (เวลามีผลของราคาบางส่วนไม่ทราบ) ;
           ประกาศกองทุนเบนซินยังจับคู่กับ G95 ไม่ได้ (ใช้เฉพาะดีเซล) ; คำแนะนำเวลาซื้อยังไม่ผ่านการพิสูจน์เดินหน้า (TapRecLog กำลังวัด)
 
-ใช้: python forecast_card.py [16:00|21:30] [--dry]    (ต้องมี SA_EMAIL / SA_PRIVATE_KEY ; ไม่ระบุรอบ → เลือกตามเวลาไทย ; --dry = พิมพ์การ์ดเท่านั้น ไม่เขียนชีท)
+ใช้: python forecast_card.py [11:00|21:30] [--dry]    (ต้องมี SA_EMAIL / SA_PRIVATE_KEY ; ไม่ระบุรอบ → เลือกตามเวลาไทย ; --dry = พิมพ์การ์ดเท่านั้น ไม่เขียนชีท)
 """
 import sys
 from datetime import datetime
@@ -26,7 +26,7 @@ from tap_policy import DEPOTS, GRID_STEP, depot_series, price_at
 
 FUEL_TH = {"B7": "ดีเซล", "G95": "แก๊สโซฮอล์ 95"}
 RETAIL_NAME = {"B7": "ดีเซล B7", "G95": "แก๊สโซฮอล์ 95"}
-ROUNDS = ("16:00", "21:30")
+ROUNDS = ("11:00", "21:30")
 UP = 0.10                              # ขยับ >= 10 สต. = ขึ้น/ลง
 MIN_RESID = 30                         # ต้องมีความคลาดเคลื่อน walk-forward อย่างน้อยกี่ค่าจึงให้ความน่าจะเป็น
 CALL_P, CALL_GAP = 0.50, 0.25          # ฟันธงทิศเมื่อโอกาสฝั่งนั้น >= 50% และนำอีกฝั่ง >= 25 จุด
@@ -245,6 +245,16 @@ def build_card(fuel: str, rnd: str, now: pd.Timestamp, f: dict, known, notice_ms
 
 
 # ---------- ผลจริง ----------
+HIND_MIN = 15      # ผลถูกเติมภายในกี่นาทีหลังออกการ์ด = ผลทราบแล้วตอนออก (ย้อนหลัง ไม่ใช่การพยากรณ์ล่วงหน้า)
+
+
+def is_hindcast(row: dict) -> bool:
+    asof, filled = to_ts(row.get("asof")), to_ts(row.get("filled_at"))
+    if pd.isna(asof) or pd.isna(filled):
+        return False
+    return filled <= asof + pd.Timedelta(minutes=HIND_MIN)
+
+
 def fill_outcome(row: dict, eppo: pd.DataFrame):
     """ΔWS จากวันก่อนวันเป้าหมายถึงวันเป้าหมาย (แถว EPPO ไม่ใช่ CARRIED) ; None ถ้ายังไม่มีข้อมูลวันเป้าหมาย"""
     e = eppo[eppo.fuel == row["fuel"]].set_index("day")["ws"]
@@ -259,10 +269,25 @@ def fill_outcome(row: dict, eppo: pd.DataFrame):
     return {"outcome_dws": round(d, 3), "outcome_cls": cls, "right": right, "filled_at": datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y-%m-%d %H:%M")}
 
 
+def drop_known(cards: list, eppo: pd.DataFrame) -> list:
+    """ตัดการ์ดที่ผลของวันเป้าหมายทราบแล้วตอนนี้ (EPPO ของวันนั้นเข้าชีทแล้ว) = ย้อนหลัง ไม่ใช่การพยากรณ์ล่วงหน้า
+    (เช่น MOPS วันนี้ยังไม่มา แล้วหันไปใช้ MOPS เมื่อวาน)"""
+    kept = []
+    for c in cards:
+        if fill_outcome({"fuel": c["fuel"], "target_day": c["target_day"], "call": c["call"]}, eppo) is not None:
+            print(f"[CARD] ข้าม {c['card_id']}: ผลของ {c['target_day']} ทราบแล้ว (EPPO เข้าชีทแล้ว) จึงไม่ใช่การพยากรณ์ล่วงหน้า")
+        else:
+            kept.append(c)
+    return kept
+
+
 def summary_lines(rows: list) -> list:
-    d = pd.DataFrame([r for r in rows if str(r.get("filled_at", "")) != ""])
+    done = [r for r in rows if str(r.get("filled_at", "")) != ""]
+    hind = [r for r in done if is_hindcast(r)]
+    d = pd.DataFrame([r for r in done if not is_hindcast(r)])
+    note = [f"[CARD] ไม่นับการ์ดย้อนหลัง {len(hind)} ใบ (ผลทราบแล้วตอนออก)"] if hind else []
     if d.empty:
-        return ["[CARD] ยังไม่มีการ์ดที่เติมผลแล้ว"]
+        return note + ["[CARD] ยังไม่มีการ์ดล่วงหน้าที่เติมผลแล้ว"]
     d["right_n"] = pd.to_numeric(d["right"], errors="coerce")
     called = d[d["call"].isin(["ลง", "ขึ้น"])]
     base = d["outcome_cls"].value_counts(normalize=True)
@@ -273,7 +298,7 @@ def summary_lines(rows: list) -> list:
         c = called[called.call == call]
         if len(c):
             out.append(f"   ฟันธง{call}: {len(c)} ใบ ถูก {int(c.right_n.sum())} ; ค่าเฉลี่ย ΔWS จริง {pd.to_numeric(c.outcome_dws).mean():+.3f}")
-    return out
+    return note + out
 
 
 # ---------- ชีท ----------
@@ -293,7 +318,7 @@ def retail_now_text(values: list, fuel: str) -> str:
 
 
 def pick_round(now: pd.Timestamp) -> str:
-    return "16:00" if now.hour < 18 else "21:30"
+    return "11:00" if now.hour < 16 else "21:30"
 
 
 def main(argv=None):
@@ -326,6 +351,7 @@ def main(argv=None):
         pred, resid, model = fit_predict(ds, fuel, f, known)
         profile = profile_cache.setdefault(fuel, change_time_profile(prices, fuel, days))
         cards.append(build_card(fuel, rnd, now, f, known, notice_msg, pred, resid, model, profile, retail_now_text(retail_vals, fuel), out_of_range(ds, fuel, f)))
+    cards = drop_known(cards, eppo)
     for c in cards:
         print(c["card_text"])
         print("-" * 60)

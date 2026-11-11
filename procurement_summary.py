@@ -4,7 +4,7 @@
 ใช้ข้อมูลที่ main.py มีอยู่แล้ว (แนวโน้ม 24/48 ชม. จาก engine, backtest_summary.json, OutlookLog) และการ์ดพยากรณ์จากแท็บ ForecastCardLog
 ฟังก์ชันทั้งหมดเป็น pure function (ไม่อ่านชีทเอง) เพื่อทดสอบได้ ; main.py เป็นผู้โหลดข้อมูลแล้วส่งเข้ามา
 
-หลักการ: ไม่ตกแต่งตัวเลข — ถ้าข้อมูลยังไม่พอให้บอกว่ายังไม่พอ ; การ์ดที่ผลทราบแล้วก่อนออก (ย้อนหลัง) ไม่ถูกนับเป็นผลทดสอบเดินหน้า
+หลักการ: ไม่ตกแต่งตัวเลข — ถ้าข้อมูลยังไม่พอให้บอกว่ายังไม่พอ ; การ์ดที่ผลทราบแล้วก่อนออก (ย้อนหลัง) ไม่ถูกนับเป็นผลทดสอบเดินหน้า (ดู prep_cards)
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import pandas as pd
 
 FUELS = [("DIESEL", "B7", "ดีเซล"), ("GASOHOL95", "G95", "แก๊สโซฮอล์ 95")]
 TIER_TH = {"UP_STRONG": "ขึ้นแรง", "UP": "ขึ้น", "UNCLEAR": "ยังไม่ชัดเจน", "DOWN": "ลง", "DOWN_STRONG": "ลงแรง"}
+HIND_MIN = 15              # ผลถูกเติมภายในกี่นาทีหลังออกการ์ด = ย้อนหลัง (ตรงกับ forecast_card.HIND_MIN)
 MIN_LIVE_DAYS = 30          # ต่ำกว่านี้ถือว่ายังน้อยเกินไปจะสรุปความแม่นยำ
 
 
@@ -36,15 +37,18 @@ def _parse_dt(v):
 
 
 def prep_cards(df: pd.DataFrame) -> pd.DataFrame:
-    """ตารางการ์ดที่ใช้ได้ : เพิ่ม asof_dt, target_dt, valid_forward (ออกก่อนวันเป้าหมายเริ่ม = พยากรณ์ล่วงหน้าจริง)"""
+    """ตารางการ์ดที่ใช้ได้ : เพิ่ม asof_dt, target_dt, valid_forward
+    valid_forward = ผลยังไม่ทราบตอนออกการ์ด ; ถ้าผลถูกเติมภายใน HIND_MIN นาทีหลังออก (ทราบแล้วตอนออก) ถือเป็นย้อนหลัง"""
     need = {"card_id", "asof", "fuel", "target_day"}
     if df is None or df.empty or not need.issubset(df.columns):
         return pd.DataFrame()
     d = df.copy()
     d["asof_dt"] = d["asof"].map(_parse_dt)
     d["target_dt"] = d["target_day"].map(_parse_dt)
+    d["filled_dt"] = d["filled_at"].map(_parse_dt) if "filled_at" in d.columns else pd.NaT
     d = d.dropna(subset=["asof_dt", "target_dt"])
-    d["valid_forward"] = d["asof_dt"].dt.normalize() < d["target_dt"].dt.normalize()
+    hind = d["filled_dt"].notna() & (d["filled_dt"] <= d["asof_dt"] + pd.Timedelta(minutes=HIND_MIN))
+    d["valid_forward"] = ~hind
     return d.sort_values("asof_dt").reset_index(drop=True)
 
 

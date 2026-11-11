@@ -16,16 +16,21 @@ def card(asof, target, fuel="B7", call="ลง", conf="กลาง", cls="", **
 
 class Cards(unittest.TestCase):
     def test_hindcast_is_not_forward(self):
-        df = pd.DataFrame([card("2026-11-11 16:18", "2026-11-11", cls="ลง"), card("2026-11-11 21:30", "2026-11-12")])
+        df = pd.DataFrame([card("2026-11-11 16:18", "2026-11-11", cls="ลง", filled_at="2026-11-11 16:18"), card("2026-11-11 21:30", "2026-11-12")])
         c = ps.prep_cards(df)
         self.assertEqual(list(c.valid_forward), [False, True])
         self.assertEqual(ps.latest_card(c, "B7")["target_day"], "2026-11-12")
 
     def test_live_stats_exclude_hindcast(self):
-        df = pd.DataFrame([card("2026-11-11 16:18", "2026-11-11", cls="ลง"), card("2026-11-11 21:30", "2026-11-12", cls="ลง"),
-                           card("2026-11-12 21:30", "2026-11-13", cls="นิ่ง")])
+        df = pd.DataFrame([card("2026-11-11 16:18", "2026-11-11", cls="ลง", filled_at="2026-11-11 16:18"),
+                           card("2026-11-11 21:30", "2026-11-12", cls="ลง", filled_at="2026-11-13 07:00"),
+                           card("2026-11-12 21:30", "2026-11-13", cls="นิ่ง", filled_at="2026-11-14 07:00")])
         s = ps.card_live_stats(ps.prep_cards(df), "B7")
         self.assertEqual((s["n_cards"], s["n_called"], s["n_right"], s["n_hind"]), (2, 2, 1, 1))
+
+    def test_same_day_morning_card_is_forward_when_filled_later(self):
+        df = pd.DataFrame([card("2026-11-12 11:00", "2026-11-12", cls="ลง", filled_at="2026-11-12 21:40")])
+        self.assertTrue(ps.prep_cards(df).valid_forward.iloc[0])
 
     def test_empty_and_bad_inputs(self):
         self.assertTrue(ps.prep_cards(pd.DataFrame()).empty)
