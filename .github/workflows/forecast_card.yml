@@ -1,0 +1,46 @@
+name: Forecast card (shadow, ForecastCardLog)
+
+# การ์ดพยากรณ์โหมดเงา 2 รอบ/วัน (16:00 และ 21:30 น. เวลาไทย) บันทึกลงแท็บ ForecastCardLog พร้อมเติมผลจริงย้อนหลัง
+# ไม่ส่ง LINE ไม่กระทบการตัดสินใจ ; cron ของ GitHub อาจมาช้า/ข้ามรอบ จึงเป็นเวลาโดยประมาณ
+on:
+  schedule:
+    - cron: "0 9 * * *"     # 16:00 ICT
+    - cron: "30 14 * * *"   # 21:30 ICT
+  workflow_dispatch:
+    inputs:
+      round:
+        description: "รอบ (16:00 หรือ 21:30)"
+        default: "21:30"
+      dry:
+        description: "dry-run (ไม่เขียนชีท)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forecast-card
+  cancel-in-progress: false
+
+jobs:
+  card:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Build forecast card
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            if [ "${{ github.event.schedule }}" = "0 9 * * *" ]; then R="16:00"; else R="21:30"; fi
+            python forecast_card.py "$R"
+          else
+            if [ "${{ inputs.dry }}" = "true" ]; then python forecast_card.py "${{ inputs.round }}" --dry; else python forecast_card.py "${{ inputs.round }}"; fi
+          fi
+        env:
+          SA_EMAIL: ${{ secrets.SA_EMAIL }}
+          SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
