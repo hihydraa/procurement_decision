@@ -138,6 +138,67 @@ class Reasons(unittest.TestCase):
         self.assertIn("ไม่มีปัจจัยที่เด่นพอจะชี้ทิศ ระบบจึงไม่ฟันธง", ps._why_block([]))
 
 
+class MarketEstimate(unittest.TestCase):
+    def h(self, tier, avg=0.22, n=113, p=None):
+        return {"hours": 24, "tier": tier, "grade": "กลาง", "label": "x", "until": pd.Timestamp("2026-11-12 20:30"),
+                "evidence": None if avg is None else {"avg_move": avg, "n": n}, "p": p or {"r10": 0.2, "f10": 0.62, "r40": 0.05, "f40": 0.1}}
+
+    def test_down_and_up_signs_and_band(self):
+        d = ps.expected_change(self.h("DOWN"))
+        self.assertEqual((d["est"], d["lo"], d["hi"], d["prob"]), (-0.22, -0.10, -0.40, 0.62))
+        u = ps.expected_change(self.h("UP", 0.30))
+        self.assertEqual((u["est"], u["lo"], u["hi"], u["prob"]), (0.30, 0.10, 0.40, 0.2))
+
+    def test_strong_has_open_band_and_unclear_none(self):
+        s = ps.expected_change(self.h("DOWN_STRONG", 0.41))
+        self.assertEqual((s["lo"], s["hi"], s["strong"]), (-0.40, None, True))
+        self.assertIsNone(ps.expected_change(self.h("UNCLEAR")))
+
+    def test_line_text(self):
+        line = ps._est_line(self.h("DOWN"))
+        for t in ("-0.22", "ช่วง -0.10 ถึง -0.40", "โอกาสตามโมเดล 62%", "113 ครั้ง"):
+            self.assertIn(t, line)
+        self.assertIn("ตั้งแต่ -0.40 ลงไป", ps._est_line(self.h("DOWN_STRONG", 0.41)))
+        self.assertEqual(ps._est_line(self.h("UNCLEAR")), "")
+        self.assertIn("ช่วง", ps._est_line(self.h("DOWN", avg=None)))      # ไม่มีค่าเฉลี่ย → ยังแสดงช่วงและโอกาส
+
+    def test_card_shows_estimate_for_market(self):
+        d = {"horizons": [self.h("DOWN")]}
+        html = ps._forecast_card("ดีเซล", d, None)
+        self.assertIn("ต้นทุนเปลี่ยนประมาณ", html)
+
+
+class RetailSection(unittest.TestCase):
+    def raw(self, **kw):
+        r = {"card_id": "2026-11-12 21:30 B7", "asof": "2026-11-11 21:30", "fuel": "B7", "target_day": "2026-11-12", "call": "ลง",
+             "p_down": 0.42, "p_flat": 0.45, "p_up": 0.13, "size_text": "ถ้าปรับ มัธยฐาน 0.80 บาท/ลิตร (ช่วงที่พบบ่อย 0.75–1.50)", "retail_base": 40.79,
+             "outcome_cls": "", "filled_at": ""}
+        r.update(kw)
+        return pd.DataFrame([r])
+
+    def test_block_shows_probs_size_and_experimental(self):
+        r = ps.latest_retail(ps.prep_retail(self.raw()), "B7")
+        html = ps._retail_block(r, {"retail_now": "ปตท. 40.79 บาท/ลิตร (ตรวจล่าสุด 11/11 23:28)"})
+        for t in ("ปลีกน่าจะลง", "ทดลอง", "มัธยฐาน 0.80", "40.79", "ลง 42%", "ยังไม่ผ่านการทดสอบเดินหน้า"):
+            self.assertIn(t, html)
+
+    def test_block_without_data(self):
+        self.assertIn("ยังไม่มีพยากรณ์ปลีก", ps._retail_block(None, None))
+        self.assertIsNone(ps.latest_retail(ps.prep_retail(pd.DataFrame()), "B7"))
+
+    def test_live_stats(self):
+        df = pd.concat([self.raw(), self.raw(card_id="b", call="นิ่ง", outcome_cls="นิ่ง", filled_at="2026-11-13 07:00"),
+                        self.raw(card_id="c", call="ลง", outcome_cls="นิ่ง", filled_at="2026-11-14 07:00"),
+                        self.raw(card_id="d", call="ไม่ชัด", outcome_cls="ลง", filled_at="2026-11-15 07:00")])
+        s = ps.retail_live_stats(ps.prep_retail(df), "B7")
+        self.assertEqual((s["n"], s["n_called"], s["n_right"]), (3, 2, 1))
+
+    def test_page_includes_retail_and_renamed_labels(self):
+        html = ps.build_summary({}, {}, pd.DataFrame(), pd.DataFrame(), pd.Timestamp("2026-11-12 08:00"), __import__("engine"), None, self.raw())
+        for t in ("ราคาขายปลีก", "ราคาขายส่ง EPPO", "พยากรณ์ปลีก (ทดลอง)", "เก็บไว้เทียบความแม่นกับตลาด"):
+            self.assertIn(t, html)
+
+
 class Render(unittest.TestCase):
     def outlook(self):
         h = lambda hrs, tier: {"hours": hrs, "tier": tier, "label": "x", "grade": "กลาง", "until": pd.Timestamp("2026-11-12 20:30")}

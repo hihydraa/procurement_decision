@@ -126,14 +126,14 @@ def _combine_base(tier24: str | None, grade: str | None, card: dict | None) -> d
     strong = bool(tier24 and tier24.endswith("STRONG"))
     if d_o and d_c and d_o != d_c:
         return {"dir": None, "action": "ยังไม่ฟันธง: สัญญาณสองแหล่งขัดกัน", "level": "ไม่ชัด",
-                "why": f"แนวโน้มตลาดชี้ {d_o} แต่การ์ดต้นทุนชี้ {d_c}"}
+                "why": f"แนวโน้มตลาดชี้ {d_o} แต่การ์ดราคาขายส่ง EPPO ชี้ {d_c}"}
     d = d_o or d_c
     if d is None:
         return {"dir": None, "action": "สั่งซื้อตามแผนปกติ ไม่ต้องเร่งหรือรอ", "level": "ไม่ชัด",
                 "why": "ทั้งสองแหล่งไม่ให้สัญญาณชัด (ย้อนหลังระบบทายทรงตัวไม่แม่น จึงไม่ฟันธง)"}
     both = d_o == d_c
     level = "สูง" if both else ("กลาง" if (strong or (card or {}).get("confidence") == "กลาง") else "ต่ำ")
-    srcs = "สัญญาณ 2 แหล่งตรงกัน" if both else ("จากแนวโน้มตลาดอย่างเดียว" if d_o else "จากการ์ดต้นทุนอย่างเดียว")
+    srcs = "สัญญาณ 2 แหล่งตรงกัน" if both else ("จากแนวโน้มตลาดอย่างเดียว" if d_o else "จากการ์ดราคาขายส่ง EPPO อย่างเดียว")
     if d == "ลง":
         timing = (card or {}).get("recommendation", "")
         action = "ชะลอการสั่งซื้อ รอราคาลง" if "ชะลอ" not in timing else timing.split(" ข้อควรระวัง")[0]
@@ -227,7 +227,7 @@ def _topic(text: str):
 
 
 def collect_reasons(d: dict, card: dict | None) -> list:
-    """[(ชนิด, ข้อความ, แหล่ง)] ไม่ซ้ำกัน : แหล่ง 'ตลาด' = โมเดลแนวโน้ม, 'การ์ด' = การ์ดต้นทุนส่ง, 'ตลาด + การ์ด' = ทั้งสองรายงานเรื่องเดียวกันและทิศเดียวกัน (นับเป็นข้อเดียว)"""
+    """[(ชนิด, ข้อความ, แหล่ง)] ไม่ซ้ำกัน : แหล่ง 'ตลาด' = โมเดลแนวโน้ม, 'การ์ด' = การ์ดราคาขายส่ง EPPO, 'ตลาด + การ์ด' = ทั้งสองรายงานเรื่องเดียวกันและทิศเดียวกัน (นับเป็นข้อเดียว)"""
     out, seen, topics = [], set(), {}
     for src, items in (("ตลาด", outlook_reason_items(d)), ("การ์ด", card_reason_items((card or {}).get("reasons")))):
         for kind, text in items:
@@ -259,7 +259,7 @@ def _why_block(items: list) -> str:
             if k == kind:
                 lis.append(f"<li class='{mark[k][1]}'><span class='ps-w-ico'>{mark[k][0]}</span> {_e(text)} <span class='ps-src'>{_e(src)}</span></li>")
     return (f"<div class='ps-why'><div class='ps-why-title'>ทำไมถึงพยากรณ์แบบนี้ <span class='muted'>({head})</span></div>"
-            f"<ul>{''.join(lis)}</ul><div class='ps-cap muted'>ลูกศรบอกทิศของสัญญาณ ไม่ใช่น้ำหนักที่โมเดลให้ · ตลาด = โมเดลแนวโน้ม 24/48 ชม. · การ์ด = การ์ดต้นทุนส่ง</div></div>")
+            f"<ul>{''.join(lis)}</ul><div class='ps-cap muted'>ลูกศรบอกทิศของสัญญาณ ไม่ใช่น้ำหนักที่โมเดลให้ · ตลาด = โมเดลแนวโน้ม 24/48 ชม. · การ์ด = การ์ดราคาขายส่ง EPPO (เก็บไว้เทียบความแม่นกับตลาด)</div></div>")
 
 
 def _main_reasons(items: list, direction) -> str:
@@ -276,8 +276,92 @@ def _main_reasons(items: list, direction) -> str:
         return ""
     return f"<div class='ps-cap'><strong>เหตุผลหลัก:</strong> {_e(txt)}</div>"
 
+def expected_change(h: dict):
+    """ต้นทุนเปลี่ยนประมาณของแนวโน้มตลาด (บาท/ลิตร) : ค่าเฉลี่ยย้อนหลังของระดับที่ทาย (evidence.avg_move, หักครั้งที่ผิดทิศแล้ว)
+    + ช่วงตามนิยามระดับ (ขึ้น/ลง = 10–40 สต., แรง = ตั้งแต่ 40 สต.) + โอกาสจากโมเดล ; ไม่ฟันธง = None"""
+    dr = _tier_dir(h["tier"])
+    if dr is None:
+        return None
+    sign = 1 if dr == "ขึ้น" else -1
+    ev = h.get("evidence") or {}
+    avg = ev.get("avg_move")
+    strong = h["tier"].endswith("STRONG")
+    p = h.get("p") or {}
+    prob = p.get("r10" if sign > 0 else "f10")
+    return {"sign": sign, "est": None if avg is None else sign * float(avg), "strong": strong,
+            "lo": sign * (0.40 if strong else 0.10), "hi": None if strong else sign * 0.40, "prob": prob, "n": ev.get("n")}
 
-def _forecast_card(label: str, d: dict, card: dict | None) -> str:
+
+def _est_line(h) -> str:
+    e = expected_change(h) if h else None
+    if not e:
+        return ""
+    parts = []
+    if e["est"] is not None:
+        parts.append(f"ต้นทุนเปลี่ยนประมาณ <strong>{e['est']:+.2f}</strong> บาท/ลิตร")
+    band = f"ตั้งแต่ {e['lo']:+.2f} ขึ้นไป" if e["strong"] and e["sign"] > 0 else f"ตั้งแต่ {e['lo']:+.2f} ลงไป" if e["strong"] else f"ช่วง {e['lo']:+.2f} ถึง {e['hi']:+.2f}"
+    parts.append(band)
+    if e["prob"] is not None:
+        parts.append(f"โอกาสตามโมเดล {e['prob']:.0%}")
+    tail = f" · เฉลี่ยรวมครั้งที่ทายพลาดแล้ว จากย้อนหลัง {e['n']} ครั้ง" if e['n'] and e["est"] is not None else ""
+    return f"<div class='ps-cap ps-est'>{' · '.join(parts)}{tail}</div>"
+
+
+# ---------- พยากรณ์ราคาขายปลีก (ทดลอง) จาก RetailFcLog ----------
+def prep_retail(df: pd.DataFrame) -> pd.DataFrame:
+    need = {"card_id", "asof", "fuel", "target_day", "call"}
+    if df is None or df.empty or not need.issubset(df.columns):
+        return pd.DataFrame()
+    d = df.copy()
+    d["asof_dt"] = d["asof"].map(_parse_dt)
+    d["target_dt"] = d["target_day"].map(_parse_dt)
+    d = d.dropna(subset=["asof_dt", "target_dt"])
+    return d.sort_values("asof_dt").reset_index(drop=True)
+
+
+def latest_retail(retail: pd.DataFrame, code: str):
+    if retail is None or retail.empty:
+        return None
+    r = retail[retail["fuel"] == code]
+    return None if r.empty else r.iloc[-1].to_dict()
+
+
+def retail_live_stats(retail: pd.DataFrame, code: str) -> dict:
+    out = {"n": 0, "n_called": 0, "n_right": 0}
+    if retail is None or retail.empty or "filled_at" not in retail.columns:
+        return out
+    r = retail[(retail["fuel"] == code) & (retail["filled_at"].astype(str).str.strip() != "")]
+    out["n"] = int(len(r))
+    called = r[r["call"].isin(["ลง", "นิ่ง", "ขึ้น"])]
+    out["n_called"] = int(len(called))
+    out["n_right"] = int((called["call"] == called.get("outcome_cls")).sum()) if len(called) else 0
+    return out
+
+
+def _retail_block(r: dict | None, card: dict | None) -> str:
+    title = "<div class='ps-subtitle'>ราคาขายปลีก <span class='ps-exp'>ทดลอง</span></div>"
+    if not r:
+        return title + "<div class='ps-cap muted'>ยังไม่มีพยากรณ์ปลีก (ออกพร้อมการ์ดรอบ 21:30)</div>"
+    call = r.get("call")
+    meta = {"ลง": "ลง", "ขึ้น": "ขึ้น", "นิ่ง": "นิ่ง"}.get(call)
+    pd_, pf, pu = (_num(r.get(k)) for k in ("p_down", "p_flat", "p_up"))
+    text = {"ลง": "ปลีกน่าจะลง", "ขึ้น": "ปลีกน่าจะขึ้น", "นิ่ง": "ปลีกน่าจะไม่ปรับ"}.get(call, "ปลีกยังไม่ชัดเจน")
+    body = title + _badge(meta, text)
+    if None not in (pd_, pf, pu):
+        body += f"<div class='ps-cap'>โอกาสปลีกปรับ ลง / ไม่ปรับ / ขึ้น</div>{_prob_bar(pd_, pf, pu)}"
+    if r.get("size_text"):
+        body += f"<div class='ps-cap'>{_e(r['size_text'])}</div>"
+    base = _num(r.get("retail_base"))
+    now = f"ปลีกล่าสุดใน EPPO {base:.2f} บาท/ลิตร" if base is not None else ""
+    ptt = (card or {}).get("retail_now")
+    body += f"<div class='ps-cap muted'>{_e(now)}{' · ' if now and ptt else ''}{_e(ptt or '')}</div>"
+    body += ("<div class='ps-cap muted'>สำหรับ " + pd.to_datetime(r["target_dt"]).strftime("%d/%m") + " · คำนวณจากโอกาสของราคาขายส่ง × ความถี่ที่ปลีกปรับตามจริงในอดีต "
+             "(ปลีกปรับประมาณ 28% ของวัน ไม่ตามราคาส่งทุกครั้ง) · ยังไม่ผ่านการทดสอบเดินหน้า</div>")
+    return body
+
+
+
+def _forecast_card(label: str, d: dict, card: dict | None, retail: dict | None = None) -> str:
     hz = {h["hours"]: h for h in d.get("horizons", [])}
 
     def badge(h):
@@ -287,14 +371,14 @@ def _forecast_card(label: str, d: dict, card: dict | None) -> str:
         sub = "" if dr is None else f"ความเชื่อมั่น {h['grade']}"
         return _badge(dr, TIER_TH[h["tier"]], strong=h["tier"].endswith("STRONG"), sub=sub)
 
-    market = (f"<div class='ps-row'><div class='ps-key'>ตลาด 24 ชม.</div>{badge(hz.get(24))}</div>"
-              f"<div class='ps-row'><div class='ps-key'>ตลาด 48 ชม.</div>{badge(hz.get(48))}</div>")
+    market = (f"<div class='ps-row'><div class='ps-key'>ตลาด 24 ชม.</div>{badge(hz.get(24))}</div>{_est_line(hz.get(24))}"
+              f"<div class='ps-row'><div class='ps-key'>ตลาด 48 ชม.</div>{badge(hz.get(48))}</div>{_est_line(hz.get(48))}")
     if card:
         lo, hi = _num(card.get("lo")), _num(card.get("hi"))
         pd_, pf, pu = (_num(card.get(k)) for k in ("p_down", "p_flat", "p_up"))
         call = card.get("call")
         cd = call if call in ("ลง", "ขึ้น") else None
-        body = _badge(cd, f"ต้นทุนส่ง {'ไม่ชัดเจน' if cd is None else call}", sub=f"ความเชื่อมั่น {card.get('confidence', '-')}")
+        body = _badge(cd, f"ขายส่ง EPPO {'ไม่ชัดเจน' if cd is None else call}", sub=f"ความเชื่อมั่น {card.get('confidence', '-')}")
         if None not in (pd_, pf, pu):
             body += f"<div class='ps-cap'>โอกาส ลง / นิ่ง / ขึ้น</div>{_prob_bar(pd_, pf, pu)}"
         if lo is not None and hi is not None:
@@ -304,16 +388,18 @@ def _forecast_card(label: str, d: dict, card: dict | None) -> str:
         body += (f"<div class='ps-cap muted'>สำหรับ {pd.to_datetime(card['target_dt']).strftime('%d/%m')} · ออกเมื่อ "
                  f"{pd.to_datetime(card['asof_dt']).strftime('%d/%m %H:%M')}</div>")
     else:
-        body = "<div class='ps-cap muted'>ยังไม่มีการ์ดต้นทุนส่งล่วงหน้า (ออกรอบ 21:30)</div>"
-    return (f"<div class='ps-fcard'><div class='ps-fuel'>{label}</div>{market}<div class='ps-sep'></div>{body}<div class='ps-sep'></div>{_why_block(collect_reasons(d, card))}</div>")
+        body = "<div class='ps-cap muted'>ยังไม่มีการ์ดราคาขายส่ง EPPO ล่วงหน้า (ออกรอบ 21:30)</div>"
+    wholesale_title = "<div class='ps-subtitle'>ราคาขายส่ง EPPO <span class='ps-exp'>เก็บไว้เทียบความแม่นกับตลาด</span></div>"
+    return (f"<div class='ps-fcard'><div class='ps-fuel'>{label}</div>{market}<div class='ps-sep'></div>{_retail_block(retail, card)}<div class='ps-sep'></div>"
+            f"{wholesale_title}{body}<div class='ps-sep'></div>{_why_block(collect_reasons(d, card))}</div>")
 
 
-def build_forecast_and_advice(outlook: dict, cards: pd.DataFrame, asof) -> str:
+def build_forecast_and_advice(outlook: dict, cards: pd.DataFrame, asof, retail: pd.DataFrame = None) -> str:
     fc, adv = [], []
     for fk, code, label in FUELS:
         d = (outlook or {}).get(fk) or {}
         card = latest_card(cards, code)
-        fc.append(_forecast_card(label, d, card))
+        fc.append(_forecast_card(label, d, card, latest_retail(retail, code)))
         h24 = next((h for h in d.get("horizons", []) if h["hours"] == 24), None)
         h48 = next((h for h in d.get("horizons", []) if h["hours"] == 48), None)
         res = combine(h24["tier"] if h24 else None, h24["grade"] if h24 else None, card, h48["tier"] if h48 else None, h48["grade"] if h48 else None)
@@ -452,7 +538,7 @@ def build_backtest(summary: dict, outlook: dict) -> str:
       <div class="muted">แนวโน้มตลาด 24 ชม. ทดสอบแบบเดินหน้า (ฝึกจากอดีตเท่านั้น) กับ {n_days or '-'} วันที่ไม่เคยใช้ฝึก · ผลเมื่อ {gen}<br>
       อ่านว่า: เมื่อระบบทายทิศนั้นในอดีต ราคาไปตามที่ทายตั้งแต่ 10 สต. กี่ % และไปผิดทิศกี่ % (แถบน้ำเงิน = ถูกทิศ, แถบส้ม = ผิดทิศ)</div>
       <div class="ps-fgrid">{''.join(cols)}</div>
-      <div class="muted">การ์ดต้นทุนส่งที่เพิ่งเริ่มใช้ยังไม่มีผลทดสอบเดินหน้าเพียงพอ จึงยังไม่แสดงในส่วนนี้</div>
+      <div class="muted">การ์ดราคาขายส่ง EPPO ที่เพิ่งเริ่มใช้ยังไม่มีผลทดสอบเดินหน้าเพียงพอ จึงยังไม่แสดงในส่วนนี้</div>
     </section>"""
 
 
@@ -464,7 +550,7 @@ def _progress(n: int, goal: int = MIN_LIVE_DAYS) -> str:
             f"<span class='ps-pval'>{n}/{goal} {'✔ พอสรุปได้' if done else 'ยังน้อยเกินไป'}</span></div>")
 
 
-def build_live_accuracy(outlook_log: pd.DataFrame, cards: pd.DataFrame, engine_mod) -> str:
+def build_live_accuracy(outlook_log: pd.DataFrame, cards: pd.DataFrame, engine_mod, retail: pd.DataFrame = None) -> str:
     cols = []
     for fk, code, label in FUELS:
         rows = []
@@ -482,7 +568,7 @@ def build_live_accuracy(outlook_log: pd.DataFrame, cards: pd.DataFrame, engine_m
             rows.append("<div class='muted'>ยังไม่มีผลที่ครบ 24 ชม.</div>")
         rows.append("</div>")
         cs = card_live_stats(cards, code)
-        rows.append("<div class='ps-btrow'><div class='ps-bthead'><strong>การ์ดต้นทุนส่ง</strong></div>")
+        rows.append("<div class='ps-btrow'><div class='ps-bthead'><strong>การ์ดราคาขายส่ง EPPO</strong></div>")
         if cs["n_cards"]:
             rows.append(_progress(cs["n_cards"]))
             if cs["n_called"]:
@@ -492,6 +578,14 @@ def build_live_accuracy(outlook_log: pd.DataFrame, cards: pd.DataFrame, engine_m
                 rows.append("<div class='muted'>ยังไม่เคยฟันธงทิศ</div>")
         else:
             rows.append("<div class='muted'>ยังไม่มีการ์ดล่วงหน้าที่รู้ผลแล้ว</div>")
+        rows.append("</div>")
+        rs = retail_live_stats(retail, code)
+        rows.append("<div class='ps-btrow'><div class='ps-bthead'><strong>พยากรณ์ปลีก (ทดลอง)</strong></div>")
+        if rs["n"]:
+            rows.append(_progress(rs["n"]))
+            rows.append(f"<div class='muted'>ฟันธง {rs['n_called']} ครั้ง (ลง/ไม่ปรับ/ขึ้น) ถูก {rs['n_right']}" + (f" ({rs['n_right'] / rs['n_called']:.0%})" if rs["n_called"] else "") + "</div>")
+        else:
+            rows.append("<div class='muted'>ยังไม่มีผลปลีกที่รู้ผลแล้ว</div>")
         rows.append("</div>")
         cols.append(f"<div class='ps-fcard'><div class='ps-fuel'>{label}</div>{''.join(rows)}</div>")
     hind = sum(card_live_stats(cards, c)["n_hind"] for _, c, _ in FUELS)
@@ -516,6 +610,9 @@ CSS = """
     .ps-w-up { color:#8f1f1f; } .ps-w-down { color:#005200; } .ps-w-note { color:#475569; }
     .ps-w-ico { display:inline-block; width:1.1em; font-weight:700; }
     .ps-src { font-size:.72rem; background:#e2e8f0; color:#475569; border-radius:6px; padding:0 6px; margin-left:4px; }
+    .ps-subtitle { font-weight:700; font-size:.95rem; margin:2px 0 4px; }
+    .ps-exp { font-weight:400; font-size:.72rem; background:#fef3c7; color:#92400e; border-radius:6px; padding:0 6px; margin-left:4px; }
+    .ps-est { margin-left:102px; margin-top:0; }
     .ps-fgrid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:10px 0; }
     .ps-fcard { background:#f8fafc; border-radius:12px; padding:14px 16px; }
     .ps-fuel { font-weight:700; font-size:1.05rem; margin-bottom:8px; }
@@ -555,7 +652,8 @@ CSS = """
 """
 
 
-def build_summary(outlook: dict, summary: dict, outlook_log: pd.DataFrame, cards_raw: pd.DataFrame, asof, engine_mod, price_feed: pd.DataFrame = None) -> str:
+def build_summary(outlook: dict, summary: dict, outlook_log: pd.DataFrame, cards_raw: pd.DataFrame, asof, engine_mod, price_feed: pd.DataFrame = None, retail_raw: pd.DataFrame = None) -> str:
     cards = prep_cards(cards_raw)
-    return (build_forecast_and_advice(outlook, cards, asof) + build_live_check(outlook_log, cards, price_feed, asof) + build_backtest(summary, outlook)
-            + build_live_accuracy(outlook_log, cards, engine_mod))
+    retail = prep_retail(retail_raw)
+    return (build_forecast_and_advice(outlook, cards, asof, retail) + build_live_check(outlook_log, cards, price_feed, asof) + build_backtest(summary, outlook)
+            + build_live_accuracy(outlook_log, cards, engine_mod, retail))

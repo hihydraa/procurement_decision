@@ -32,6 +32,7 @@ TABS = {
     "TAPREC_LOG": "TapRecLog",
     "RETAIL_LOG": "RetailLog",
     "FORECAST_CARD": "ForecastCardLog",
+    "RETAIL_FC": "RetailFcLog",
 }
 
 TZ_NAME = "Asia/Bangkok"

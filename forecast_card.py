@@ -18,9 +18,10 @@ import numpy as np
 import pandas as pd
 
 from common import OILBOT_SHEET_ID, SHEET_ID, TABS, TZ_NAME, ensure_tab, get_token, sheets_append, sheets_get, sheets_update, to_ts
-from diag_rule_backtest import MEDIAN_MM, add_deltas, mops_daily, wti_daily
+from diag_rule_backtest import MEDIAN_MM, add_deltas, eppo_daily, mops_daily, wti_daily
 from diag_wf_components import FEATS, build_dataset, eppo_components, ridge_fit, walk_forward
 from ingest import cell_time
+import retail_forecast as RF
 from pricelog_frame import build_frame
 from tap_policy import DEPOTS, GRID_STEP, depot_series, price_at
 
@@ -301,6 +302,73 @@ def summary_lines(rows: list) -> list:
     return note + out
 
 
+# ---------- พยากรณ์ราคาปลีก (ทดลอง ดู retail_forecast.py) ----------
+RETAIL_COLUMNS = ["card_id", "asof", "round", "fuel", "target_day", "retail_base", "p_down", "p_flat", "p_up", "call", "size_text", "size_med",
+                  "n_hist", "dow_scale", "outcome_dretail", "outcome_cls", "right", "filled_at"]
+RETAIL_LAST = "R"
+R_OUT_FROM = RETAIL_COLUMNS.index("outcome_dretail")
+
+
+def retail_rows(cards: list, eppo_d: pd.DataFrame) -> list:
+    """แถวพยากรณ์ปลีกต่อการ์ด (ใช้ความน่าจะเป็น WS ของการ์ดเป็นอินพุต) ; ข้ามถ้าประวัติไม่พอ"""
+    out = []
+    for c in cards:
+        if c["p_down"] == "" or c["p_flat"] == "" or c["p_up"] == "":
+            continue
+        tgt = pd.Timestamp(c["target_day"])
+        base = eppo_d[(eppo_d.fuel == c["fuel"]) & (eppo_d.day < tgt)].sort_values("day")
+        f = RF.forecast(eppo_d, c["fuel"], {"ลง": float(c["p_down"]), "นิ่ง": float(c["p_flat"]), "ขึ้น": float(c["p_up"])}, tgt,
+                        float(base.retail.iloc[-1]) if len(base) else None)
+        if f is None:
+            continue
+        out.append({"card_id": c["card_id"], "asof": c["asof"], "round": c["round"], "fuel": c["fuel"], "target_day": c["target_day"],
+                    "retail_base": f["retail_base"], "p_down": round(f["p_down"], 3), "p_flat": round(f["p_flat"], 3), "p_up": round(f["p_up"], 3),
+                    "call": f["call"], "size_text": f["size_text"], "size_med": round(f["size_med"], 2) if f["size_med"] != "" else "",
+                    "n_hist": f["n_hist"], "dow_scale": f["dow_scale"], **{k: "" for k in RETAIL_COLUMNS[R_OUT_FROM:]}})
+    return out
+
+
+def retail_text(r: dict) -> str:
+    fuel = FUEL_TH[r["fuel"]]
+    p = f"ลง {float(r['p_down']):.0%} / นิ่ง {float(r['p_flat']):.0%} / ขึ้น {float(r['p_up']):.0%}"
+    base = f" (ปลีกล่าสุดใน EPPO {float(r['retail_base']):.2f})" if r["retail_base"] != "" else ""
+    return f"ปลีก{fuel} {r['target_day']}: {r['call']} · {p}{base} {r['size_text']} [ทดลอง]".strip()
+
+
+def write_retail_log(tok, rows: list, eppo_d: pd.DataFrame):
+    tab = TABS["RETAIL_FC"]
+    if ensure_tab(tok, SHEET_ID, tab):
+        sheets_update(tok, SHEET_ID, f"{tab}!A1", [RETAIL_COLUMNS])
+        print(f"[RETAIL-FC] created tab {tab}")
+    values = sheets_get(tok, SHEET_ID, f"{tab}!A1:{RETAIL_LAST}20000")
+    head = values[0] if values else RETAIL_COLUMNS
+    have_rows = [dict(zip(head, r + [""] * (len(head) - len(r)))) for r in values[1:]]
+    have = {str(r.get("card_id", "")) for r in have_rows}
+    add = [r for r in rows if r["card_id"] not in have]
+    if add:
+        sheets_append(tok, SHEET_ID, f"{tab}!A1:{RETAIL_LAST}1", [[r[k] for k in RETAIL_COLUMNS] for r in add])
+        have_rows += add
+    print(f"[RETAIL-FC] new rows: +{len(add)}")
+    filled = 0
+    for i, r in enumerate(have_rows):
+        if str(r.get("filled_at", "")) == "" and str(r.get("target_day", "")):
+            tgt = to_ts(r["target_day"])
+            res = RF.outcome(eppo_d, r["fuel"], tgt)
+            if res:
+                d, cls = res
+                call = r.get("call", "")
+                right = "" if call in ("", "ไม่ชัด") else int(call == cls)
+                upd = {"outcome_dretail": d, "outcome_cls": cls, "right": right, "filled_at": datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y-%m-%d %H:%M")}
+                sheets_update(tok, SHEET_ID, f"{tab}!{col_letter(R_OUT_FROM)}{i + 2}:{RETAIL_LAST}{i + 2}", [[upd[c] for c in RETAIL_COLUMNS[R_OUT_FROM:]]])
+                have_rows[i].update(upd)
+                filled += 1
+    print(f"[RETAIL-FC] outcomes filled: {filled}")
+    done = [r for r in have_rows if str(r.get("filled_at", "")) != "" and str(r.get("right", "")) != ""]
+    if done:
+        ok = sum(int(float(r["right"])) for r in done)
+        print(f"[RETAIL-FC] เติมผลแล้ว {len(done)} ใบที่ฟันธง ถูก {ok} ({ok / len(done):.0%})")
+
+
 # ---------- ชีท ----------
 def retail_now_text(values: list, fuel: str) -> str:
     h = [str(x).strip() for x in values[0]] if values else []
@@ -328,7 +396,9 @@ def main(argv=None):
     rnd = next((a for a in argv if a in ROUNDS), pick_round(now))
     tok = get_token()
     mops, wti = mops_daily(sheets_get(tok, SHEET_ID, "Entry_MOPS!A1:F6000")), wti_daily(sheets_get(tok, SHEET_ID, "Entry_WTI!A1:H6000"))
-    eppo = eppo_components(sheets_get(tok, SHEET_ID, "Entry_Eppo!A1:S6000"))
+    eppo_vals = sheets_get(tok, SHEET_ID, "Entry_Eppo!A1:S6000")
+    eppo = eppo_components(eppo_vals)
+    eppo_d = eppo_daily(eppo_vals)                    # มีราคาปลีก ใช้พยากรณ์/ทวนสอบปลีก
     notices = load_notices_full(sheets_get(tok, SHEET_ID, "Entry_FundNotice!A1:H3000"))
     ds = build_dataset(mops, wti, eppo)
     prices = build_frame(sheets_get(tok, OILBOT_SHEET_ID, "PriceLog!A1:Q200000")).reset_index(drop=True)
@@ -355,6 +425,9 @@ def main(argv=None):
     for c in cards:
         print(c["card_text"])
         print("-" * 60)
+    rrows = retail_rows(cards, eppo_d)
+    for r in rrows:
+        print(retail_text(r))
     if dry:
         print("[CARD] --dry : ไม่เขียนชีท")
         return
@@ -382,6 +455,7 @@ def main(argv=None):
     print(f"[CARD] outcomes filled: {filled}")
     for line in summary_lines(rows):
         print(line)
+    write_retail_log(tok, rrows, eppo_d)
 
 
 if __name__ == "__main__":
