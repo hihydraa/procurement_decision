@@ -13,6 +13,11 @@ on:
 permissions:
   contents: write
 
+# รอบ 15:45 และ 20:45 น. ถูกสั่งจาก Cloudflare Worker (oil-bot) ด้วย เพราะตัวตั้งเวลาของ GitHub ข้ามรอบบ่อย — กันสองรอบรันชนกัน (เขียนชีท/หน้าเว็บพร้อมกัน)
+concurrency:
+  group: update-dashboard
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
