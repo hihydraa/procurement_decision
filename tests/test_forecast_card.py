@@ -1,3 +1,4 @@
+import sys
 import unittest
 
 import numpy as np
@@ -179,3 +180,19 @@ class MoveTo11(unittest.TestCase):
         known = {"card_id": "a", "fuel": "B7", "target_day": "2026-11-11", "call": "ลง"}
         future = {"card_id": "b", "fuel": "B7", "target_day": "2026-11-12", "call": "ลง"}
         self.assertEqual(fc.drop_known([known, future], eppo), [future])
+
+
+class RetailRows(unittest.TestCase):
+    def test_rows_from_cards_and_skip_when_missing(self):
+        sys.path.insert(0, __import__('os').path.dirname(__file__))
+        import test_retail_forecast as T
+        e = T.synthetic()
+        card = {"card_id": "2026-08-05 21:30 B7", "asof": "2026-08-04 21:30", "round": "21:30", "fuel": "B7", "target_day": "2026-08-05", "p_down": 0.7, "p_flat": 0.1, "p_up": 0.2}
+        rows = fc.retail_rows([card, {**card, "card_id": "x", "p_down": ""}], e)
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(set(fc.RETAIL_COLUMNS), set(r))
+        self.assertAlmostEqual(float(r["p_down"]) + float(r["p_flat"]) + float(r["p_up"]), 1.0, places=2)
+        self.assertEqual(r["filled_at"], "")
+        self.assertIn("ปลีกดีเซล", fc.retail_text(r))
+        self.assertIn("[ทดลอง]", fc.retail_text(r))
