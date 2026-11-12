@@ -440,7 +440,10 @@ def decide_outlook(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params, 
         tier = M.classify_outlook(p["r10"], p["f10"], p["r40"], p["f40"])
         ev = _outlook_evidence(summary, key, tier)
         until = ref + pd.Timedelta(hours=hz)
-        out["horizons"].append({
+        reasons = _reason_lines(fuel, f, mm["r10"], mm["f10"])            # ปัจจัยจริงที่ดันทิศทางของโมเดลนี้ (เรียงตามแรง)
+        if f["trend"] is None or (isinstance(f["trend"], float) and np.isnan(f["trend"])):
+            reasons.append("ยังไม่มี Trend Mops ของวันนี้ — ความมั่นใจต่ำกว่าปกติ")
+        out["horizons"].append({"reasons": reasons,
             "hours": hz, "tier": tier, "label": M.OUTLOOK_TIERS[tier], "headline": f"{OUTLOOK_HEADLINE[tier]} ภายใน {hz} ชม.",
             "size": OUTLOOK_SIZE.get(tier), "until": until, "p": p, "grade": (ev or {}).get("grade", "ต่ำ"), "evidence": ev,
             "base_up": ((summary or {}).get("outlook_results", {}).get(key) or {}).get("base_up10"),

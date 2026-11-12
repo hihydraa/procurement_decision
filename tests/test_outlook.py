@@ -252,3 +252,19 @@ class LogRefsTest(unittest.TestCase):
     def test_cap_boundary(self):
         self.assertEqual(self.refs("2026-11-04 03:30"), ["11-03 15:30", "11-03 20:30"])    # 15:30 ช้า 12 ชม. พอดี ยังนับ
         self.assertEqual(self.refs("2026-11-04 03:31"), ["11-03 20:30"])                    # เกิน 12 ชม. แล้ว
+
+
+class OutlookReasonsTest(unittest.TestCase):
+    def test_horizons_carry_reasons_from_active_features(self):
+        import model as M
+        import signals as S
+        params = M.load_params()
+        rows = [{"msg_date": "2026-10-20", "msg_time": h, "provider": p, "direction": d, "scope": "ALL", "stated_time": ""}
+                for h, p, d in [("07:00", "SFL", "UP"), ("17:30", "IRPC", "UP"), ("18:10", "PTT", "DOWN")]]
+        t = S.Tables(intraday=pd.DataFrame([{"msg_date": "2026-10-20", "msg_time": "15:00", "kind": "TREND", "b": 0.7, "d": 2.0}]), headsup=pd.DataFrame(rows),
+                     mops_close=pd.DataFrame([{"msg_date": "2026-10-20", "msg_time": "20:10", "mops_date": "2026-10-20", "g95": 100, "g95_chg": -3.0, "diesel": 150, "diesel_chg": -5.0}]),
+                     fund=pd.DataFrame())
+        d = engine.decide_outlook("DIESEL", pd.Timestamp("2026-10-20 20:35"), t, params, None)
+        for h in d["horizons"]:
+            self.assertTrue(h["reasons"])
+            self.assertTrue(any("MOPS ปิดล่าสุด" in r for r in h["reasons"]))

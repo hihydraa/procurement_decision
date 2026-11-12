@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from html import escape
 
+import re
+
 import pandas as pd
 
 import live_check as LC
@@ -180,6 +182,87 @@ def _range_bar(lo: float, hi: float) -> str:
             f"<div class='ps-range-axis'><span>ลง {half:.1f}</span><span>0</span><span>ขึ้น {half:.1f}</span></div>")
 
 
+# ---------- เหตุผลของผลพยากรณ์ ----------
+def classify_reason(text: str) -> str:
+    """'up' = ชี้ราคา/ต้นทุนขึ้น, 'down' = ชี้ลง, 'note' = ข้อมูลประกอบ/ข้อจำกัด"""
+    t = str(text)
+    if "เสี่ยงราคาขึ้น" in t or "ดันต้นทุนขึ้น" in t or "เสี่ยงต้นทุนขึ้น" in t:
+        return "up"
+    if "โน้มราคาลง" in t or "ลดต้นทุน" in t or "โน้มต้นทุนลง" in t:
+        return "down"
+    return "note"
+
+
+def card_reason_items(reasons: str) -> list:
+    """แยกข้อความเหตุผลของการ์ด (คั่นด้วย ' · ') เป็น [(ชนิด, ข้อความ)] ; MOPS/WTI ใช้ทิศของการเปลี่ยนแปลงเป็นตัวชี้ (ไม่ใช่น้ำหนักในโมเดล)"""
+    items = []
+    for p in [x.strip() for x in str(reasons or "").split(" · ") if x.strip()]:
+        kind = classify_reason(p)
+        if kind == "note":
+            m = re.match(r"MOPS .*?([+-]\d+\.\d+) \(Δ1D\) ([+-]\d+\.\d+) \(Δ3D\)", p)
+            if m:
+                m1, m3 = float(m.group(1)), float(m.group(2))
+                v = m3 if abs(m3) >= 1 else (m1 if abs(m1) >= 0.3 else 0.0)
+                if v:
+                    kind = "down" if v < 0 else "up"
+                    p += " → " + ("โน้มต้นทุนลง" if v < 0 else "เสี่ยงต้นทุนขึ้น")
+            m = re.match(r"WTI Δ1D ([+-]\d+\.\d+)", p)
+            if m and abs(float(m.group(1))) >= 0.5:
+                kind = "down" if float(m.group(1)) < 0 else "up"
+                p += " → " + ("โน้มต้นทุนลง" if kind == "down" else "เสี่ยงต้นทุนขึ้น")
+        items.append((kind, p))
+    return items
+
+
+def outlook_reason_items(d: dict) -> list:
+    """เหตุผลจากโมเดลแนวโน้มตลาด (ใช้ของ 24 ชม. ถ้าไม่มีใช้ 48 ชม.)"""
+    hz = {h["hours"]: h for h in (d or {}).get("horizons", [])}
+    h = hz.get(24) or hz.get(48)
+    return [(classify_reason(t), t) for t in (h or {}).get("reasons", [])]
+
+
+def collect_reasons(d: dict, card: dict | None) -> list:
+    """[(ชนิด, ข้อความ, แหล่ง)] ไม่ซ้ำกัน : แหล่ง 'ตลาด' = โมเดลแนวโน้ม, 'การ์ด' = การ์ดต้นทุนส่ง"""
+    out, seen = [], set()
+    for src, items in (("ตลาด", outlook_reason_items(d)), ("การ์ด", card_reason_items((card or {}).get("reasons")))):
+        for kind, text in items:
+            if text not in seen:
+                seen.add(text)
+                out.append((kind, text, src))
+    return out
+
+
+def _why_block(items: list) -> str:
+    if not items:
+        return "<div class='ps-why'><div class='ps-why-title'>ทำไมถึงพยากรณ์แบบนี้</div><div class='muted'>ไม่มีปัจจัยที่เด่นพอจะชี้ทิศ ระบบจึงไม่ฟันธง</div></div>"
+    n_up = sum(1 for k, _, _ in items if k == "up")
+    n_dn = sum(1 for k, _, _ in items if k == "down")
+    head = (f"ชี้ขึ้น {n_up} ข้อ · ชี้ลง {n_dn} ข้อ" if (n_up or n_dn) else "ไม่มีปัจจัยที่ชี้ทิศชัด")
+    mark = {"up": ("▲", "ps-w-up"), "down": ("▼", "ps-w-down"), "note": ("◆", "ps-w-note")}
+    lis = []
+    for kind in ("up", "down", "note"):
+        for k, text, src in items:
+            if k == kind:
+                lis.append(f"<li class='{mark[k][1]}'><span class='ps-w-ico'>{mark[k][0]}</span> {_e(text)} <span class='ps-src'>{_e(src)}</span></li>")
+    return (f"<div class='ps-why'><div class='ps-why-title'>ทำไมถึงพยากรณ์แบบนี้ <span class='muted'>({head})</span></div>"
+            f"<ul>{''.join(lis)}</ul><div class='ps-cap muted'>ลูกศรบอกทิศของสัญญาณ ไม่ใช่น้ำหนักที่โมเดลให้ · ตลาด = โมเดลแนวโน้ม 24/48 ชม. · การ์ด = การ์ดต้นทุนส่ง</div></div>")
+
+
+def _main_reasons(items: list, direction) -> str:
+    """เหตุผลหลักใต้คำแนะนำ : ทิศที่แนะนำ → 2 ข้อแรกของทิศนั้น ; ไม่ฟันธง → ข้อแรกของแต่ละทิศที่ขัดกัน"""
+    ups = [t for k, t, _ in items if k == "up"]
+    dns = [t for k, t, _ in items if k == "down"]
+    if direction == "ลง" and dns:
+        txt = "; ".join(dns[:2])
+    elif direction == "ขึ้น" and ups:
+        txt = "; ".join(ups[:2])
+    elif ups and dns:
+        txt = f"ชี้ขึ้น: {ups[0]} | ชี้ลง: {dns[0]}"
+    else:
+        return ""
+    return f"<div class='ps-cap'><strong>เหตุผลหลัก:</strong> {_e(txt)}</div>"
+
+
 def _forecast_card(label: str, d: dict, card: dict | None) -> str:
     hz = {h["hours"]: h for h in d.get("horizons", [])}
 
@@ -208,7 +291,7 @@ def _forecast_card(label: str, d: dict, card: dict | None) -> str:
                  f"{pd.to_datetime(card['asof_dt']).strftime('%d/%m %H:%M')}</div>")
     else:
         body = "<div class='ps-cap muted'>ยังไม่มีการ์ดต้นทุนส่งล่วงหน้า (ออกรอบ 21:30)</div>"
-    return (f"<div class='ps-fcard'><div class='ps-fuel'>{label}</div>{market}<div class='ps-sep'></div>{body}</div>")
+    return (f"<div class='ps-fcard'><div class='ps-fuel'>{label}</div>{market}<div class='ps-sep'></div>{body}<div class='ps-sep'></div>{_why_block(collect_reasons(d, card))}</div>")
 
 
 def build_forecast_and_advice(outlook: dict, cards: pd.DataFrame, asof) -> str:
@@ -222,9 +305,10 @@ def build_forecast_and_advice(outlook: dict, cards: pd.DataFrame, asof) -> str:
         res = combine(h24["tier"] if h24 else None, h24["grade"] if h24 else None, card, h48["tier"] if h48 else None, h48["grade"] if h48 else None)
         icon, cls, _ = DIR_META[res["dir"]]
         dots = {"สูง": "●●●", "กลาง": "●●○", "ต่ำ": "●○○", "ไม่ชัด": "○○○"}[res["level"]]
+        main = _main_reasons(collect_reasons(d, card), res["dir"])
         adv.append(f"<div class='ps-advice {cls}-b'><div class='ps-adv-ico {cls}'>{icon}</div><div>"
                    f"<div class='ps-adv-fuel'>{label}</div><div class='ps-adv-action'>{_e(res['action'])}</div>"
-                   f"<div class='muted'><span class='ps-dots'>{dots}</span> ระดับสัญญาณ: {_e(res['level'])} · {_e(res['why'])}</div></div></div>")
+                   f"<div class='muted'><span class='ps-dots'>{dots}</span> ระดับสัญญาณ: {_e(res['level'])} · {_e(res['why'])}</div>{main}</div></div>")
     legend = ("<div class='ps-legend'><span class='ps-down-t'>▼ ราคาลง (ดีต่อการซื้อ: รอได้)</span>"
               "<span class='ps-up-t'>▲ ราคาขึ้น (ควรซื้อก่อน)</span><span class='ps-none-t'>◆ ไม่ชัดเจน (ซื้อตามปกติ)</span>"
               "<span class='muted'>▼▼ ▲▲ = แรง (ขยับ ≥ 40 สต.)</span></div>")
@@ -413,6 +497,11 @@ CSS = """
     .ps-right { background:#2a78d6; } .ps-wrong { background:#eb6834; }
     .ps-chip { display:inline-block; padding:1px 9px; border-radius:999px; color:#fff; font-size:.8rem; font-weight:600; white-space:nowrap; }
     .ps-chip.ps-right { background:#2a78d6; } .ps-chip.ps-wrong { background:#c4501f; } .ps-chip.ps-none { background:#64645e; }
+    .ps-why ul { margin:4px 0; padding-left:0; list-style:none; } .ps-why li { font-size:.86rem; margin:3px 0; }
+    .ps-why-title { font-weight:600; font-size:.92rem; }
+    .ps-w-up { color:#8f1f1f; } .ps-w-down { color:#005200; } .ps-w-note { color:#475569; }
+    .ps-w-ico { display:inline-block; width:1.1em; font-weight:700; }
+    .ps-src { font-size:.72rem; background:#e2e8f0; color:#475569; border-radius:6px; padding:0 6px; margin-left:4px; }
     .ps-fgrid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:10px 0; }
     .ps-fcard { background:#f8fafc; border-radius:12px; padding:14px 16px; }
     .ps-fuel { font-weight:700; font-size:1.05rem; margin-bottom:8px; }
