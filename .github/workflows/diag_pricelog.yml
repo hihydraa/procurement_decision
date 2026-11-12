@@ -56,6 +56,11 @@ jobs:
         env:
           SA_EMAIL: ${{ secrets.SA_EMAIL }}
           SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
+      - name: Retail forecast skill (Entry_Eppo history, read-only)
+        run: python diag_retail_forecast.py
+        env:
+          SA_EMAIL: ${{ secrets.SA_EMAIL }}
+          SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
       - name: Forecast card dry-run (prints both fuels, writes nothing)
         run: python forecast_card.py 21:30 --dry
         env:
