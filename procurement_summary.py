@@ -277,8 +277,9 @@ def _main_reasons(items: list, direction) -> str:
     return f"<div class='ps-cap'><strong>เหตุผลหลัก:</strong> {_e(txt)}</div>"
 
 def expected_change(h: dict):
-    """ต้นทุนเปลี่ยนประมาณของแนวโน้มตลาด (บาท/ลิตร) : ค่าเฉลี่ยย้อนหลังของระดับที่ทาย (evidence.avg_move, หักครั้งที่ผิดทิศแล้ว)
-    + ช่วงตามนิยามระดับ (ขึ้น/ลง = 10–40 สต., แรง = ตั้งแต่ 40 สต.) + โอกาสจากโมเดล ; ไม่ฟันธง = None"""
+    """ต้นทุนเปลี่ยนประมาณของแนวโน้มตลาด (บาท/ลิตร) :
+    est = ค่าเฉลี่ยย้อนหลังของระดับที่ทาย รวมครั้งที่ทายพลาดแล้ว (evidence.avg_move) ; band = ช่วงถ้าเป็นไปตามที่ทาย (ขึ้น/ลง 10–40 สต., แรง ตั้งแต่ 40 สต.)
+    prob = โอกาสตามโมเดลที่ขยับถึงเกณฑ์ของระดับนั้น (ระดับแรง ใช้เกณฑ์ 40 สต. ไม่ใช่ 10 สต.) ; ไม่ฟันธง = None"""
     dr = _tier_dir(h["tier"])
     if dr is None:
         return None
@@ -287,9 +288,9 @@ def expected_change(h: dict):
     avg = ev.get("avg_move")
     strong = h["tier"].endswith("STRONG")
     p = h.get("p") or {}
-    prob = p.get("r10" if sign > 0 else "f10")
+    key = ("r" if sign > 0 else "f") + ("40" if strong else "10")
     return {"sign": sign, "est": None if avg is None else sign * float(avg), "strong": strong,
-            "lo": sign * (0.40 if strong else 0.10), "hi": None if strong else sign * 0.40, "prob": prob, "n": ev.get("n")}
+            "lo": sign * (0.40 if strong else 0.10), "hi": None if strong else sign * 0.40, "prob": p.get(key), "n": ev.get("n")}
 
 
 def _est_line(h) -> str:
@@ -298,13 +299,13 @@ def _est_line(h) -> str:
         return ""
     parts = []
     if e["est"] is not None:
-        parts.append(f"ต้นทุนเปลี่ยนประมาณ <strong>{e['est']:+.2f}</strong> บาท/ลิตร")
-    band = f"ตั้งแต่ {e['lo']:+.2f} ขึ้นไป" if e["strong"] and e["sign"] > 0 else f"ตั้งแต่ {e['lo']:+.2f} ลงไป" if e["strong"] else f"ช่วง {e['lo']:+.2f} ถึง {e['hi']:+.2f}"
+        parts.append(f"ต้นทุนเปลี่ยนประมาณ <strong>{e['est']:+.2f}</strong> บาท/ลิตร (เฉลี่ยรวมครั้งที่ทายพลาดแล้ว จากย้อนหลัง {e['n']} ครั้ง)" if e["n"]
+                     else f"ต้นทุนเปลี่ยนประมาณ <strong>{e['est']:+.2f}</strong> บาท/ลิตร (เฉลี่ยรวมครั้งที่ทายพลาดแล้ว)")
+    band = f"ถ้าเป็นไปตามที่ทาย ตั้งแต่ {e['lo']:+.2f} ขึ้นไป" if e["strong"] and e["sign"] > 0 else f"ถ้าเป็นไปตามที่ทาย ตั้งแต่ {e['lo']:+.2f} ลงไป" if e["strong"] else f"ถ้าเป็นไปตามที่ทาย {e['lo']:+.2f} ถึง {e['hi']:+.2f}"
     parts.append(band)
     if e["prob"] is not None:
-        parts.append(f"โอกาสตามโมเดล {e['prob']:.0%}")
-    tail = f" · เฉลี่ยรวมครั้งที่ทายพลาดแล้ว จากย้อนหลัง {e['n']} ครั้ง" if e['n'] and e["est"] is not None else ""
-    return f"<div class='ps-cap ps-est'>{' · '.join(parts)}{tail}</div>"
+        parts.append(f"โอกาสตามโมเดลที่ขยับถึง {'40' if e['strong'] else '10'} สต. {e['prob']:.0%}")
+    return f"<div class='ps-cap ps-est'>{' · '.join(parts)}</div>"
 
 
 # ---------- พยากรณ์ราคาขายปลีก (ทดลอง) จาก RetailFcLog ----------
