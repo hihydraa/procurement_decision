@@ -103,6 +103,28 @@ def forecast(eppo: pd.DataFrame, fuel: str, p_ws: dict, target_day: pd.Timestamp
             "n_hist": int(len(h)), "dow_scale": round(scale, 2), "dow_n": n_dow}
 
 
+# ---------- โมเดลจากสัญญาณ Jobber (ดู exp_retail_search.py) ----------
+SIGNAL_FEATURES = ("up_n", "dn_n", "close_last", "fund_next")
+SIGNAL_CLIPS = {"up_n": (0, 4), "dn_n": (0, 4), "close_last": (-8.0, 8.0), "fund_next": (-3.0, 3.0)}
+SIGNAL_HOUR = 20.5          # สัญญาณของคืนก่อนวันเป้าหมาย ตัดที่ 20:30
+
+
+def signal_features(tables, fuel: str, day: pd.Timestamp) -> dict:
+    """สัญญาณ ณ 20:30 ของวัน day (วันก่อนวันเป้าหมาย) — ใช้เฉพาะข้อความที่โพสต์ก่อนเวลานั้น"""
+    import signals as S
+    f = S.build_features(pd.Timestamp(day).normalize() + pd.Timedelta(hours=SIGNAL_HOUR), tables, fuel)
+    return {k: f.get(k) for k in SIGNAL_FEATURES}
+
+
+def signal_vector(f: dict) -> np.ndarray:
+    out = []
+    for k in SIGNAL_FEATURES:
+        v = f.get(k)
+        v = 0.0 if v is None or (isinstance(v, float) and np.isnan(v)) else float(v)
+        out.append(min(max(v, SIGNAL_CLIPS[k][0]), SIGNAL_CLIPS[k][1]))
+    return np.array(out)
+
+
 def outcome(eppo: pd.DataFrame, fuel: str, target_day: pd.Timestamp):
     """(ปลีกเปลี่ยนกี่บาท, ชนิด) ของวันเป้าหมายเทียบวันก่อน ; None ถ้ายังไม่มีข้อมูลวันนั้น"""
     g = eppo[eppo.fuel == fuel].drop_duplicates("day", keep="last").set_index("day").retail

@@ -85,3 +85,23 @@ class Forecast(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SignalFeatureTest(unittest.TestCase):
+    """ฟีเจอร์สัญญาณ Jobber ของการทดลองปลีก (exp_retail_search.py) : ตัดค่าสุดโต่ง ค่าว่าง = 0 และไม่ใช้ข้อความหลัง 20:30"""
+
+    def test_vector_clips_and_fills(self):
+        import numpy as np
+        import retail_forecast as RF
+        v = RF.signal_vector({"up_n": 9, "dn_n": None, "close_last": float("nan"), "fund_next": -5})
+        np.testing.assert_array_equal(v, [4, 0, 0, -3])
+
+    def test_features_cut_at_2030(self):
+        import pandas as pd
+        import retail_forecast as RF
+        import signals as S
+        hu = pd.DataFrame([["2026-10-01", "17:00", "A", "UP", "ALL"], ["2026-10-01", "21:00", "B", "UP", "ALL"]],
+                          columns=["msg_date", "msg_time", "provider", "direction", "scope"])
+        f = RF.signal_features(S.Tables(headsup=hu), "B7", pd.Timestamp("2026-10-01"))
+        self.assertEqual(f["up_n"], 1)
+        self.assertEqual(set(f), set(RF.SIGNAL_FEATURES))
