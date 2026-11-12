@@ -221,14 +221,28 @@ def outlook_reason_items(d: dict) -> list:
     return [(classify_reason(t), t) for t in (h or {}).get("reasons", [])]
 
 
+def _topic(text: str):
+    """หัวข้อเดียวกันที่สองแหล่งรายงานซ้ำ (ประกาศกองทุนของพรุ่งนี้) จะรวมเป็นข้อเดียว ; หัวข้ออื่นไม่รวม (MOPS 1 วัน กับ 3 วันเป็นคนละข้อมูล)"""
+    return "fund" if "กองทุน" in str(text) else None
+
+
 def collect_reasons(d: dict, card: dict | None) -> list:
-    """[(ชนิด, ข้อความ, แหล่ง)] ไม่ซ้ำกัน : แหล่ง 'ตลาด' = โมเดลแนวโน้ม, 'การ์ด' = การ์ดต้นทุนส่ง"""
-    out, seen = [], set()
+    """[(ชนิด, ข้อความ, แหล่ง)] ไม่ซ้ำกัน : แหล่ง 'ตลาด' = โมเดลแนวโน้ม, 'การ์ด' = การ์ดต้นทุนส่ง, 'ตลาด + การ์ด' = ทั้งสองรายงานเรื่องเดียวกันและทิศเดียวกัน (นับเป็นข้อเดียว)"""
+    out, seen, topics = [], set(), {}
     for src, items in (("ตลาด", outlook_reason_items(d)), ("การ์ด", card_reason_items((card or {}).get("reasons")))):
         for kind, text in items:
-            if text not in seen:
-                seen.add(text)
-                out.append((kind, text, src))
+            if text in seen:
+                continue
+            seen.add(text)
+            tp = _topic(text)
+            if tp and kind != "note" and (tp, kind) in topics:
+                i = topics[(tp, kind)]
+                k, t, s0 = out[i]
+                out[i] = (k, t, s0 if src in s0 else f"{s0} + {src}")
+                continue
+            if tp and kind != "note":
+                topics[(tp, kind)] = len(out)
+            out.append((kind, text, src))
     return out
 
 

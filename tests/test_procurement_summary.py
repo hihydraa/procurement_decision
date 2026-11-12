@@ -111,6 +111,16 @@ class Reasons(unittest.TestCase):
         items = ps.collect_reasons(d, {"reasons": "WTI Δ1D -1.44 · ค่าการตลาดเทียบค่ากลาง +0.06 (EPPO 11/11)"})
         self.assertEqual([(k, s) for k, _, s in items], [("down", "ตลาด"), ("down", "การ์ด"), ("note", "การ์ด")])
 
+    def test_same_fund_notice_from_both_sources_counts_once(self):
+        d = {"horizons": [{"hours": 24, "tier": "UP", "grade": "กลาง", "reasons": ["กองทุนประกาศปรับ +0.37 บาท/ลิตร มีผลพรุ่งนี้ → เสี่ยงราคาขึ้น"]}]}
+        items = ps.collect_reasons(d, {"reasons": "ประกาศกองทุนดีเซลมีผลพรุ่งนี้ +0.37 บาท/ลิตร (ลดอุดหนุน → ดันต้นทุนขึ้น) · WTI Δ1D -1.44"})
+        self.assertEqual([(k, s) for k, _, s in items], [("up", "ตลาด + การ์ด"), ("down", "การ์ด")])
+
+    def test_opposite_mops_windows_are_kept_separate(self):
+        d = {"horizons": [{"hours": 24, "tier": "UP", "grade": "กลาง", "reasons": ["MOPS ปิดล่าสุด +1.67 USD/bbl → เสี่ยงราคาขึ้น"]}]}
+        items = ps.collect_reasons(d, {"reasons": "MOPS ดีเซล +1.67 (Δ1D) -10.89 (Δ3D) ณ 11/11"})
+        self.assertEqual([k for k, _, _ in items], ["up", "down"])
+
     def test_page_shows_reasons_and_main_reason(self):
         d = {"horizons": [{"hours": 24, "tier": "DOWN", "label": "x", "grade": "กลาง", "until": pd.Timestamp("2026-11-12 20:30"),
                            "reasons": ["MOPS ปิดล่าสุด -5.00 USD/bbl → โน้มราคาลง"]}]}
