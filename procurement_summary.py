@@ -303,7 +303,7 @@ def _est_line(h) -> str:
     parts.append(band)
     if e["prob"] is not None:
         parts.append(f"โอกาสตามโมเดล {e['prob']:.0%}")
-    tail = f" · เฉลี่ยรวมครั้งที่ทายพลาดแล้ว จากย้อนหลัง {e["n"]} ครั้ง" if e["n"] and e["est"] is not None else ""
+    tail = f" · เฉลี่ยรวมครั้งที่ทายพลาดแล้ว จากย้อนหลัง {e['n']} ครั้ง" if e['n'] and e["est"] is not None else ""
     return f"<div class='ps-cap ps-est'>{' · '.join(parts)}{tail}</div>"
 
 
