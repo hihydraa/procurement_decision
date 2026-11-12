@@ -30,6 +30,28 @@ def vectorize(f: dict) -> np.ndarray:
     return np.array([val("trend"), trend_missing, val("up_n"), val("dn_n"), cl, close_sign, val("close_3"), val("fund_next")], dtype=float)
 
 
+# ---------- ฟีเจอร์ชุด v2 (โมเดลแนวโน้ม 24 ชม.) : ชุดเดิม 8 ตัว + ราคาที่รู้ ณ เวลาตัดสินใจ (ดู signals.build_features_v2, exp_model_search.py) ----------
+FEATURES_V2 = FEATURES + ["pend", "pend_pos", "pend_neg", "pend_up_n", "pend_dn_n", "mom1", "mom3", "intra",
+                          "close_5", "close_10", "mom5", "mom10", "disp", "dow_mon", "dow_fri", "dow_sat", "dow_sun"]
+CLIPS_V2 = {"pend": (-3.0, 3.0), "pend_up_n": (0, 8), "pend_dn_n": (0, 8), "mom1": (-3.0, 3.0), "mom3": (-5.0, 5.0), "intra": (-2.0, 2.0),
+            "close_5": (-25.0, 25.0), "close_10": (-40.0, 40.0), "mom5": (-6.0, 6.0), "mom10": (-8.0, 8.0), "disp": (0.0, 3.0)}
+
+
+def vectorize_v2(f: dict) -> np.ndarray:
+    def val(k):
+        v = f.get(k)
+        if v is None or (isinstance(v, float) and np.isnan(v)):
+            return 0.0
+        lo, hi = CLIPS_V2[k]
+        return float(min(max(float(v), lo), hi))
+
+    pend = val("pend")
+    dow = f.get("dow")
+    return np.concatenate([vectorize(f), [pend, max(pend, 0.0), min(pend, 0.0), val("pend_up_n"), val("pend_dn_n"), val("mom1"), val("mom3"), val("intra"),
+                                          val("close_5"), val("close_10"), val("mom5"), val("mom10"), val("disp"),
+                                          float(dow == 0), float(dow == 4), float(dow == 5), float(dow == 6)]])
+
+
 def fit_logistic(X: np.ndarray, y: np.ndarray, l2: float = 2.0, iters: int = 60):
     """ridge logistic regression (Newton) — คืน (w, b, mu, sd) โดย standardize ฟีเจอร์ที่ไม่ใช่ binary"""
     mu, sd = X.mean(axis=0), X.std(axis=0)
@@ -61,6 +83,15 @@ def model_version(params) -> str:
         return ""
     h = hashlib.sha1(json.dumps(params.get("models", {}), sort_keys=True).encode("utf-8")).hexdigest()[:7]
     return f"{params.get('trained_at', '?')}-{h}"
+
+
+def outlook_version(params) -> str:
+    """รหัสเวอร์ชันของโมเดลแนวโน้ม (บันทึกคู่กับ OutlookLog) : รหัสโมเดลหลัก + แฮชของโมเดลแนวโน้มและชุดฟีเจอร์ — เปลี่ยนเมื่อโมเดลแนวโน้มตัวใดเปลี่ยน"""
+    if not params:
+        return ""
+    o = params.get("outlook") or {}
+    h = hashlib.sha1(json.dumps({"m": o.get("models", {}), "f": o.get("feature_set", {})}, sort_keys=True).encode("utf-8")).hexdigest()[:5]
+    return f"{model_version(params)}+o{h}"
 
 
 def load_params(path: str = PARAMS_PATH):
@@ -121,6 +152,9 @@ def utility(action: str, gain_buy_now: float) -> float:
 OUTLOOK_REF_HOUR = 20.5            # ประเมิน ณ 20:30 (หลังประกาศกองทุน + MOPS ปิด) — ช่วงที่ backtest แม่นที่สุด
 OUTLOOK_REF_PM = 15.5              # รอบบ่าย 15:30 — ใช้ช่วง 15:30–20:30 เพราะสัญญาณของวันนี้แม่นกว่าข้อมูลเมื่อคืน (AUC 0.66–0.68 เทียบ 0.55–0.58 บนเป้าหมายเดียวกัน)
 OUTLOOK_HORIZONS = (24, 48)
+# โมเดลแนวโน้มที่ใช้ฟีเจอร์ชุด v2 : เฉพาะ key ที่ผ่านทั้งเกณฑ์ของการทดลอง (exp_model_search.py) และประตูตรวจของ retrain (ระดับคำทายไม่แย่ลง)
+# ผล 2026-11-12 : G95_H24 ผ่าน ; B7_H24, B7_P_H24, G95_P_H24 AUC ดีขึ้นแต่ระดับ "ขึ้นแรง/ขึ้น" แม่นน้อยลง จึงยังไม่ใช้ ; 48 ชม. ไม่ดีขึ้น
+OUTLOOK_V2_KEYS = ("G95_H24",)
 OUTLOOK_SMALL, OUTLOOK_BIG = 0.10, 0.40   # บาท/ลิตร: ขยับ >= SMALL นับเป็นขึ้น/ลง ; >= BIG นับเป็น "แรง"
 OUTLOOK_MIN_P = 0.50               # โอกาสขั้นต่ำที่จะทายว่าขึ้น/ลง (ต่ำกว่านี้ = ยังไม่ชัดเจน ไม่ฝืนทาย)
 OUTLOOK_STRONG_P = 0.30            # โอกาสขยับ >= BIG ขั้นต่ำที่จะเรียก "แรง"

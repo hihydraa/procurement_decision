@@ -60,6 +60,12 @@ def merge_increment(kind: str, base: pd.DataFrame, inc):
     new = inc[_times(inc, kind) > cut]
     if new.empty:
         return base, 0
+    if kind == "prices" and "msg_date" in base.columns and "msg_date" not in new.columns:
+        # ฟีดในชีทไม่มี msg_date/msg_time : ใช้เวลาโพสต์ (posted) ถ้ามี ไม่งั้นใช้เวลามีผล (ประมาณ) — ฟีเจอร์ชุด v2 ต้องรู้ว่าราคาถูกโพสต์เมื่อไร
+        new = new.copy()
+        eff = pd.to_datetime(new["effective"], errors="coerce")
+        posted = pd.to_datetime(new["posted"], errors="coerce").fillna(eff) if "posted" in new.columns else eff
+        new["msg_date"], new["msg_time"] = posted.dt.strftime("%Y-%m-%d"), posted.dt.strftime("%H:%M")
     cols = [c for c in base.columns if c in new.columns]
     return pd.concat([base, new[cols]], ignore_index=True), len(new)
 
@@ -190,6 +196,12 @@ def merge_models(old_params: dict, old_summary: dict, new_params: dict, new_summ
         if group == "outlook_results":
             params.setdefault("outlook", {**{k: v for k, v in new_params["outlook"].items() if k != "models"}, "models": {}})
             params["outlook"]["models"][key] = new_params["outlook"]["models"][key]
+            for extra in ("feature_set", "models_v1"):                 # ชุดฟีเจอร์ของ key ต้องตามโมเดลที่รับเข้ามาเสมอ (v2 เวกเตอร์ยาวกว่า)
+                val = (new_params["outlook"].get(extra) or {}).get(key)
+                if val is not None:
+                    params["outlook"].setdefault(extra, {})[key] = val
+                else:
+                    (params["outlook"].get(extra) or {}).pop(key, None)
             summary.setdefault(group, {})[key] = new_summary[group][key]
             outlook_changed = True
             continue
