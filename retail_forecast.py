@@ -125,6 +125,89 @@ def signal_vector(f: dict) -> np.ndarray:
     return np.array(out)
 
 
+SIGNAL_MODEL_FILE = "retail_signal_model.json"
+LONG_HISTORY_FILE = "data/eppo_daily_long.csv"
+SIGNAL_MAX_AGE_H = 12.0     # ฟีดสัญญาณต้องมีข้อความใหม่ภายในกี่ชั่วโมงก่อนเวลาตัด จึงถือว่าใช้ได้
+
+
+def long_history(eppo: pd.DataFrame, path: str = None) -> pd.DataFrame:
+    """ต่อประวัติราคาจากไฟล์โครงสร้างราคา EPPO (ตั้งแต่ปลายปี 2023) ไว้หน้าข้อมูลในชีท — ใช้เฉพาะวันที่ก่อนวันแรกของชีท จึงไม่ทับค่าในชีท
+    เหตุผล : ประวัติสั้น (ตั้งแต่ มี.ค. 2026) ทำให้ความถี่ที่ปลีกตาม WS สูงเกินจริง (ดูผลรอบ 2 ใน exp_retail_search.py)"""
+    import os
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), LONG_HISTORY_FILE)
+    try:
+        old = pd.read_csv(path, parse_dates=["day"])
+    except (OSError, ValueError):
+        return eppo
+    if eppo is None or eppo.empty:
+        return old
+    old = old[old.day < eppo.day.min()]
+    cols = [c for c in eppo.columns if c in old.columns]
+    return pd.concat([old[cols], eppo], ignore_index=True).sort_values(["fuel", "day"]).reset_index(drop=True)
+
+
+def fit_signal_model(tables, eppo: pd.DataFrame, fuel: str, last_signal_day: pd.Timestamp) -> dict | None:
+    """ฝึกโลจิสติกส์ 2 ตัว (ขึ้น/ลง >= MOVE) จากคู่วันติดกันของราคาปลีก + สัญญาณ 20:30 ของวันก่อน"""
+    import model as M
+    g = eppo[eppo.fuel == fuel].drop_duplicates("day", keep="last").set_index("day").sort_index()
+    X, y, days = [], [], []
+    for day, r in g.iterrows():
+        nxt = day + pd.Timedelta(days=1)
+        if nxt not in g.index or day > last_signal_day:
+            continue
+        X.append(signal_vector(signal_features(tables, fuel, day)))
+        y.append(float(g.retail[nxt] - r.retail))
+        days.append(day)
+    if len(y) < 100:
+        return None
+    X, y = np.vstack(X), np.array(y)
+    yu, yd = (y >= MOVE).astype(float), (y <= -MOVE).astype(float)
+    if not (0 < yu.sum() < len(y) and 0 < yd.sum() < len(y)):
+        return None
+    return {"up": M.fit_logistic(X, yu), "down": M.fit_logistic(X, yd), "n": int(len(y)), "n_up": int(yu.sum()), "n_down": int(yd.sum()),
+            "from": str(min(days).date()), "to": str(max(days).date())}
+
+
+def signals_fresh(tables, asof: pd.Timestamp) -> bool:
+    """ฟีดสัญญาณ (ประกาศปรับราคา / MOPS ปิด / กองทุน) มีข้อความภายใน SIGNAL_MAX_AGE_H ก่อน asof หรือไม่"""
+    newest = [df.ts[df.ts <= asof].max() for df in (tables.headsup, tables.mops_close, tables.fund) if not df.empty and (df.ts <= asof).any()]
+    return bool(newest) and (asof - max(newest)) <= pd.Timedelta(hours=SIGNAL_MAX_AGE_H)
+
+
+def signal_forecast(model: dict, tables, fuel: str, target_day: pd.Timestamp) -> dict | None:
+    """ความน่าจะเป็นของปลีกวันเป้าหมายจากสัญญาณคืนก่อน (บันทึกคู่ขนาน ยังไม่ใช้แสดงผล) ; None ถ้าไม่มีโมเดล/ฟีดไม่สด"""
+    import model as M
+    m = (model or {}).get(fuel)
+    eve = pd.Timestamp(target_day).normalize() - pd.Timedelta(days=1)
+    asof = eve + pd.Timedelta(hours=SIGNAL_HOUR)
+    if not m or not signals_fresh(tables, asof):
+        return None
+    x = signal_vector(signal_features(tables, fuel, eve))
+    pu, pd_ = float(M.predict_proba(m["up"], x)[0]), float(M.predict_proba(m["down"], x)[0])
+    if pu + pd_ > 0.98:
+        k = 0.98 / (pu + pd_)
+        pu, pd_ = pu * k, pd_ * k
+    p = {"ลง": pd_, "นิ่ง": 1.0 - pu - pd_, "ขึ้น": pu}
+    return {"p_down": pd_, "p_flat": p["นิ่ง"], "p_up": pu, "call": decide(p)}
+
+
+def main(argv):
+    """python retail_forecast.py fit <data_dir ของ jobber> [eppo_daily.csv] → เขียน retail_signal_model.json"""
+    import json
+    import fit_model as F
+    _, tables = F.load(argv[1])
+    eppo = pd.read_csv(argv[2] if len(argv) > 2 else LONG_HISTORY_FILE, parse_dates=["day"])
+    last = tables.headsup.ts.max().normalize() - pd.Timedelta(days=1)
+    out = {"features": list(SIGNAL_FEATURES), "move": MOVE, "signal_hour": SIGNAL_HOUR}
+    for fuel in ("B7", "G95"):
+        m = fit_signal_model(tables, eppo, fuel, last)
+        if m:
+            out[fuel] = m
+            print(f"{fuel}: n={m['n']} ({m['from']} ถึง {m['to']}) ขึ้น {m['n_up']} ลง {m['n_down']} ; w ขึ้น {np.round(m['up']['w'], 2).tolist()} ; w ลง {np.round(m['down']['w'], 2).tolist()}")
+    with open(SIGNAL_MODEL_FILE, "w", encoding="utf-8") as fh:
+        json.dump(out, fh, ensure_ascii=False, indent=1)
+
+
 def outcome(eppo: pd.DataFrame, fuel: str, target_day: pd.Timestamp):
     """(ปลีกเปลี่ยนกี่บาท, ชนิด) ของวันเป้าหมายเทียบวันก่อน ; None ถ้ายังไม่มีข้อมูลวันนั้น"""
     g = eppo[eppo.fuel == fuel].drop_duplicates("day", keep="last").set_index("day").retail
@@ -133,3 +216,9 @@ def outcome(eppo: pd.DataFrame, fuel: str, target_day: pd.Timestamp):
         return None
     d = float(g[t] - g[t - pd.Timedelta(days=1)])
     return round(d, 2), classify(d)
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) >= 3 and sys.argv[1] == "fit":
+        main(sys.argv[1:])
