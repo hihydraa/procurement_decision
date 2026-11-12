@@ -304,20 +304,81 @@ def summary_lines(rows: list) -> list:
 
 # ---------- พยากรณ์ราคาปลีก (ทดลอง ดู retail_forecast.py) ----------
 RETAIL_COLUMNS = ["card_id", "asof", "round", "fuel", "target_day", "retail_base", "p_down", "p_flat", "p_up", "call", "size_text", "size_med",
-                  "n_hist", "dow_scale", "outcome_dretail", "outcome_cls", "right", "filled_at"]
-RETAIL_LAST = "R"
-R_OUT_FROM = RETAIL_COLUMNS.index("outcome_dretail")
+                  "n_hist", "dow_scale", "outcome_dretail", "outcome_cls", "right", "filled_at",
+                  "sig_p_down", "sig_p_flat", "sig_p_up", "sig_call", "sig_note"]       # sig_* = โมเดลสัญญาณ Jobber บันทึกคู่ขนาน (ยังไม่ใช้แสดงผล)
+R_OUT_FROM, R_OUT_TO = RETAIL_COLUMNS.index("outcome_dretail"), RETAIL_COLUMNS.index("filled_at")
+RETAIL_OUT_LAST = col_letter(R_OUT_TO)          # คอลัมน์สุดท้ายของช่วงผลจริง (R) — คงตำแหน่งเดิม คอลัมน์ sig_* ต่อท้าย
+RETAIL_LAST = col_letter(len(RETAIL_COLUMNS) - 1)
+SIG_KEYS = ("sig_p_down", "sig_p_flat", "sig_p_up", "sig_call", "sig_note")
+
+
+def load_signal_tables():
+    """ฟีดสัญญาณ Jobber จากชีท (แท็บที่ ingest.py คัดลอกไว้) สำหรับโมเดลปลีกคู่ขนาน ; อ่านไม่ได้/คอลัมน์ไม่ครบ = ตารางว่าง"""
+    import urllib.parse
+    import signals as S
+
+    def feed(name, need):
+        try:
+            df = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={urllib.parse.quote(name)}")
+            df.columns = [str(c).strip() for c in df.columns]
+            return df if all(c in df.columns for c in need) else pd.DataFrame()
+        except Exception as e:                                         # noqa: BLE001 — โมเดลคู่ขนานต้องไม่ทำให้การ์ดหลักล้ม
+            print(f"[RETAIL-FC] โหลดฟีด {name} ไม่สำเร็จ: {e}")
+            return pd.DataFrame()
+
+    return S.Tables(headsup=feed(TABS["FEED_HEADSUP"], ("msg_date", "msg_time", "provider", "direction", "scope")),
+                    mops_close=feed(TABS["FEED_MOPS_CLOSE"], ("msg_date", "msg_time", "g95_chg", "diesel_chg")),
+                    fund=feed(TABS["FEED_FUND_NOTICE"], ("msg_date", "msg_time", "effective_date", "diesel_new")))
+
+
+def signal_shadow(rows: list, rnd: str, now: pd.Timestamp, tables=None, model=None) -> list:
+    """เติมคอลัมน์ sig_* ให้แถวพยากรณ์ปลีก (เฉพาะรอบ 21:30 ซึ่งสัญญาณของคืนนี้ออกครบแล้ว) ; ผิดพลาดใด ๆ = เว้นว่างพร้อมเหตุผล"""
+    if not rows:
+        return rows
+    note = ""
+    if rnd != "21:30":
+        note = "รอบนี้ไม่คำนวณ (ใช้สัญญาณ 20:30)"
+    else:
+        try:
+            if model is None:
+                import json
+                import os
+                with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), RF.SIGNAL_MODEL_FILE), encoding="utf-8") as fh:
+                    model = json.load(fh)
+            tables = tables if tables is not None else load_signal_tables()
+        except Exception as e:                                         # noqa: BLE001
+            note = f"โหลดโมเดล/ฟีดไม่สำเร็จ: {e}"[:120]
+    for r in rows:
+        r.update({k: "" for k in SIG_KEYS})
+        if note:
+            r["sig_note"] = note
+            continue
+        tgt = pd.Timestamp(r["target_day"])
+        if now < tgt.normalize() - pd.Timedelta(days=1) + pd.Timedelta(hours=RF.SIGNAL_HOUR):
+            r["sig_note"] = "ยังไม่ถึงเวลาตัดสัญญาณ 20:30"
+            continue
+        try:
+            f = RF.signal_forecast(model, tables, r["fuel"], tgt)
+        except Exception as e:                                         # noqa: BLE001
+            f, r["sig_note"] = None, f"คำนวณไม่สำเร็จ: {e}"[:120]
+        if f:
+            r.update({"sig_p_down": round(f["p_down"], 3), "sig_p_flat": round(f["p_flat"], 3), "sig_p_up": round(f["p_up"], 3), "sig_call": f["call"],
+                      "sig_note": f"โมเดลสัญญาณ n={model[r['fuel']]['n']} ถึง {model[r['fuel']]['to']}"})
+        elif not r["sig_note"]:
+            r["sig_note"] = "ไม่มีโมเดลของชนิดนี้ หรือฟีดสัญญาณไม่สด"
+    return rows
 
 
 def retail_rows(cards: list, eppo_d: pd.DataFrame) -> list:
     """แถวพยากรณ์ปลีกต่อการ์ด (ใช้ความน่าจะเป็น WS ของการ์ดเป็นอินพุต) ; ข้ามถ้าประวัติไม่พอ"""
     out = []
+    hist = RF.long_history(eppo_d)                    # ประวัติยาว (ไฟล์ EPPO ตั้งแต่ปลายปี 2023 + ชีท) สำหรับความถี่ที่ปลีกตาม WS
     for c in cards:
         if c["p_down"] == "" or c["p_flat"] == "" or c["p_up"] == "":
             continue
         tgt = pd.Timestamp(c["target_day"])
         base = eppo_d[(eppo_d.fuel == c["fuel"]) & (eppo_d.day < tgt)].sort_values("day")
-        f = RF.forecast(eppo_d, c["fuel"], {"ลง": float(c["p_down"]), "นิ่ง": float(c["p_flat"]), "ขึ้น": float(c["p_up"])}, tgt,
+        f = RF.forecast(hist, c["fuel"], {"ลง": float(c["p_down"]), "นิ่ง": float(c["p_flat"]), "ขึ้น": float(c["p_up"])}, tgt,
                         float(base.retail.iloc[-1]) if len(base) else None)
         if f is None:
             continue
@@ -342,6 +403,9 @@ def write_retail_log(tok, rows: list, eppo_d: pd.DataFrame):
         print(f"[RETAIL-FC] created tab {tab}")
     values = sheets_get(tok, SHEET_ID, f"{tab}!A1:{RETAIL_LAST}20000")
     head = values[0] if values else RETAIL_COLUMNS
+    if values and len(head) < len(RETAIL_COLUMNS) and list(head) == RETAIL_COLUMNS[:len(head)]:      # แท็บเดิมยังไม่มีคอลัมน์ sig_* → ต่อหัวตาราง
+        sheets_update(tok, SHEET_ID, f"{tab}!A1", [RETAIL_COLUMNS])
+        head = RETAIL_COLUMNS
     have_rows = [dict(zip(head, r + [""] * (len(head) - len(r)))) for r in values[1:]]
     have = {str(r.get("card_id", "")) for r in have_rows}
     add = [r for r in rows if r["card_id"] not in have]
@@ -359,7 +423,7 @@ def write_retail_log(tok, rows: list, eppo_d: pd.DataFrame):
                 call = r.get("call", "")
                 right = "" if call in ("", "ไม่ชัด") else int(call == cls)
                 upd = {"outcome_dretail": d, "outcome_cls": cls, "right": right, "filled_at": datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y-%m-%d %H:%M")}
-                sheets_update(tok, SHEET_ID, f"{tab}!{col_letter(R_OUT_FROM)}{i + 2}:{RETAIL_LAST}{i + 2}", [[upd[c] for c in RETAIL_COLUMNS[R_OUT_FROM:]]])
+                sheets_update(tok, SHEET_ID, f"{tab}!{col_letter(R_OUT_FROM)}{i + 2}:{RETAIL_OUT_LAST}{i + 2}", [[upd[c] for c in RETAIL_COLUMNS[R_OUT_FROM:R_OUT_TO + 1]]])
                 have_rows[i].update(upd)
                 filled += 1
     print(f"[RETAIL-FC] outcomes filled: {filled}")
@@ -425,9 +489,11 @@ def main(argv=None):
     for c in cards:
         print(c["card_text"])
         print("-" * 60)
-    rrows = retail_rows(cards, eppo_d)
+    rrows = signal_shadow(retail_rows(cards, eppo_d), rnd, now)
     for r in rrows:
         print(retail_text(r))
+        if r.get("sig_call") or r.get("sig_note"):
+            print(f"   [คู่ขนาน] โมเดลสัญญาณ: {r.get('sig_call') or '-'} ลง {r.get('sig_p_down')} / ขึ้น {r.get('sig_p_up')} ({r.get('sig_note')})")
     if dry:
         print("[CARD] --dry : ไม่เขียนชีท")
         return
