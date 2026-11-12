@@ -90,6 +90,44 @@ class Horizon48(unittest.TestCase):
         self.assertIsNone(r["dir"])
 
 
+class Reasons(unittest.TestCase):
+    def test_classify(self):
+        self.assertEqual(ps.classify_reason("2 ราย ประกาศ 'มีปรับขึ้น' วันนี้ → เสี่ยงราคาขึ้น"), "up")
+        self.assertEqual(ps.classify_reason("MOPS ปิดล่าสุด -5.00 USD/bbl → โน้มราคาลง"), "down")
+        self.assertEqual(ps.classify_reason("ค่าการตลาดเทียบค่ากลาง +0.06 (EPPO 11/11)"), "note")
+
+    def test_card_reason_items(self):
+        s = ("MOPS ดีเซล +1.67 (Δ1D) -10.89 (Δ3D) ณ 11/11 · WTI Δ1D -1.44 · ประกาศกองทุนดีเซลมีผลพรุ่งนี้ +0.37 บาท/ลิตร (ลดอุดหนุน → ดันต้นทุนขึ้น)"
+             " · ค่าการตลาดเทียบค่ากลาง +0.06 (EPPO 11/11) · หมายเหตุ: MOPS ซ้ำ")
+        kinds = [k for k, _ in ps.card_reason_items(s)]
+        self.assertEqual(kinds, ["down", "down", "up", "note", "note"])
+
+    def test_small_moves_are_notes(self):
+        k = [k for k, _ in ps.card_reason_items("MOPS G95 +0.10 (Δ1D) +0.20 (Δ3D) ณ 11/11 · WTI Δ1D -0.20")]
+        self.assertEqual(k, ["note", "note"])
+
+    def test_collect_dedup_and_sources(self):
+        d = {"horizons": [{"hours": 24, "tier": "DOWN", "grade": "กลาง", "reasons": ["MOPS ปิดล่าสุด -5.00 USD/bbl → โน้มราคาลง"]}]}
+        items = ps.collect_reasons(d, {"reasons": "WTI Δ1D -1.44 · ค่าการตลาดเทียบค่ากลาง +0.06 (EPPO 11/11)"})
+        self.assertEqual([(k, s) for k, _, s in items], [("down", "ตลาด"), ("down", "การ์ด"), ("note", "การ์ด")])
+
+    def test_page_shows_reasons_and_main_reason(self):
+        d = {"horizons": [{"hours": 24, "tier": "DOWN", "label": "x", "grade": "กลาง", "until": pd.Timestamp("2026-11-12 20:30"),
+                           "reasons": ["MOPS ปิดล่าสุด -5.00 USD/bbl → โน้มราคาลง"]}]}
+        card = {"call": "ลง", "confidence": "กลาง", "lo": -1, "hi": -0.5, "p_down": .75, "p_flat": .1, "p_up": .15, "timing": "", "recommendation": "ชะลอการสั่งซื้อ",
+                "reasons": "WTI Δ1D -1.44", "target_dt": pd.Timestamp("2026-11-12"), "asof_dt": pd.Timestamp("2026-11-11 21:30")}
+        html = ps._forecast_card("ดีเซล", d, card)
+        self.assertIn("ทำไมถึงพยากรณ์แบบนี้", html)
+        self.assertIn("ชี้ขึ้น 0 ข้อ · ชี้ลง 2 ข้อ", html)
+        self.assertIn("MOPS ปิดล่าสุด", html)
+        self.assertIn("เหตุผลหลัก", ps._main_reasons(ps.collect_reasons(d, card), "ลง"))
+        self.assertEqual(ps._main_reasons([], "ลง"), "")
+        self.assertIn("ชี้ขึ้น:", ps._main_reasons([("up", "A", "ตลาด"), ("down", "B", "การ์ด")], None))
+
+    def test_no_reasons_message(self):
+        self.assertIn("ไม่มีปัจจัยที่เด่นพอจะชี้ทิศ ระบบจึงไม่ฟันธง", ps._why_block([]))
+
+
 class Render(unittest.TestCase):
     def outlook(self):
         h = lambda hrs, tier: {"hours": hrs, "tier": tier, "label": "x", "grade": "กลาง", "until": pd.Timestamp("2026-11-12 20:30")}
