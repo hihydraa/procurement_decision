@@ -95,6 +95,49 @@ def _reason_lines(fuel: str, f: dict, model_rise: dict, model_fall: dict) -> lis
     return [t for _, t in items[:4]]
 
 
+def _reason_lines_v2(fuel: str, f: dict, model_rise: dict, model_fall: dict) -> list:
+    """เหตุผลของโมเดลชุด v2 : ชุดเดิม (กรองทิศให้สมเหตุสมผลเหมือนเดิม) + ปัจจัยจากราคา เรียงตามแรงที่ดัน (ขึ้น − ลง) สูงสุด 5 ข้อ"""
+    x = M.vectorize_v2(f)
+    cr = np.array(model_rise["w"]) * ((x - np.array(model_rise["mu"])) / np.array(model_rise["sd"]))
+    cf = np.array(model_fall["w"]) * ((x - np.array(model_fall["mu"])) / np.array(model_fall["sd"]))
+    push = dict(zip(M.FEATURES_V2, cr - cf))
+    g = lambda k: (np.nan if f.get(k) is None else float(f.get(k)))
+    name = FUEL_TH[fuel]
+    ok = lambda v, thr: not np.isnan(v) and abs(v) >= thr
+    cand = []
+    pend_push = push["pend"] + push["pend_pos"] + push["pend_neg"] + push["pend_up_n"] + push["pend_dn_n"]
+    if ok(g("pend"), 0.05):
+        cand.append((pend_push, f"ผู้ค้าประกาศราคาล่วงหน้าแล้ว: ราคาต่ำสุดของตลาดจะ{'ขึ้น' if g('pend') > 0 else 'ลง'} {abs(g('pend')):.2f} บาท/ลิตร", g("pend")))
+    elif (f.get("pend_up_n") or 0) > 0 or (f.get("pend_dn_n") or 0) > 0:
+        n_up, n_dn = int(f.get("pend_up_n") or 0), int(f.get("pend_dn_n") or 0)
+        cand.append((pend_push, f"มีผู้ค้าประกาศราคาล่วงหน้าแล้ว (ขึ้น {n_up} / ลง {n_dn} คลัง) แต่ราคาต่ำสุดของตลาดยังไม่เปลี่ยน", n_up - n_dn))
+    if ok(g("mom1"), 0.10):
+        cand.append((push["mom1"], f"ราคา{name} ขยับ {g('mom1'):+.2f} บาท/ลิตร ใน 24 ชม. ที่ผ่านมา", None))
+    if ok(g("mom3"), 0.20):
+        cand.append((push["mom3"] + push["mom5"] + push["mom10"], f"ราคา{name} ขยับ {g('mom3'):+.2f} บาท/ลิตร ใน 3 วัน", None))
+    if ok(g("intra"), 0.10):
+        cand.append((push["intra"], f"วันนี้ราคาขยับ {g('intra'):+.2f} บาท/ลิตร ตั้งแต่เช้า", None))
+    if ok(g("close_5"), 2.0):
+        cand.append((push["close_5"] + push["close_10"], f"MOPS 5 ครั้งล่าสุดรวม {g('close_5'):+.2f} USD/bbl", g("close_5")))
+    if ok(g("disp"), 0.30):
+        cand.append((push["disp"], f"ราคาต่ำสุดต่ำกว่าค่ากลางของตลาด {g('disp'):.2f} บาท/ลิตร", None))
+    dow_name = {0: ("dow_mon", "วันจันทร์"), 4: ("dow_fri", "วันศุกร์"), 5: ("dow_sat", "วันเสาร์"), 6: ("dow_sun", "วันอาทิตย์")}.get(f.get("dow"))
+    if dow_name:
+        cand.append((push[dow_name[0]], f"{dow_name[1]} (รูปแบบการปรับราคาตามวันในสัปดาห์)", None))
+    items = []
+    for p_, text, expect in cand:
+        if abs(p_) < 0.05:
+            continue
+        if expect is not None and expect != 0 and (expect > 0) != (p_ > 0):       # ทิศสวนสามัญสำนึก (เช่น ประกาศขึ้นแต่โมเดลดันลง) ไม่แสดง
+            continue
+        items.append((abs(p_), f"{text} → {'เสี่ยงราคาขึ้น' if p_ > 0 else 'โน้มราคาลง'}"))
+    items.sort(reverse=True)
+    base = _reason_lines(fuel, f, {k: (v[:len(M.FEATURES)] if isinstance(v, list) else v) for k, v in model_rise.items()},
+                         {k: (v[:len(M.FEATURES)] if isinstance(v, list) else v) for k, v in model_fall.items()})
+    out = [t for _, t in items[:3]] + base[:3]
+    return out[:5]
+
+
 def _evidence(summary, key: str, action: str, group: str = "results"):
     """สถิติย้อนหลังของคำแนะนำชนิดนี้ในช่วงทดสอบที่ไม่เคยใช้จูนเกณฑ์"""
     try:
@@ -436,14 +479,25 @@ def decide_outlook(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params, 
         mm = cfg["models"].get(key)
         if not mm:
             continue
-        p = {k: float(M.predict_proba(mm[k], x)[0]) for k in ("r10", "f10", "r40", "f40")}
+        fx, xx, fset = f, x, "v1"
+        if (cfg.get("feature_set") or {}).get(key) == "v2":
+            if tables.has_prices(fuel, ref):
+                fx = S.build_features_v2(ref, tables, fuel, hz)
+                xx, fset = M.vectorize_v2(fx), "v2"
+            elif (cfg.get("models_v1") or {}).get(key):          # ฟีดราคาไม่พร้อม → ใช้โมเดลชุดเดิมของ key นี้
+                mm = cfg["models_v1"][key]
+                out["note"] = "ฟีดราคา Jobber ไม่พร้อม — ใช้โมเดลชุดเดิม (ไม่มีข้อมูลราคาที่ประกาศล่วงหน้า)"
+            else:
+                continue
+        p = {k: float(M.predict_proba(mm[k], xx)[0]) for k in ("r10", "f10", "r40", "f40")}
         tier = M.classify_outlook(p["r10"], p["f10"], p["r40"], p["f40"])
         ev = _outlook_evidence(summary, key, tier)
         until = ref + pd.Timedelta(hours=hz)
-        reasons = _reason_lines(fuel, f, mm["r10"], mm["f10"])            # ปัจจัยจริงที่ดันทิศทางของโมเดลนี้ (เรียงตามแรง)
+        reasons = (_reason_lines_v2(fuel, fx, mm["r10"], mm["f10"]) if fset == "v2"
+                   else _reason_lines(fuel, f, mm["r10"], mm["f10"]))        # ปัจจัยจริงที่ดันทิศทางของโมเดลนี้ (เรียงตามแรง)
         if f["trend"] is None or (isinstance(f["trend"], float) and np.isnan(f["trend"])):
             reasons.append("ยังไม่มี Trend Mops ของวันนี้ — ความมั่นใจต่ำกว่าปกติ")
-        out["horizons"].append({"reasons": reasons,
+        out["horizons"].append({"reasons": reasons, "feature_set": fset,
             "hours": hz, "tier": tier, "label": M.OUTLOOK_TIERS[tier], "headline": f"{OUTLOOK_HEADLINE[tier]} ภายใน {hz} ชม.",
             "size": OUTLOOK_SIZE.get(tier), "until": until, "p": p, "grade": (ev or {}).get("grade", "ต่ำ"), "evidence": ev,
             "base_up": ((summary or {}).get("outlook_results", {}).get(key) or {}).get("base_up10"),

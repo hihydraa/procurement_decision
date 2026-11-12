@@ -30,8 +30,9 @@ STEP = 30
 
 def load(data_dir):
     rd = lambda n: pd.read_csv(os.path.join(data_dir, n))
-    return (rd("prices.csv"), S.Tables(intraday=rd("trend.csv"), headsup=rd("headsup.csv"),
-                                       mops_close=rd("mops.csv"), fund=rd("fund.csv")))
+    prices = rd("prices.csv")
+    return (prices, S.Tables(intraday=rd("trend.csv"), headsup=rd("headsup.csv"),
+                             mops_close=rd("mops.csv"), fund=rd("fund.csv")).set_prices(prices))
 
 
 def auc(y, p):
@@ -192,7 +193,7 @@ def fit_dispatch_into(book, tables, params, summary):
                       f"holdout gain={res['holdout_policy']['total_gain_thb_per_litre']:+.1f} (n={res['holdout_policy']['n_days']})")
 
 
-def build_outlook_dataset(book, tables, fuel, hz, ref_hour=M.OUTLOOK_REF_HOUR):
+def build_outlook_dataset(book, tables, fuel, hz, ref_hour=M.OUTLOOK_REF_HOUR, v2=False):
     """ตัดสิน ณ ref_hour ของวัน d ; y = ราคาต่ำสุดตลาด(ref + hz ชม.) - ราคา(ref) — ไม่ผูกกับเวลาถึงคลังของสาขาใด"""
     days = pd.date_range(tables.headsup.ts.min().normalize() + pd.Timedelta(days=10),
                          tables.headsup.ts.max().normalize() - pd.Timedelta(days=max(M.OUTLOOK_HORIZONS) // 24 + 1))
@@ -203,7 +204,8 @@ def build_outlook_dataset(book, tables, fuel, hz, ref_hour=M.OUTLOOK_REF_HOUR):
     for d, a, b in zip(days, p0, p1):
         if np.isnan(a) or np.isnan(b):
             continue
-        f = S.build_features(d + pd.Timedelta(hours=ref_hour), tables, fuel)
+        asof = d + pd.Timedelta(hours=ref_hour)
+        f = S.build_features_v2(asof, tables, fuel, hz) if v2 else S.build_features(asof, tables, fuel)
         f.update({"date": d, "y": b - a})
         rows.append(f)
     return pd.DataFrame(rows)
@@ -246,8 +248,11 @@ def fit_outlook_into(book, tables, params, summary):
     for fuel, hz, tag, ref_hour in [(f_, h_, t_, r_) for f_ in S.FUELS for t_, r_ in (("", M.OUTLOOK_REF_HOUR), ("P_", M.OUTLOOK_REF_PM)) for h_ in M.OUTLOOK_HORIZONS]:
         if True:
             key = f"{fuel}_{tag}H{hz}"
-            df = build_outlook_dataset(book, tables, fuel, hz, ref_hour)
-            X = np.vstack([M.vectorize(r) for r in df.to_dict("records")])
+            v2 = key in M.OUTLOOK_V2_KEYS and not tables.known(fuel).empty           # ชุด v2 ต้องมีตารางราคาพร้อมเวลาโพสต์
+            df = build_outlook_dataset(book, tables, fuel, hz, ref_hour, v2=v2)
+            recs = df.to_dict("records")
+            X1 = np.vstack([M.vectorize(r) for r in recs])
+            X = np.vstack([M.vectorize_v2(r) for r in recs]) if v2 else X1
             y = df.y.to_numpy()
             tg = {"r10": (y >= M.OUTLOOK_SMALL), "f10": (y <= -M.OUTLOOK_SMALL), "r40": (y >= M.OUTLOOK_BIG), "f40": (y <= -M.OUTLOOK_BIG)}
             tg = {k: v.astype(float) for k, v in tg.items()}
@@ -261,6 +266,13 @@ def fit_outlook_into(book, tables, params, summary):
                 "auc_r10": auc(tg["r10"][ok], P["r10"][ok]), "auc_f10": auc(tg["f10"][ok], P["f10"][ok]),
                 "tiers": outlook_tier_stats(yo, tiers)}
             params["outlook"]["models"][key] = {k: M.fit_logistic(X, v) for k, v in tg.items()}
+            params["outlook"].get("feature_set", {}).pop(key, None)
+            params["outlook"].get("models_v1", {}).pop(key, None)
+            if v2:      # เก็บโมเดลชุดเดิมไว้ใช้เมื่อฟีดราคาไม่พร้อม (วันทดสอบชุดเดียวกัน)
+                params["outlook"].setdefault("feature_set", {})[key] = "v2"
+                params["outlook"].setdefault("models_v1", {})[key] = {k: M.fit_logistic(X1, v) for k, v in tg.items()}
+                P1 = {k: _wf_proba(X1, tg[k]) for k in ("r10", "f10")}
+                summary["outlook_results"][key].update({"feature_set": "v2", "auc_r10_v1": auc(tg["r10"][ok], P1["r10"][ok]), "auc_f10_v1": auc(tg["f10"][ok], P1["f10"][ok])})
             t = summary["outlook_results"][key]["tiers"]
             print(f"[outlook {key}] n={len(df)} oos={ok.sum()} AUC r10={summary['outlook_results'][key]['auc_r10']:.2f} f10={summary['outlook_results'][key]['auc_f10']:.2f} | "
                   + " ".join(f"{M.OUTLOOK_TIERS[c]}:{t[c]['n']}" + (f"({t[c]['right10']:.0%}/{t[c]['wrong10']:.0%},{t[c]['grade']})" if t[c].get('grade') else "") for c in M.OUTLOOK_TIERS))

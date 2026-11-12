@@ -1563,6 +1563,13 @@ def main():
         fund=load_feed(TABS_FEED["fund"], warnings),
     )
     try:
+        price_feed = load_sheet_by_name("Entry_Prices")             # ราคา Jobber (ฟีดจาก PriceLog) : ฟีเจอร์ชุด v2 ของแนวโน้ม + ทวนสอบสดกับคำพยากรณ์
+        if "effective" not in price_feed.columns:                    # gviz ส่งชีทแรกมาแทนเมื่อไม่มีแท็บ
+            price_feed = pd.DataFrame()
+    except Exception:
+        price_feed = pd.DataFrame()
+    tables.set_prices(price_feed)
+    try:
         decision_log = load_sheet_by_name(TABS_FEED["decision_log"])
     except Exception:
         decision_log = pd.DataFrame()            # ยังไม่มีบันทึกคำแนะนำ — ไม่ใช่ข้อผิดพลาด
@@ -1611,7 +1618,7 @@ def main():
             outlook_log = pd.DataFrame()
     except Exception:
         outlook_log = pd.DataFrame()
-    write_outlook_files(outlook, M.model_version(params), extras=outlook_log_extras(tables, params, summary, asof, outlook))
+    write_outlook_files(outlook, M.outlook_version(params), extras=outlook_log_extras(tables, params, summary, asof, outlook))
     dispatch_html = build_outlook_section(outlook, asof, build_outlook_live(outlook_log, summary)) + dispatch_html
 
     try:
@@ -1620,10 +1627,6 @@ def main():
             cards_raw = pd.DataFrame()
     except Exception:
         cards_raw = pd.DataFrame()
-    try:
-        price_feed = load_sheet_by_name("Entry_Prices")             # ราคาจอบเบอร์ล่าสุด (ฟีดจาก PriceLog) ใช้ทวนสอบสดกับคำพยากรณ์
-    except Exception:
-        price_feed = pd.DataFrame()
     try:
         retail_raw = load_sheet_by_name("RetailFcLog")             # พยากรณ์ราคาปลีก (ทดลอง) ยังไม่มีแท็บ = ไม่ใช่ข้อผิดพลาด
         if "card_id" not in retail_raw.columns:

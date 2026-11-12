@@ -46,7 +46,8 @@ class PricesFeedTest(unittest.TestCase):
                   ["ไออาร์", "ชุมพร", "B7", 40.0, d, "10:30", ""]]               # ไม่ระบุ → เวลาโพสต์
         with mock.patch("ingest.sheets_get", return_value=values):
             out = I._prices_feed("tok")
-        self.assertEqual(out[0], ["provider", "warehouse", "fuel", "price", "effective"])
+        self.assertEqual(out[0], ["provider", "warehouse", "fuel", "price", "effective", "posted"])
+        self.assertEqual([r[5] for r in out[1:]], [f"{d} 08:08", f"{d} 17:05", f"{d} 10:30"])
         self.assertEqual([r[4] for r in out[1:]], [f"{d} 05:00", f"{(today + timedelta(days=1)).isoformat()} 05:00", f"{d} 10:30"])
 
 

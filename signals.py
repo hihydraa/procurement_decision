@@ -53,6 +53,25 @@ class Tables:
         self.fund = add_ts(f)
         if not self.fund.empty:
             self.fund["effective_date"] = pd.to_datetime(self.fund["effective_date"], errors="coerce")
+        self._prices, self._known = None, {}
+
+    def set_prices(self, prices: pd.DataFrame) -> "Tables":
+        """ผูกตารางราคา (ข้อมูลย้อนหลังหรือฟีด Entry_Prices) เพื่อใช้ฟีเจอร์ชุด v2"""
+        self._prices, self._known = prices, {}
+        return self
+
+    def known(self, fuel: str) -> "KnownPrices":
+        if fuel not in self._known:
+            self._known[fuel] = KnownPrices(self._prices, fuel)
+        return self._known[fuel]
+
+    def has_prices(self, fuel: str, asof: pd.Timestamp, max_age_h: float = 36.0) -> bool:
+        """มีราคาที่โพสต์ภายใน max_age_h ก่อน asof หรือไม่ (ฟีดราคาสดพอสำหรับชุด v2)"""
+        kp = self.known(fuel)
+        if kp.empty:
+            return False
+        snap = kp.snapshot(asof)
+        return (not snap.empty) and (asof - snap.msg.max()) <= pd.Timedelta(hours=max_age_h)
 
 
 def build_features(asof: pd.Timestamp, t: Tables, fuel: str) -> dict:
@@ -99,6 +118,94 @@ def build_features(asof: pd.Timestamp, t: Tables, fuel: str) -> dict:
             f["fund_level"] = _num(w.iloc[-1][col + "_new"])
             nxt = w[w.effective_date == day + pd.Timedelta(days=1)]
             f["fund_next"] = float((nxt[col + "_new"].map(_num) - nxt[col + "_old"].map(_num)).sum())
+    return f
+
+
+def _posted_ts(p: pd.DataFrame) -> pd.Series:
+    """เวลาที่ราคาถูก "โพสต์" : msg_date+msg_time (ข้อมูลย้อนหลัง) → posted (ฟีดในชีท) → ถ้าไม่มีทั้งคู่ใช้เวลามีผล (ประมาณ : ราคาที่ประกาศล่วงหน้าจะถูกมองว่ายังไม่รู้)"""
+    ts = pd.Series(pd.NaT, index=p.index, dtype="datetime64[ns]")
+    if "msg_date" in p.columns and "msg_time" in p.columns:
+        ts = pd.to_datetime(p["msg_date"].astype(str) + " " + p["msg_time"].astype(str), errors="coerce")
+    if "posted" in p.columns:
+        ts = ts.fillna(pd.to_datetime(p["posted"], errors="coerce"))
+    return ts.fillna(pd.to_datetime(p["effective"], errors="coerce"))
+
+
+class KnownPrices:
+    """ราคาที่ "รู้ ณ เวลา asof" ของชนิดน้ำมันหนึ่ง : ใช้เฉพาะแถวที่โพสต์ <= asof แล้วถามราคาล่าสุดต่อ (ผู้ขาย, คลัง) ณ เวลา t ใด ๆ
+    (รวมเวลาในอนาคตที่ประกาศไว้แล้ว เช่น โพสต์ 17:30 มีผล 23:59) — ต่างจาก PriceBook ที่ดูเฉพาะเวลามีผลและใช้เป็นผลจริง"""
+
+    def __init__(self, prices: pd.DataFrame, fuel: str):
+        cols = ["msg", "eff", "price", "key"]
+        if prices is None or prices.empty or not {"provider", "warehouse", "fuel", "price", "effective"}.issubset(prices.columns):
+            self.p = pd.DataFrame(columns=cols)
+        else:
+            p = prices[prices.fuel.astype(str) == fuel].copy()
+            p["msg"] = _posted_ts(p)
+            p["eff"] = pd.to_datetime(p["effective"], errors="coerce")
+            p["price"] = pd.to_numeric(p["price"], errors="coerce")
+            p = p.dropna(subset=["msg", "eff", "price"])
+            p = p[p.price.between(15, 70)]
+            p["key"] = p.provider.astype(str) + "|" + p.warehouse.astype(str)
+            self.p = p.sort_values("msg")[cols].reset_index(drop=True)
+        self.msg = self.p.msg.to_numpy(dtype="datetime64[ns]")
+
+    @property
+    def empty(self) -> bool:
+        return self.p.empty
+
+    def snapshot(self, asof: pd.Timestamp) -> pd.DataFrame:
+        n = int(np.searchsorted(self.msg, np.datetime64(asof), side="right"))
+        lo = int(np.searchsorted(self.msg, np.datetime64(asof - pd.Timedelta(days=14)), side="left"))
+        return self.p.iloc[lo:n]
+
+    @staticmethod
+    def latest(snap: pd.DataFrame, t: pd.Timestamp) -> pd.Series:
+        w = snap[(snap.eff <= t) & (snap.eff >= t - pd.Timedelta(days=MARKET_MAX_AGE_DAYS))]
+        if w.empty:
+            return pd.Series(dtype=float)
+        return w.sort_values(["eff", "msg"]).groupby("key").price.last()
+
+
+PRICE_FEATURES = ("pend", "pend_up_n", "pend_dn_n", "mom1", "mom3", "mom5", "mom10", "intra", "disp", "n_series")
+
+
+def price_features(kp: KnownPrices, asof: pd.Timestamp, hz: int) -> dict:
+    """ฟีเจอร์จากราคาที่รู้ ณ asof :
+    pend = ราคาต่ำสุดของตลาด ณ asof+hz ตามที่ประกาศไว้แล้ว − ราคาต่ำสุดตอนนี้ ; pend_up_n/dn_n = จำนวน (ผู้ขาย, คลัง) ที่ประกาศขึ้น/ลงแล้ว
+    mom1/3/5/10 = ราคาตอนนี้ − ราคาเมื่อ 1/3/5/10 วันก่อน ; intra = ราคาตอนนี้ − ราคา 06:00 วันนี้ ; disp = ค่ากลางของตลาด − ราคาต่ำสุด"""
+    out = {k: np.nan for k in PRICE_FEATURES}
+    snap = kp.snapshot(asof)
+    now = kp.latest(snap, asof)
+    if now.empty:
+        return out
+    p0 = float(now.min())
+    fut = kp.latest(snap, asof + pd.Timedelta(hours=hz))
+    out["pend"] = float(fut.min()) - p0 if len(fut) else 0.0
+    both = pd.concat([now.rename("a"), fut.rename("b")], axis=1).dropna()
+    d = both.b - both.a
+    out["pend_up_n"], out["pend_dn_n"] = int((d >= 0.05).sum()), int((d <= -0.05).sum())
+    for name, days in (("mom1", 1), ("mom3", 3), ("mom5", 5), ("mom10", 10)):
+        prev = kp.latest(snap, asof - pd.Timedelta(days=days))
+        out[name] = p0 - float(prev.min()) if len(prev) else np.nan
+    morn = kp.latest(snap, asof.normalize() + pd.Timedelta(hours=6))
+    out["intra"] = p0 - float(morn.min()) if len(morn) else np.nan
+    out["disp"] = float(now.median()) - p0
+    out["n_series"] = int(len(now))
+    return out
+
+
+def build_features_v2(asof: pd.Timestamp, t: "Tables", fuel: str, hz: int) -> dict:
+    """ฟีเจอร์ชุด v2 ของโมเดลแนวโน้ม = ชุดเดิม + ราคาที่รู้ ณ asof + ผลรวม MOPS 5/10 ครั้ง + วันในสัปดาห์ ; ต้องมี t.known(fuel)"""
+    f = build_features(asof, t, fuel)
+    f.update(price_features(t.known(fuel), asof, hz))
+    f["close_5"], f["close_10"] = np.nan, np.nan
+    if not t.mops_close.empty:
+        w = t.mops_close[t.mops_close.ts <= asof]
+        v = w[CLOSE_COL[fuel]].map(_num).dropna()
+        if len(v):
+            f["close_5"], f["close_10"] = float(v.iloc[-5:].sum()), float(v.iloc[-10:].sum())
+    f["dow"] = int(asof.dayofweek)
     return f
 
 

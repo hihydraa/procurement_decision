@@ -399,18 +399,19 @@ def effective_datetime(d: str, t: str, eff_t: str) -> datetime:
 
 
 def _prices_feed(tok):
-    """PriceLog -> Entry_Prices (provider, warehouse, fuel, price, effective) เฉพาะ FEED_DAYS_PRICES วันล่าสุด
+    """PriceLog -> Entry_Prices (provider, warehouse, fuel, price, effective, posted) เฉพาะ FEED_DAYS_PRICES วันล่าสุด
     effective = วัน/เวลาที่ราคามีผล (ดู effective_datetime)"""
     rows = col_to_dicts(sheets_get(tok, OILBOT_SHEET_ID, "PriceLog!A1:Q200000"))
     cutoff = (datetime.now(TZ) - timedelta(days=FEED_DAYS_PRICES)).strftime("%Y-%m-%d")
-    out = [["provider", "warehouse", "fuel", "price", "effective"]]
+    out = [["provider", "warehouse", "fuel", "price", "effective", "posted"]]
     for r in rows:
         d, t = cell_date(r.get("update_date")), cell_time(r.get("update_time"))
         price = r.get("price")
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", d) or d < cutoff or not isinstance(price, (int, float)):
             continue
         eff = effective_datetime(d, t, cell_time(r.get("effective_time")))
-        out.append([r.get("provider"), r.get("warehouse_name"), r.get("fuel_type"), price, eff.strftime("%Y-%m-%d %H:%M")])
+        posted = f"{d} {t[:5]}" if re.match(r"^\d{1,2}:\d{2}", str(t)) else ""       # เวลาที่ราคาถูกโพสต์ (ใช้กับฟีเจอร์ "รู้ ณ เวลาตัดสินใจ")
+        out.append([r.get("provider"), r.get("warehouse_name"), r.get("fuel_type"), price, eff.strftime("%Y-%m-%d %H:%M"), posted])
     return out
 
 
@@ -420,7 +421,7 @@ def ingest_feeds(tok):
     H_COLS = ["msg_date", "msg_time", "provider", "direction", "scope", "stated_time", "has_rate", "rates"]
     F_COLS = ["msg_date", "msg_time", "issue_no", "effective_date", "diesel_old", "diesel_new", "benzene_old", "benzene_new"]
     M_COLS = ["msg_date", "msg_time", "mops_date", "g95", "g95_chg", "diesel", "diesel_chg"]
-    P_COLS = ["provider", "warehouse", "fuel", "price", "effective"]
+    P_COLS = ["provider", "warehouse", "fuel", "price", "effective", "posted"]
     plan = [
         (TABS["FEED_INTRADAY"], I_COLS, lambda: _feed_rows(tok, "IntradayMops", I_COLS, {"msg_date": cell_date, "msg_time": cell_time})),
         (TABS["FEED_HEADSUP"], H_COLS, lambda: _feed_rows(tok, "HeadsUp", H_COLS, {"msg_date": cell_date, "msg_time": cell_time, "stated_time": cell_time})),
