@@ -152,15 +152,20 @@ class MarketEstimate(unittest.TestCase):
     def test_strong_has_open_band_and_unclear_none(self):
         s = ps.expected_change(self.h("DOWN_STRONG", 0.41))
         self.assertEqual((s["lo"], s["hi"], s["strong"]), (-0.40, None, True))
+        self.assertEqual(s["prob"], 0.1)                              # ระดับแรง ใช้โอกาสถึง 40 สต. (f40) ไม่ใช่ f10
+        u = ps.expected_change(self.h("UP_STRONG", 0.45, p={"r10": 0.7, "f10": 0.02, "r40": 0.31, "f40": 0.01}))
+        self.assertEqual(u["prob"], 0.31)
         self.assertIsNone(ps.expected_change(self.h("UNCLEAR")))
 
     def test_line_text(self):
         line = ps._est_line(self.h("DOWN"))
-        for t in ("-0.22", "ช่วง -0.10 ถึง -0.40", "โอกาสตามโมเดล 62%", "113 ครั้ง"):
+        for t in ("-0.22", "ถ้าเป็นไปตามที่ทาย -0.10 ถึง -0.40", "ที่ขยับถึง 10 สต. 62%", "113 ครั้ง"):
             self.assertIn(t, line)
-        self.assertIn("ตั้งแต่ -0.40 ลงไป", ps._est_line(self.h("DOWN_STRONG", 0.41)))
+        strong = ps._est_line(self.h("DOWN_STRONG", 0.41))
+        self.assertIn("ตั้งแต่ -0.40 ลงไป", strong)
+        self.assertIn("ที่ขยับถึง 40 สต. 10%", strong)
         self.assertEqual(ps._est_line(self.h("UNCLEAR")), "")
-        self.assertIn("ช่วง", ps._est_line(self.h("DOWN", avg=None)))      # ไม่มีค่าเฉลี่ย → ยังแสดงช่วงและโอกาส
+        self.assertIn("ถ้าเป็นไปตามที่ทาย", ps._est_line(self.h("DOWN", avg=None)))      # ไม่มีค่าเฉลี่ย → ยังแสดงช่วงและโอกาส
 
     def test_card_shows_estimate_for_market(self):
         d = {"horizons": [self.h("DOWN")]}
