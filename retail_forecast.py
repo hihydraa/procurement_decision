@@ -126,6 +126,8 @@ def signal_vector(f: dict) -> np.ndarray:
 
 
 SIGNAL_MODEL_FILE = "retail_signal_model.json"
+WS_SIGNAL_MODEL_FILE = "ws_signal_model.json"       # เป้า = ราคาขายส่ง EPPO ; ฝึกเฉพาะปี 2026 (กลไกกองทุนต่างจากปีก่อน ดู exp_ws_search.py)
+WS_TRAIN_FROM = "2026-01-01"
 LONG_HISTORY_FILE = "data/eppo_daily_long.csv"
 SIGNAL_MAX_AGE_H = 12.0     # ฟีดสัญญาณต้องมีข้อความใหม่ภายในกี่ชั่วโมงก่อนเวลาตัด จึงถือว่าใช้ได้
 
@@ -146,17 +148,19 @@ def long_history(eppo: pd.DataFrame, path: str = None) -> pd.DataFrame:
     return pd.concat([old[cols], eppo], ignore_index=True).sort_values(["fuel", "day"]).reset_index(drop=True)
 
 
-def fit_signal_model(tables, eppo: pd.DataFrame, fuel: str, last_signal_day: pd.Timestamp) -> dict | None:
-    """ฝึกโลจิสติกส์ 2 ตัว (ขึ้น/ลง >= MOVE) จากคู่วันติดกันของราคาปลีก + สัญญาณ 20:30 ของวันก่อน"""
+def fit_signal_model(tables, eppo: pd.DataFrame, fuel: str, last_signal_day: pd.Timestamp, col: str = "retail", start=None) -> dict | None:
+    """ฝึกโลจิสติกส์ 2 ตัว (ขึ้น/ลง >= MOVE) จากคู่วันติดกันของราคา (col = retail หรือ ws) + สัญญาณ 20:30 ของวันก่อน ; start = ใช้ข้อมูลตั้งแต่วันใด"""
     import model as M
     g = eppo[eppo.fuel == fuel].drop_duplicates("day", keep="last").set_index("day").sort_index()
+    if start is not None:
+        g = g[g.index >= pd.Timestamp(start)]
     X, y, days = [], [], []
     for day, r in g.iterrows():
         nxt = day + pd.Timedelta(days=1)
         if nxt not in g.index or day > last_signal_day:
             continue
         X.append(signal_vector(signal_features(tables, fuel, day)))
-        y.append(float(g.retail[nxt] - r.retail))
+        y.append(float(g[col][nxt] - r[col]))
         days.append(day)
     if len(y) < 100:
         return None
@@ -206,6 +210,14 @@ def main(argv):
             print(f"{fuel}: n={m['n']} ({m['from']} ถึง {m['to']}) ขึ้น {m['n_up']} ลง {m['n_down']} ; w ขึ้น {np.round(m['up']['w'], 2).tolist()} ; w ลง {np.round(m['down']['w'], 2).tolist()}")
     with open(SIGNAL_MODEL_FILE, "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, indent=1)
+    ws = {"features": list(SIGNAL_FEATURES), "move": MOVE, "signal_hour": SIGNAL_HOUR, "target": "ws", "train_from": WS_TRAIN_FROM}
+    for fuel in ("B7", "G95"):
+        m = fit_signal_model(tables, eppo, fuel, last, col="ws", start=WS_TRAIN_FROM)
+        if m:
+            ws[fuel] = m
+            print(f"WS {fuel}: n={m['n']} ({m['from']} ถึง {m['to']}) ขึ้น {m['n_up']} ลง {m['n_down']} ; w ขึ้น {np.round(m['up']['w'], 2).tolist()} ; w ลง {np.round(m['down']['w'], 2).tolist()}")
+    with open(WS_SIGNAL_MODEL_FILE, "w", encoding="utf-8") as fh:
+        json.dump(ws, fh, ensure_ascii=False, indent=1)
 
 
 def outcome(eppo: pd.DataFrame, fuel: str, target_day: pd.Timestamp):

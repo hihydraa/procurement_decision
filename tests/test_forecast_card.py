@@ -106,9 +106,42 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(len(fc.COLUMNS), len(card))
         self.assertIn("ราคาปลีก: ปตท. 41.79", card["card_text"])
         self.assertIn("ยังไม่ผ่านการทดสอบเดินหน้า", card["card_text"])
-        self.assertIn(card["call"], ("ลง", "ขึ้น", "ไม่ชัด"))
-        if card["call"] == "ไม่ชัด":
-            self.assertIn("ไม่ชัดเจน", card["card_text"])
+        # วิธี ridge ไม่ฟันธงทิศอีก (exp_ws_search.py) แต่เก็บทิศที่มันจะฟันธงไว้เทียบผลจริง
+        self.assertEqual((card["call"], card["confidence"], card["model"]), ("ไม่ชัด", "ต่ำ", "C"))
+        self.assertIn(card["ridge_call"], ("ลง", "ขึ้น", "ไม่ชัด"))
+        self.assertIn("ไม่ฟันธงทิศ", card["card_text"])
+        self.assertIn("หักล้างราคาหน้าโรงกลั่น", card["card_text"])
+        self.assertEqual(fc.COLUMNS[fc.OUT_TO], "filled_at")
+        self.assertEqual((fc.col_letter(fc.OUT_TO), fc.col_letter(len(fc.COLUMNS) - 1)), (fc.OUT_LAST_COL, fc.LAST_COL))   # ช่วงผลจริงคงตำแหน่งเดิม
+        sig = {"p_down": 0.70, "p_flat": 0.25, "p_up": 0.05}
+        b7 = fc.build_card("B7", "21:30", pd.Timestamp("2026-07-14 21:31"), f, 0.0, "x", pred_c, resid, model_c, prof, "r", sig=sig, sig_note="n")
+        self.assertEqual((b7["call"], b7["sig_call"], b7["model"]), ("ไม่ชัด", "ลง", "C"))          # ดีเซล : โมเดลสัญญาณบันทึกคู่ขนานเท่านั้น
+        fg, pg, rg, mg = f, pred, resid, "DIRECT"            # ข้อมูลสังเคราะห์มีเฉพาะดีเซล : ใช้ฟีเจอร์ชุดเดียวกันทดสอบการประกอบการ์ดของ G95
+        g = fc.build_card("G95", "21:30", pd.Timestamp("2026-07-14 21:31"), fg, None, "x", pg, rg, mg, prof, "r", sig=sig, sig_note="n")
+        self.assertEqual((g["call"], g["model"], g["p_down"], g["confidence"]), ("ลง", "SIG", 0.7, "กลาง"))   # G95 : โมเดลสัญญาณเป็นคำทายหลัก
+        self.assertIn("โมเดลสัญญาณ Jobber", g["card_text"])
+        g0 = fc.build_card("G95", "11:00", pd.Timestamp("2026-07-14 11:01"), fg, None, "x", pg, rg, mg, prof, "r", sig=None, sig_note="รอบนี้ไม่คำนวณ")
+        self.assertEqual((g0["call"], g0["model"], g0["sig_call"]), ("ไม่ชัด", mg, ""))               # ไม่มีสัญญาณ → ไม่ฟันธง
+
+    def test_ws_signal_gating(self):
+        import json, os
+        import signals as S
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ws_signal_model.json"), encoding="utf-8") as fh:
+            model = json.load(fh)
+        self.assertEqual(model["train_from"], "2026-01-01")
+        day = "2026-11-12"
+        hu = pd.DataFrame([[day, "17:00", "A", "DOWN", "ALL"], [day, "17:20", "B", "DOWN", "ALL"]], columns=["msg_date", "msg_time", "provider", "direction", "scope"])
+        mc = pd.DataFrame([[day, "18:23", day, 108.28, -6.0, 153.14, -8.0]], columns=["msg_date", "msg_time", "mops_date", "g95", "g95_chg", "diesel", "diesel_chg"])
+        t = S.Tables(headsup=hu, mops_close=mc)
+        tgt = pd.Timestamp("2026-11-13")
+        sig, note = fc.ws_signal("G95", tgt, "21:30", pd.Timestamp("2026-11-12 21:31"), t, model)
+        self.assertAlmostEqual(sig["p_down"] + sig["p_flat"] + sig["p_up"], 1.0)
+        self.assertGreater(sig["p_down"], sig["p_up"])
+        self.assertIn("n=", note)
+        self.assertIsNone(fc.ws_signal("G95", tgt, "11:00", pd.Timestamp("2026-11-12 11:01"), t, model)[0])
+        self.assertIsNone(fc.ws_signal("G95", tgt, "21:30", pd.Timestamp("2026-11-11 21:31"), t, model)[0])      # ก่อนเวลาตัดสัญญาณ
+        self.assertIsNone(fc.ws_signal("G95", tgt, "21:30", pd.Timestamp("2026-11-12 21:31"), S.Tables(), model)[0])  # ฟีดว่าง
+        self.assertIsNone(fc.ws_signal("G95", tgt, "21:30", pd.Timestamp("2026-11-12 21:31"), None, model)[0])       # โหลดฟีดไม่ได้ → ไม่ล้ม
 
     def test_unclear_when_no_history(self):
         mops, wti, eppo = synth()
