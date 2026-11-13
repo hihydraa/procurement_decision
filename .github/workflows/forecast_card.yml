@@ -33,6 +33,15 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
+      # ดึงข้อมูลข้ามชีทก่อนสร้างการ์ด (MOPS ปิดตลาด, ฟีดสัญญาณ, EPPO) : workflow แดชบอร์ดพึ่งตัวตั้งเวลาของ GitHub ซึ่งข้ามรอบบ่อย
+      # ถ้าไม่ดึงเอง การ์ดรอบ 21:30 จะเห็น MOPS ของเมื่อวานแล้วตั้งวันเป้าหมายผิด (เกิดจริง 12/11/2026) ; dry-run ไม่เขียนชีทจึงข้ามขั้นนี้
+      - name: Refresh source data into the sheet
+        if: github.event_name == 'schedule' || inputs.dry != true
+        run: python ingest.py
+        continue-on-error: true
+        env:
+          SA_EMAIL: ${{ secrets.SA_EMAIL }}
+          SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
       - name: Build forecast card
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
