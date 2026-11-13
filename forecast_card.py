@@ -39,7 +39,15 @@ COLUMNS = ["card_id", "asof", "round", "fuel", "target_day", "mops_day", "m1", "
            "p_down", "p_flat", "p_up", "call", "confidence", "timing", "retail_now", "reasons", "recommendation", "model", "card_text",
            "outcome_dws", "outcome_cls", "right", "filled_at"]
 OUT_FROM, OUT_TO = COLUMNS.index("outcome_dws"), COLUMNS.index("filled_at")
-LAST_COL = "AD"
+# คอลัมน์ต่อท้าย (หลังช่วงผลจริง ซึ่งคงตำแหน่งเดิมถึง AD) : เก็บทั้งสองวิธีไว้เทียบผลจริง — ridge_call = ทิศที่วิธี ridge จะฟันธง, sig_* = โมเดลสัญญาณ Jobber
+ALT_KEYS = ["ridge_call", "sig_p_down", "sig_p_up", "sig_call", "sig_note"]
+COLUMNS = COLUMNS + ALT_KEYS
+OUT_LAST_COL = "AD"
+LAST_COL = "AI"
+# ผล exp_ws_search.py (2026-11-13, 78 วันทดสอบ) : วิธี ridge ฟันธงแล้วถูกเพียง ~1 ใน 4 (ดีเซล 16/64, G95 13/52) → ไม่ให้ฟันธงทิศอีก
+# โมเดลสัญญาณผ่านเกณฑ์ครบเฉพาะ G95 → ใช้เป็นคำทายหลักของ G95 ; ดีเซล (ไม่ผ่านเกณฑ์ AUC ครึ่งหลัง) บันทึกคู่ขนานเท่านั้น
+WS_SIGNAL_FUELS = ("G95",)
+RIDGE_NOTE = "วิธีนี้ทดสอบย้อนหลังแล้วฟันธงถูกเพียงราว 1 ใน 4 จึงไม่ฟันธงทิศ และความน่าจะเป็นข้างต้นสูงเกินจริง"
 
 
 def col_letter(i: int) -> str:
@@ -204,7 +212,7 @@ def reasons_text(fuel: str, f: dict, known, notice_msg: str, rnd: str) -> str:
     mname = "MOPS " + ("ดีเซล" if fuel == "B7" else "G95")
     parts = [f"{mname} {f['m1'] + 0.0:+.2f} (Δ1D) {f['m3'] + 0.0:+.2f} (Δ3D) ณ {f['mops_day']:%d/%m}", f"WTI Δ1D {f['w1'] + 0.0:+.2f}"]
     if known is not None:
-        parts.append(f"ประกาศกองทุนดีเซลมีผลพรุ่งนี้ {known:+.2f} บาท/ลิตร ({'ลดอุดหนุน → ดันต้นทุนขึ้น' if known > 0 else 'เพิ่มอุดหนุน → กดต้นทุน' if known < 0 else 'ไม่เปลี่ยน'})")
+        parts.append(f"ประกาศกองทุนดีเซลมีผลพรุ่งนี้ {known:+.2f} บาท/ลิตร ({'ลดอุดหนุน' if known > 0 else 'เพิ่มอุดหนุน' if known < 0 else 'ไม่เปลี่ยน'} ; ปี 2026 กองทุนมักถูกปรับเพื่อหักล้างราคาหน้าโรงกลั่น ต้นทุนขายส่งจึงมักไม่ขยับตาม)")
     elif fuel == "B7":
         parts.append(notice_msg)
     else:
@@ -213,23 +221,36 @@ def reasons_text(fuel: str, f: dict, known, notice_msg: str, rnd: str) -> str:
     return " · ".join(parts)
 
 
-def build_card(fuel: str, rnd: str, now: pd.Timestamp, f: dict, known, notice_msg: str, pred: float, resid: np.ndarray, model: str, profile: dict, retail_now: str, oor: list = None) -> dict:
+def build_card(fuel: str, rnd: str, now: pd.Timestamp, f: dict, known, notice_msg: str, pred: float, resid: np.ndarray, model: str, profile: dict, retail_now: str, oor: list = None,
+               sig: dict = None, sig_note: str = "") -> dict:
+    """sig = ความน่าจะเป็นจากโมเดลสัญญาณ Jobber ของวันเป้าหมาย (p_down, p_flat, p_up) หรือ None ; ใช้เป็นคำทายหลักเฉพาะชนิดใน WS_SIGNAL_FUELS"""
     p = probabilities(pred, resid)
-    call, conf = decide(p)
+    ridge_call = decide(p)[0]
+    sig_call = decide(sig)[0] if sig else ""
+    use_sig = bool(sig) and fuel in WS_SIGNAL_FUELS
     oor = oor or []
-    conf = cap_confidence(conf, oor)
+    if use_sig:
+        call, conf = decide(sig)
+        conf = cap_confidence(conf, [])
+    else:
+        call, conf = "ไม่ชัด", "ต่ำ"                       # วิธี ridge ไม่ฟันธงทิศอีก (ดู RIDGE_NOTE)
     timing, top = timing_text(profile, call)
     rec = recommend(call, conf, top, fuel)
     target = f["mops_day"].normalize() + pd.Timedelta(days=1)          # วันที่คำทายใช้ (สอดคล้องกับการฝึก : MOPS วัน t → ราคาหน้าคลัง t+1)
-    if p:
+    if use_sig:
+        head = (f"ต้นทุน{FUEL_TH[fuel]}: " + (f"มีแนวโน้มปรับ{call}" if call != "ไม่ชัด" else "ไม่ชัดเจน")
+                + f" · โอกาสลง ≥10 สต. {sig['p_down']:.0%} / นิ่ง {sig['p_flat']:.0%} / ขึ้น ≥10 สต. {sig['p_up']:.0%} (โมเดลสัญญาณ Jobber คืนนี้ ; ผ่านการทดสอบย้อนหลัง ยังไม่ผ่านการทดสอบเดินหน้า)")
+    elif p:
         rng = f"{p['lo']:+.2f} ถึง {p['hi']:+.2f}"
-        head = (f"ต้นทุน{FUEL_TH[fuel]}: " + (f"มีแนวโน้มปรับ{call} ช่วงประมาณ {rng} บาท/ลิตร" if call != "ไม่ชัด" else f"ไม่ชัดเจน (ช่วงที่เป็นไปได้ {rng} บาท/ลิตร)")
-                + f" · โอกาสลง ≥10 สต. {p['p_down']:.0%} / นิ่ง {p['p_flat']:.0%} / ขึ้น ≥10 สต. {p['p_up']:.0%}"
-                + (" (จำกัดเพดาน 75% เพราะยังไม่ผ่านการทดสอบเดินหน้า)" if p.get("capped") else "")
+        head = (f"ต้นทุน{FUEL_TH[fuel]}: ไม่ฟันธงทิศ (ช่วงที่เป็นไปได้ {rng} บาท/ลิตร)"
+                + f" · โอกาสลง ≥10 สต. {p['p_down']:.0%} / นิ่ง {p['p_flat']:.0%} / ขึ้น ≥10 สต. {p['p_up']:.0%} · {RIDGE_NOTE}"
                 + (" · ช่วงนี้เป็นการเปลี่ยนสุทธิรวมผลกองทุนที่ประกาศแล้ว" if model == "C" else ""))
     else:
         head = f"ต้นทุน{FUEL_TH[fuel]}: ไม่ชัดเจน (ข้อมูลย้อนหลังไม่พอสำหรับให้ความน่าจะเป็น)"
+    q = sig if use_sig else p                             # ความน่าจะเป็นของคำทายหลัก (บันทึกในคอลัมน์ p_*)
     reasons = reasons_text(fuel, f, known, notice_msg, rnd)
+    if use_sig:
+        reasons += " · คำทายหลักมาจากโมเดลสัญญาณ Jobber (จำนวนผู้ค้าที่ประกาศขึ้น/ลง, MOPS ปิด, ประกาศกองทุน)"
     if f.get("carried"):
         reasons += " · หมายเหตุ: MOPS ล่าสุดในชีทซ้ำค่าเดิม (ยังไม่อัปเดต) จึงใช้ของวันก่อนหน้า"
     if oor:
@@ -240,9 +261,10 @@ def build_card(fuel: str, rnd: str, now: pd.Timestamp, f: dict, known, notice_ms
     return {"card_id": f"{target:%Y-%m-%d} {rnd} {fuel}", "asof": now.strftime("%Y-%m-%d %H:%M"), "round": rnd, "fuel": fuel, "target_day": target.strftime("%Y-%m-%d"),
             "mops_day": f["mops_day"].strftime("%Y-%m-%d"), "m1": round(f["m1"], 3), "m3": round(f["m3"], 3), "w1": round(f["w1"], 3), "w3": round(f["w3"], 3),
             "mm_gap": round(f["mm_gap"], 3), "known_fund": "" if known is None else round(known, 3), "pred": round(pred, 3), "lo": round(p.get("lo", float("nan")), 3) if p else "",
-            "hi": round(p.get("hi", float("nan")), 3) if p else "", "p_down": round(p["p_down"], 3) if p else "", "p_flat": round(p["p_flat"], 3) if p else "",
-            "p_up": round(p["p_up"], 3) if p else "", "call": call, "confidence": conf, "timing": timing, "retail_now": retail_now, "reasons": reasons,
-            "recommendation": rec, "model": model, "card_text": text, **{c: "" for c in COLUMNS[OUT_FROM:]}}
+            "hi": round(p.get("hi", float("nan")), 3) if p else "", "p_down": round(q["p_down"], 3) if q else "", "p_flat": round(q["p_flat"], 3) if q else "",
+            "p_up": round(q["p_up"], 3) if q else "", "call": call, "confidence": conf, "timing": timing, "retail_now": retail_now, "reasons": reasons,
+            "recommendation": rec, "model": "SIG" if use_sig else model, "card_text": text, **{c: "" for c in COLUMNS[OUT_FROM:]},
+            "ridge_call": ridge_call, "sig_p_down": round(sig["p_down"], 3) if sig else "", "sig_p_up": round(sig["p_up"], 3) if sig else "", "sig_call": sig_call, "sig_note": sig_note}
 
 
 # ---------- ผลจริง ----------
@@ -329,6 +351,32 @@ def load_signal_tables():
     return S.Tables(headsup=feed(TABS["FEED_HEADSUP"], ("msg_date", "msg_time", "provider", "direction", "scope")),
                     mops_close=feed(TABS["FEED_MOPS_CLOSE"], ("msg_date", "msg_time", "g95_chg", "diesel_chg")),
                     fund=feed(TABS["FEED_FUND_NOTICE"], ("msg_date", "msg_time", "effective_date", "diesel_new")))
+
+
+def ws_signal(fuel: str, target: pd.Timestamp, rnd: str, now: pd.Timestamp, tables, model) -> tuple:
+    """(ความน่าจะเป็น WS จากโมเดลสัญญาณ หรือ None, หมายเหตุ) — ใช้ได้เฉพาะรอบ 21:30 หลังเวลาตัดสัญญาณ และเมื่อฟีดสด"""
+    if rnd != "21:30":
+        return None, "รอบนี้ไม่คำนวณ (ใช้สัญญาณ 20:30)"
+    if now < pd.Timestamp(target).normalize() - pd.Timedelta(days=1) + pd.Timedelta(hours=RF.SIGNAL_HOUR):
+        return None, "ยังไม่ถึงเวลาตัดสัญญาณ 20:30"
+    try:
+        f = RF.signal_forecast(model, tables, fuel, target)
+    except Exception as e:                                             # noqa: BLE001 — ต้องไม่ทำให้การ์ดล้ม
+        return None, f"คำนวณไม่สำเร็จ: {e}"[:120]
+    if not f:
+        return None, "ไม่มีโมเดลของชนิดนี้ หรือฟีดสัญญาณไม่สด"
+    return {k: f[k] for k in ("p_down", "p_flat", "p_up")}, f"โมเดลสัญญาณ WS n={model[fuel]['n']} ถึง {model[fuel]['to']}"
+
+
+def load_json_model(name: str) -> dict:
+    import json
+    import os
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), name), encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError) as e:
+        print(f"[CARD] โหลดโมเดล {name} ไม่สำเร็จ: {e}")
+        return {}
 
 
 def signal_shadow(rows: list, rnd: str, now: pd.Timestamp, tables=None, model=None) -> list:
@@ -470,6 +518,8 @@ def main(argv=None):
     days = pd.date_range(prices.effective.max().normalize() - pd.Timedelta(days=50), prices.effective.max().normalize(), freq="D")
     profile_cache = {}
     cards = []
+    sig_tables = load_signal_tables() if rnd == "21:30" else None      # ฟีดสัญญาณ Jobber (ใช้ทั้งโมเดล WS และโมเดลปลีกคู่ขนาน)
+    ws_model = load_json_model(RF.WS_SIGNAL_MODEL_FILE)
     for fuel in ("B7", "G95"):
         f = current_features(mops, wti, eppo, fuel)
         if f is None:
@@ -484,12 +534,14 @@ def main(argv=None):
             notice_msg = "ประกาศกองทุนดีเซลของพรุ่งนี้ยังไม่ออก (ปกติออก ~19:18–21:14)"
         pred, resid, model = fit_predict(ds, fuel, f, known)
         profile = profile_cache.setdefault(fuel, change_time_profile(prices, fuel, days))
-        cards.append(build_card(fuel, rnd, now, f, known, notice_msg, pred, resid, model, profile, retail_now_text(retail_vals, fuel), out_of_range(ds, fuel, f)))
+        sig, sig_note = ws_signal(fuel, target, rnd, now, sig_tables, ws_model)
+        cards.append(build_card(fuel, rnd, now, f, known, notice_msg, pred, resid, model, profile, retail_now_text(retail_vals, fuel), out_of_range(ds, fuel, f),
+                                sig=sig, sig_note=sig_note))
     cards = drop_known(cards, eppo)
     for c in cards:
         print(c["card_text"])
         print("-" * 60)
-    rrows = signal_shadow(retail_rows(cards, eppo_d), rnd, now)
+    rrows = signal_shadow(retail_rows(cards, eppo_d), rnd, now, tables=sig_tables)
     for r in rrows:
         print(retail_text(r))
         if r.get("sig_call") or r.get("sig_note"):
@@ -503,6 +555,9 @@ def main(argv=None):
         print(f"[CARD] created tab {tab}")
     values = sheets_get(tok, SHEET_ID, f"{tab}!A1:{LAST_COL}20000")
     head = values[0] if values else COLUMNS
+    if values and len(head) < len(COLUMNS) and list(head) == COLUMNS[:len(head)]:        # แท็บเดิมยังไม่มีคอลัมน์ต่อท้าย → ต่อหัวตาราง
+        sheets_update(tok, SHEET_ID, f"{tab}!A1", [COLUMNS])
+        head = COLUMNS
     rows = [dict(zip(head, r + [""] * (len(head) - len(r)))) for r in values[1:]]
     have = {str(r.get("card_id", "")) for r in rows}
     add = [c for c in cards if c["card_id"] not in have]
