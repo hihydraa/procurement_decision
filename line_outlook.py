@@ -193,11 +193,12 @@ def retail_lines(retail: pd.DataFrame, asof: pd.Timestamp) -> list:
             p, base = _probs(r, ("p_down", "p_flat", "p_up")), _f(r.get("retail_base"))
             if p:
                 out.append(f"• โอกาส {p}")
-            is_sig = str(r.get("model") or "").strip() == "SIG"
+            model = str(r.get("model") or "").strip()
+            is_sig = model == "SIG"
             alt = _probs(r, ("old_p_down", "old_p_flat", "old_p_up") if is_sig else ("sig_p_down", "sig_p_flat", "sig_p_up"))
             if alt:
                 out.append(f"• {'วิธีเดิม' if is_sig else 'โมเดลสัญญาณ'} (คู่ขนาน): {alt}")
-            if not is_sig:
+            if model == "OLD":                               # แถวก่อนการสลับโมเดล (model ว่าง) ไม่ใส่หมายเหตุนี้
                 out.append("• คืนนี้โมเดลสัญญาณใช้ไม่ได้ จึงใช้วิธีเดิมเป็นคำทายหลัก")
             size = str(r.get("size_text") or "").strip()
             detail = ([f"ปลีกล่าสุดใน EPPO {base:.2f}"] if base is not None else []) + ([size] if size and size != "nan" else [])
