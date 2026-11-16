@@ -202,8 +202,13 @@ def retail_lines(retail: pd.DataFrame, asof: pd.Timestamp) -> list:
     บรรทัดหลัก = คำทายหลักของแถว (p_*/call) : model = SIG คือโมเดลสัญญาณ Jobber และวิธีเดิม (old_*) เป็นบรรทัดคู่ขนาน
     แถวเก่า/แถวที่โมเดลสัญญาณใช้ไม่ได้ (model ≠ SIG) : วิธีเดิมเป็นหลัก และโมเดลสัญญาณ (sig_*) เป็นบรรทัดคู่ขนานถ้ามี"""
     import procurement_summary as PS
-    out = section("② ราคาขายปลีก (หน้าปั๊ม) · วันถัดไป", "ราคาหน้าปั๊มจะปรับหรือไม่ [ทดลอง ยังไม่ผ่านการทดสอบเดินหน้า]")
     today, stats = pd.Timestamp(asof).normalize(), []
+    # หัวข้อบอกวันที่พยากรณ์จริง : พยากรณ์ออกคืนก่อนวันเป้าหมาย จึงเป็น "พรุ่งนี้" เฉพาะหลังการ์ดรอบ 21:30 ; ถามตอนกลางวันจะเป็นของ "วันนี้"
+    tgts = [pd.Timestamp(r["target_dt"]).normalize() for r in (PS.latest_retail(retail, fuel) for fuel, _ in FUELS) if r]
+    tgt = max([t for t in tgts if t >= today], default=None)
+    when = ("รอพยากรณ์ของวันถัดไป" if tgt is None else f"วันนี้ ({tgt:%d/%m})" if tgt == today
+            else f"พรุ่งนี้ ({tgt:%d/%m})" if tgt == today + pd.Timedelta(days=1) else f"วันที่ {tgt:%d/%m}")
+    out = section(f"② ราคาขายปลีก (หน้าปั๊ม) · {when}", "ราคาหน้าปั๊มจะปรับหรือไม่ [ทดลอง ยังไม่ผ่านการทดสอบเดินหน้า]")
     for fuel, name in FUELS:
         r = PS.latest_retail(retail, fuel)
         if not r or pd.Timestamp(r["target_dt"]).normalize() < today:
