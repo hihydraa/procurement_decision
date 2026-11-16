@@ -302,7 +302,7 @@ HEADSUP = (("9:12", "SFL", "DOWN", "ALL", "9:00", "N", None), ("12:18", "SFL", "
 
 
 class NoticeTest(unittest.TestCase):
-    """ประกาศของผู้ค้าส่งเป็นข้อเท็จจริงที่รู้ก่อนพยากรณ์ : แสดงบนสุด พร้อมเรทและเวลามีผล"""
+    """ประกาศของผู้ค้าส่ง : ใช้เป็นเส้นตายและขนาดการขึ้นในคำแนะนำ ไม่แสดงรายการซ้ำในข้อความ"""
 
     def test_grouping_pending_and_lookahead(self):
         ns = {(n["provider"], n["dir"]): n for n in L.notices(_headsup(*HEADSUP), pd.Timestamp("2026-11-12 20:47"))}
@@ -316,21 +316,13 @@ class NoticeTest(unittest.TestCase):
         self.assertEqual(L.notices(pd.DataFrame(), pd.Timestamp("2026-11-12 20:47")), [])
         self.assertEqual(L.parse_rates("DIESEL:+1.00 GASOHOL:-0.50"), {"DIESEL": 1.0, "GASOHOL": -0.5})
 
-    def test_lines_and_pending_rise(self):
+    def test_pending_rise(self):
         d = {"DIESEL": {"fuel": "B7", "ref": pd.Timestamp("2026-11-12 20:30"), "horizons": []}}
         inp = L.make_input(d, pd.Timestamp("2026-11-12 20:47"), _headsup(*HEADSUP))
-        text = "\n".join(L.notice_lines(inp))
-        self.assertIn("📢 ประกาศของผู้ค้าส่งวันนี้ (ข้อเท็จจริง ไม่ใช่คำทาย)", text)
-        self.assertIn("⬆ ไออาร์ (IRPC): ขึ้น ดีเซล +1.00 · แก๊สโซฮอล์ +1.00 · มีผล 23:30 น. (ประกาศ 17:44)", text)
-        self.assertIn("⬆ ปตท.: ขึ้น ดีเซล +0.75 (ประกาศ 16:48)", text)
-        self.assertIn("⬆ ไม่ระบุราย: ขึ้น ทุกผลิตภัณฑ์ · มีผล 00:00 น. (ประกาศ 17:30)", text)
-        self.assertIn("⬇ ลงระหว่างวัน: สตาร์ฟูเอลส์ 2 ครั้ง", text)
-        self.assertIn("(ข้อมูลถึง 20:47 น. · ไม่รวมข้อยกเว้นรายคลัง)", text)
         self.assertEqual(L.pending_rise(inp, "B7"), {"amt": 1.0, "when": "23:30"})                         # เรทสูงสุด และเวลามีผลที่เร็วที่สุด
         self.assertEqual(L.pending_rise(inp, "G95"), {"amt": 1.0, "when": "23:30"})
         self.assertIsNone(L.pending_rise({"notices": []}, "B7"))
-        self.assertEqual(L.notice_lines(_inp()), [])                                                       # ไม่มีช่อง notices = ไม่แสดงส่วนนี้
-        self.assertIn("ยังไม่มีประกาศปรับราคา", "\n".join(L.notice_lines({"asof": "2026-11-12 09:00", "notices": []})))
+        self.assertIsNone(L.pending_rise(_inp(), "B7"))                                                    # ไม่มีช่อง notices
 
 
 class AdviceTest(unittest.TestCase):
@@ -344,7 +336,10 @@ class AdviceTest(unittest.TestCase):
     def test_wait_buy_conflict_and_none(self):
         wait = L.advice_line(self._f("DOWN_STRONG", (20, "16:30", "DOWN", True, 163, 0.64)), self.RISE)
         self.assertTrue(wait.startswith("⏳ รอซื้อบ่ายพรุ่งนี้ (หลัง 16:00 น.)"))
-        self.assertIn("• แนวโน้ม 24 ชม. ลงแรง (ความเชื่อมั่น กลาง)", wait)
+        self.assertIn("• แนวโน้ม 24 ชม. ลงแรง (ความเชื่อมั่น กลาง)\n", wait)
+        f = self._f("DOWN_STRONG")
+        f["h24"]["avg_move"] = 0.496
+        self.assertIn("• แนวโน้ม 24 ชม. ลงแรง (ความเชื่อมั่น กลาง) · ย้อนหลังราคาต่างจากคืนนี้เฉลี่ย 0.50 บาท/ลิตร", L.advice_line(f, None))
         self.assertIn("• ราคา 16:30 น. พรุ่งนี้มักต่ำกว่าคืนนี้ (ย้อนหลังถูก 64% จาก 163 ครั้ง)", wait)
         self.assertIn("⚠ คืนนี้ราคาจะขึ้น +1.00 เวลา 23:30 น. ตามประกาศ", wait)
         self.assertIn("เลี่ยงซื้อช่วงเช้าหลังราคาขึ้น", wait)
@@ -369,8 +364,9 @@ class AdviceTest(unittest.TestCase):
         inp["fuels"]["G95"]["profile"] = self._f("x", (20, "16:30", "DOWN", True, 163, 0.64))["profile"]
         inp["notices"] = L.notices(_headsup(*HEADSUP), pd.Timestamp(inp["asof"]))
         text, _ = L.build_message(inp, _log())
-        self.assertTrue(text.startswith("🛢 พยากรณ์ราคาน้ำมัน\n📢 ประกาศของผู้ค้าส่งวันนี้"))
-        self.assertLess(text.index("📢"), text.index("🧭 ควรซื้อเมื่อไร (คืนนี้ หรือ 13/11) [ทดลอง ยังไม่มีผลจริง]"))
+        self.assertTrue(text.startswith("🛢 พยากรณ์ราคาน้ำมัน\n🧭 ควรซื้อเมื่อไร (คืนนี้ หรือ 13/11) [ทดลอง ยังไม่มีผลจริง]"))
+        self.assertNotIn("📢", text)                                                      # ไม่แสดงรายการประกาศซ้ำ (ผู้ซื้อเห็นอยู่แล้ว)
+        self.assertNotIn("ไออาร์", text)
         self.assertLess(text.index("🧭"), text.index("ราคาส่ง (Jobber) · 24 ชม.ข้างหน้า"))
         self.assertIn("ดีเซล: ❔ ยังบอกไม่ได้ว่าควรรีบหรือรอ\n   ⚠ คืนนี้ราคาจะขึ้น +1.00 เวลา 23:30 น. ตามประกาศ", text)
         self.assertIn("แก๊สโซฮอล์ 95: ⏳ รอซื้อบ่ายพรุ่งนี้ (หลัง 16:00 น.)", text)

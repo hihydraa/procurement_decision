@@ -3,7 +3,7 @@
 
 เนื้อหา : ใช้โมเดลเดียว คือแนวโน้ม Jobber 24 ชม. จากข้อมูล 20:30 (ตัวเดียวที่ผลจริงเริ่มเข้ากับผลทดสอบย้อนหลัง)
           + เหตุผลสั้น ๆ + ผลของคำทายล่าสุดที่รู้ผลแล้ว + สถิติผลจริงสะสมจาก OutlookLog
-ลำดับ : 📢 ประกาศของผู้ค้าส่งวันนี้ (ข้อเท็จจริงจากฟีด รู้ก่อนพยากรณ์) → 🧭 ควรซื้อเมื่อไร (ซื้อก่อนขึ้นคืนนี้ หรือรอบ่ายพรุ่งนี้) → รายละเอียด
+ลำดับ : 🧭 ควรซื้อเมื่อไร (ซื้อก่อนขึ้นคืนนี้ หรือรอบ่ายพรุ่งนี้ ; ใช้ประกาศของผู้ค้าส่งเป็นเส้นตาย ไม่แสดงรายการประกาศซ้ำ) → รายละเอียด
 รูปแบบ : แบ่งเป็นส่วนมีหัวข้อคั่น — ① ราคาส่ง (Jobber) พร้อมผลงานที่ผ่านมาของตัวเอง ② ราคาขายปลีก (เฉพาะข้อความตอบเมื่อพิมพ์ถาม)
           ความน่าจะเป็นแสดงเป็นแถบข้อความ ▰▱ (ช่องข้อความของไลน์ส่งรูปไม่ได้)
           ไม่รวมแนวโน้ม 48 ชม. และการ์ดต้นทุนขายส่ง (ยังไม่มีหลักฐานพอ)
@@ -53,7 +53,7 @@ def make_input(outlook: dict, asof, headsup: pd.DataFrame = None) -> dict:
             "profile": [{"hours": int(pf["hours"]), "at": pd.Timestamp(pf["at"]).strftime("%H:%M"), "call": pf["call"], "ok": bool(pf["ok"]),
                          "n": pf.get("n"), "right": pf.get("right")} for pf in (d.get("profile") or [])],
             "h24": None if h is None else {"tier": h["tier"], "grade": h.get("grade"), "reasons": list(h.get("reasons") or []),
-                                           "n": ev.get("n"), "right10": ev.get("right10"), "wrong10": ev.get("wrong10"),
+                                           "n": ev.get("n"), "right10": ev.get("right10"), "wrong10": ev.get("wrong10"), "avg_move": ev.get("avg_move"),
                                            "p_up": (h.get("p") or {}).get("r10"), "p_down": (h.get("p") or {}).get("f10")}}
     out = {"asof": pd.Timestamp(asof).strftime("%Y-%m-%d %H:%M"), "fuels": fuels}
     if headsup is not None:
@@ -66,9 +66,8 @@ def write_input(outlook: dict, asof, path: str = INPUT_FILE, headsup: pd.DataFra
         json.dump(make_input(outlook, asof, headsup), fh, ensure_ascii=False, indent=1)
 
 
-# ---------- ประกาศปรับราคาของผู้ค้าส่งที่รู้แล้ววันนี้ (ข้อเท็จจริงจากฟีด Entry_HeadsUp ไม่ใช่คำทาย) ----------
-PROVIDER_TH = {"IRPC": "ไออาร์ (IRPC)", "PTT": "ปตท.", "SFL": "สตาร์ฟูเอลส์", "BC": "บางจาก", "BSRC": "บางจาก (BSRC)"}
-RATE_TH = {"DIESEL": "ดีเซล", "GASOHOL": "แก๊สโซฮอล์"}
+# ---------- ประกาศปรับราคาของผู้ค้าส่งที่รู้แล้ววันนี้ (ฟีด Entry_HeadsUp) ----------
+# ไม่แสดงรายการประกาศในข้อความ (ผู้ซื้อเห็นจากกลุ่มไลน์ของผู้ค้าอยู่แล้ว — เจ้าของระบบ 16/11/2026) ; ใช้เฉพาะเป็นเส้นตาย/ขนาดการขึ้นในคำแนะนำ
 FUEL_GROUP = {"B7": "DIESEL", "G95": "GASOHOL"}
 
 
@@ -114,26 +113,6 @@ def notices(headsup: pd.DataFrame, asof) -> list:
         out.append({"provider": prov, "dir": direction, "at": f"{posted:%H:%M}", "n": int(len(g)), "rates": (col("rates") or [""])[-1],
                     "stated": stated, "scope": (col("scope") or ["ALL"])[-1], "pending": bool(pending)})
     return out
-
-
-def notice_lines(inp: dict) -> list:
-    """ส่วนบนสุดของข้อความ : ประกาศขึ้นแสดงรายผู้ค้า (เรท + เวลามีผล) ; ประกาศลงระหว่างวันย่อเป็นบรรทัดเดียว ; ไม่มีช่อง notices = ไม่แสดง"""
-    if inp.get("notices") is None:
-        return []
-    ns = inp["notices"]
-    name = lambda n: PROVIDER_TH.get(n["provider"], n["provider"] or "ไม่ระบุราย")
-    out = ["📢 ประกาศของผู้ค้าส่งวันนี้ (ข้อเท็จจริง ไม่ใช่คำทาย)"]
-    for n in [x for x in ns if x["dir"] == "UP"]:
-        r = parse_rates(n["rates"])
-        what = " · ".join(f"{RATE_TH.get(k, k)} {v:+.2f}" for k, v in r.items()) or {"DIESEL": "ดีเซล", "GASOHOL": "กลุ่มแก๊สโซฮอล์"}.get(n["scope"], "ทุกผลิตภัณฑ์")
-        when = (f" · มีผล {n['stated']} น." if n["stated"] else "") + ("" if n["pending"] else " (มีผลแล้ว)")
-        out.append(f"⬆ {name(n)}: ขึ้น {what}{when} (ประกาศ {n['at']})")
-    downs = [x for x in ns if x["dir"] == "DOWN"]
-    if downs:
-        out.append("⬇ ลงระหว่างวัน: " + " · ".join(f"{name(n)} {n['n']} ครั้ง" for n in downs))
-    if len(out) == 1:
-        out.append("ยังไม่มีประกาศปรับราคา")
-    return out + [f"(ข้อมูลถึง {pd.Timestamp(inp['asof']):%H:%M} น. · ไม่รวมข้อยกเว้นรายคลัง)", ""]
 
 
 def pending_rise(inp: dict, fuel: str) -> dict | None:
@@ -221,11 +200,13 @@ def advice_line(f: dict, rise: dict | None) -> str:
     noon, pm = pf.get(16), pf.get(20)
     tier = (f.get("h24") or {}).get("tier") or "UNCLEAR"
     grade = (f.get("h24") or {}).get("grade") or "ต่ำ"
+    mv = (f.get("h24") or {}).get("avg_move")              # ขยับเฉลี่ยตามทิศที่ทาย จาก walk-forward (รวมครั้งที่ทายพลาด) = ส่วนต่างที่คาดได้
+    gain = f" · ย้อนหลังราคาต่างจากคืนนี้เฉลี่ย {abs(mv):.2f} บาท/ลิตร" if mv is not None and mv == mv and mv > 0 else ""
     wait, buy = [], []
     if tier.startswith("DOWN"):
-        wait.append(f"แนวโน้ม 24 ชม. {CALL_WORD[tier]} (ความเชื่อมั่น {grade})")
+        wait.append(f"แนวโน้ม 24 ชม. {CALL_WORD[tier]} (ความเชื่อมั่น {grade}){gain}")
     if tier.startswith("UP"):
-        buy.append(f"แนวโน้ม 24 ชม. {CALL_WORD[tier]} (ความเชื่อมั่น {grade})")
+        buy.append(f"แนวโน้ม 24 ชม. {CALL_WORD[tier]} (ความเชื่อมั่น {grade}){gain}")
     if pm and pm["call"] == "DOWN":
         wait.append(f"ราคา 16:30 น. พรุ่งนี้มักต่ำกว่าคืนนี้ ({pct(pm)})")
     if pm and pm["call"] == "UP":
@@ -371,7 +352,7 @@ def build_message(inp: dict, log: pd.DataFrame, on_demand: bool = False, retail:
     bad = {fuel: usable(fuels.get(fuel), asof, on_demand) for fuel, _ in FUELS}
     ok = [(fuel, name) for fuel, name in FUELS if not bad[fuel]]
     ref_id = f"{asof:%Y-%m-%d} 20:30"
-    lines = ["🛢 พยากรณ์ราคาน้ำมัน"] + notice_lines(inp) + advice_lines(inp, ok) + section(("① " if retail is not None else "") + "ราคาส่ง (Jobber) · 24 ชม.ข้างหน้า", "ราคาต่ำสุดที่ผู้ค้าส่งประกาศหน้าคลัง จะขึ้นหรือลง")
+    lines = ["🛢 พยากรณ์ราคาน้ำมัน"] + advice_lines(inp, ok) + section(("① " if retail is not None else "") + "ราคาส่ง (Jobber) · 24 ชม.ข้างหน้า", "ราคาต่ำสุดที่ผู้ค้าส่งประกาศหน้าคลัง จะขึ้นหรือลง")
     if ok:
         ref = pd.Timestamp(fuels[ok[0][0]]["ref"])
         lines += [f"ข้อมูล {ref:%H:%M} น. {ref:%d/%m} · ใช้ได้ถึง {ref:%H:%M} น. {ref + pd.Timedelta(days=1):%d/%m}"]
