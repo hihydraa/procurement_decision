@@ -64,13 +64,16 @@ def _reasons(reasons: list, mark: str, k: int) -> list:
     return [_strip(r) for r in reasons if mark in r][:k]
 
 
-def usable(f: dict, asof: pd.Timestamp) -> str:
-    """'' ถ้าใช้ส่งได้ ; ไม่งั้นคืนเหตุผล — ต้องเป็นคำทายจากข้อมูล 20:30 ของวันนี้ ไม่ค้าง และมีผลช่วง 24 ชม."""
+def usable(f: dict, asof: pd.Timestamp, on_demand: bool = False) -> str:
+    """'' ถ้าใช้ส่งได้ ; ไม่งั้นคืนเหตุผล — ข้อความประจำคืน : ต้องเป็นคำทายจากข้อมูล 20:30 ของวันนี้ ไม่ค้าง และมีผลช่วง 24 ชม.
+    on_demand (ตอบเมื่อพิมพ์ถาม) : ใช้คำทายล่าสุดที่ยังไม่หมดอายุ 24 ชม. ได้ (เช่น ของเมื่อคืน หรือรอบบ่าย 15:30)"""
     if not f:
         return "ไม่มีผลของชนิดนี้"
     ref = pd.Timestamp(f["ref"])
     if f.get("h24") is None:
         return f.get("note") or "ระบบยังไม่ให้แนวโน้ม (ข้อมูลไม่พร้อม)"
+    if on_demand:
+        return "" if pd.Timedelta(0) <= asof - ref < pd.Timedelta(hours=24) else f"คำทายล่าสุด ({ref:%d/%m %H:%M}) หมดอายุแล้ว"
     if ref.strftime("%H:%M") != "20:30" or ref.normalize() != asof.normalize() or f.get("stale"):
         return f"ยังไม่มีข้อมูลรอบ 20:30 ของวันนี้ (ล่าสุด {ref:%d/%m %H:%M})"
     return ""
@@ -130,19 +133,22 @@ def live_summary(log: pd.DataFrame) -> list:
     return [f"สถิติผลจริงตั้งแต่ {first:%d/%m} ({days}/{READY_DAYS} วัน)", f"ฟันธง {calls} ครั้ง · ถูก {right} · ผิดทิศ {wrong} · ราคานิ่ง {flat}"]
 
 
-def build_message(inp: dict, log: pd.DataFrame) -> tuple:
-    """(ข้อความ, รหัสจุดอ้างอิงสำหรับกันส่งซ้ำ)"""
+def build_message(inp: dict, log: pd.DataFrame, on_demand: bool = False) -> tuple:
+    """(ข้อความ, รหัสจุดอ้างอิงสำหรับกันส่งซ้ำ) ; on_demand = ข้อความสำหรับตอบเมื่อพิมพ์ถาม (ใช้คำทายล่าสุดที่ยังไม่หมดอายุ)"""
     asof = pd.Timestamp(inp["asof"])
     fuels = inp.get("fuels", {})
-    bad = {fuel: usable(fuels.get(fuel), asof) for fuel, _ in FUELS}
+    bad = {fuel: usable(fuels.get(fuel), asof, on_demand) for fuel, _ in FUELS}
     ok = [(fuel, name) for fuel, name in FUELS if not bad[fuel]]
     ref_id = f"{asof:%Y-%m-%d} 20:30"
     lines = ["🛢 แนวโน้มราคาหน้าคลัง 24 ชม."]
     if ok:
         ref = pd.Timestamp(fuels[ok[0][0]]["ref"])
-        lines += [f"ข้อมูล 20:30 น. {ref:%d/%m} · ใช้ได้ถึง 20:30 น. {ref + pd.Timedelta(days=1):%d/%m}", ""]
+        lines += [f"ข้อมูล {ref:%H:%M} น. {ref:%d/%m} · ใช้ได้ถึง {ref:%H:%M} น. {ref + pd.Timedelta(days=1):%d/%m}"]
+        if ref.strftime("%H:%M") != "20:30":
+            lines.append("(รอบบ่าย: มีผลจริงเพียงไม่กี่วัน เชื่อถือได้น้อยกว่ารอบ 20:30)")
+        lines.append("")
     else:
-        lines += [f"คืนนี้ ({asof:%d/%m}) ไม่มีคำทาย", ""]
+        lines += [("ตอนนี้" if on_demand else f"คืนนี้ ({asof:%d/%m})") + " ไม่มีคำทาย", ""]
     unclear = []
     for fuel, name in FUELS:
         if bad[fuel]:

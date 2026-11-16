@@ -79,6 +79,19 @@ class MessageTest(unittest.TestCase):
         empty, _ = L.build_message(_inp(), pd.DataFrame())
         self.assertIn("ยังไม่มีผลจริง", empty)
 
+    def test_on_demand_uses_latest_unexpired_forecast(self):
+        day = _inp(asof="2026-11-13 09:10", ref="2026-11-12 20:30")                       # ถามตอนเช้า : ใช้คำทายของเมื่อคืน
+        self.assertIn("ไม่มีคำทาย", L.build_message(day, _log())[0])                       # ข้อความประจำคืนยังเข้มเหมือนเดิม
+        text, _ = L.build_message(day, _log(), on_demand=True)
+        self.assertIn("ข้อมูล 20:30 น. 12/11 · ใช้ได้ถึง 20:30 น. 13/11", text)
+        self.assertIn("ดีเซล: 📈 ขึ้น", text)
+        pm, _ = L.build_message(_inp(asof="2026-11-13 16:00", ref="2026-11-13 15:30"), _log(), on_demand=True)
+        self.assertIn("ข้อมูล 15:30 น. 13/11", pm)
+        self.assertIn("รอบบ่าย", pm)
+        old, _ = L.build_message(_inp(asof="2026-11-14 21:00", ref="2026-11-12 20:30"), _log(), on_demand=True)
+        self.assertIn("ตอนนี้ ไม่มีคำทาย", old)
+        self.assertIn("หมดอายุแล้ว", old)
+
     def test_make_input_from_engine_shape(self):
         d = {"GASOHOL95": {"fuel": "G95", "ref": pd.Timestamp("2026-11-12 20:30"), "source": "E", "stale": False, "note": None,
                            "horizons": [{"hours": 48, "tier": "UP", "reasons": []},

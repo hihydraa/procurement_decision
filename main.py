@@ -1622,6 +1622,10 @@ def main():
     try:                                                   # ข้อมูลเข้าของข้อความไลน์ส่วนตัว (ช่วงทดสอบ ดู line_outlook.py) — ล้มเหลวต้องไม่กระทบหน้าเว็บ
         import line_outlook
         line_outlook.write_input(outlook, asof)
+        # ข้อความเดียวกันสำหรับตอบเมื่อพิมพ์ "forecast" ในแชทส่วนตัว (Worker อ่านจาก outlook.json ช่อง line_text)
+        pub = json.loads(open("outlook.json", encoding="utf-8").read())
+        pub["line_text"] = line_outlook.build_message(line_outlook.make_input(outlook, asof), outlook_log, on_demand=True)[0]
+        write_text("outlook.json", json.dumps(pub, ensure_ascii=False, indent=1))
     except Exception as e:
         print(f"[LINE] เขียนข้อมูลเข้าไม่สำเร็จ: {e}")
     dispatch_html = build_outlook_section(outlook, asof, build_outlook_live(outlook_log, summary)) + dispatch_html
