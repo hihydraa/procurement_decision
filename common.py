@@ -30,6 +30,7 @@ TABS = {
     "DISPATCH_LOG": "DispatchLog",
     "OUTLOOK_LOG": "OutlookLog",
     "TAPREC_LOG": "TapRecLog",
+    "NOON_SHADOW_LOG": "NoonShadowLog",   # รอบเที่ยงของดีเซลแบบเงา (log_noon.py)
     "RETAIL_LOG": "RetailLog",
     "FORECAST_CARD": "ForecastCardLog",
     "RETAIL_FC": "RetailFcLog",
