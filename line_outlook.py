@@ -3,6 +3,7 @@
 
 เนื้อหา : ใช้โมเดลเดียว คือแนวโน้ม Jobber 24 ชม. จากข้อมูล 20:30 (ตัวเดียวที่ผลจริงเริ่มเข้ากับผลทดสอบย้อนหลัง)
           + เหตุผลสั้น ๆ + ผลของคำทายล่าสุดที่รู้ผลแล้ว + สถิติผลจริงสะสมจาก OutlookLog
+ลำดับ : 🧭 ควรซื้อเมื่อไร (ซื้อก่อนขึ้นคืนนี้ หรือรอบ่ายพรุ่งนี้ ; ใช้ประกาศของผู้ค้าส่งเป็นเส้นตาย ไม่แสดงรายการประกาศซ้ำ) → รายละเอียด
 รูปแบบ : แบ่งเป็นส่วนมีหัวข้อคั่น — ① ราคาส่ง (Jobber) พร้อมผลงานที่ผ่านมาของตัวเอง ② ราคาขายปลีก (เฉพาะข้อความตอบเมื่อพิมพ์ถาม)
           ความน่าจะเป็นแสดงเป็นแถบข้อความ ▰▱ (ช่องข้อความของไลน์ส่งรูปไม่ได้)
           ไม่รวมแนวโน้ม 48 ชม. และการ์ดต้นทุนขายส่ง (ยังไม่มีหลักฐานพอ)
@@ -41,7 +42,7 @@ FOOTER = "[ทดสอบ] ยังไม่ผ่านเกณฑ์ผล�
 
 
 # ---------- ข้อมูลเข้าจาก main.py ----------
-def make_input(outlook: dict, asof) -> dict:
+def make_input(outlook: dict, asof, headsup: pd.DataFrame = None) -> dict:
     """ย่อผลของ engine.decide_outlook ให้เหลือเฉพาะที่ข้อความใช้ (ช่วง 24 ชม.) — เขียนเป็นไฟล์ให้ขั้นส่งอ่าน"""
     fuels = {}
     for d in outlook.values():
@@ -52,14 +53,78 @@ def make_input(outlook: dict, asof) -> dict:
             "profile": [{"hours": int(pf["hours"]), "at": pd.Timestamp(pf["at"]).strftime("%H:%M"), "call": pf["call"], "ok": bool(pf["ok"]),
                          "n": pf.get("n"), "right": pf.get("right")} for pf in (d.get("profile") or [])],
             "h24": None if h is None else {"tier": h["tier"], "grade": h.get("grade"), "reasons": list(h.get("reasons") or []),
-                                           "n": ev.get("n"), "right10": ev.get("right10"), "wrong10": ev.get("wrong10"),
+                                           "n": ev.get("n"), "right10": ev.get("right10"), "wrong10": ev.get("wrong10"), "avg_move": ev.get("avg_move"),
                                            "p_up": (h.get("p") or {}).get("r10"), "p_down": (h.get("p") or {}).get("f10")}}
-    return {"asof": pd.Timestamp(asof).strftime("%Y-%m-%d %H:%M"), "fuels": fuels}
+    out = {"asof": pd.Timestamp(asof).strftime("%Y-%m-%d %H:%M"), "fuels": fuels}
+    if headsup is not None:
+        out["notices"] = notices(headsup, asof)
+    return out
 
 
-def write_input(outlook: dict, asof, path: str = INPUT_FILE) -> None:
+def write_input(outlook: dict, asof, path: str = INPUT_FILE, headsup: pd.DataFrame = None) -> None:
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump(make_input(outlook, asof), fh, ensure_ascii=False, indent=1)
+        json.dump(make_input(outlook, asof, headsup), fh, ensure_ascii=False, indent=1)
+
+
+# ---------- ประกาศปรับราคาของผู้ค้าส่งที่รู้แล้ววันนี้ (ฟีด Entry_HeadsUp) ----------
+# ไม่แสดงรายการประกาศในข้อความ (ผู้ซื้อเห็นจากกลุ่มไลน์ของผู้ค้าอยู่แล้ว — เจ้าของระบบ 16/11/2026) ; ใช้เฉพาะเป็นเส้นตาย/ขนาดการขึ้นในคำแนะนำ
+FUEL_GROUP = {"B7": "DIESEL", "G95": "GASOHOL"}
+
+
+def _txt(v) -> str:
+    s = "" if v is None else str(v).strip()
+    return "" if s.lower() in ("", "nan", "none", "nat") else s
+
+
+def _hhmm(v) -> str:
+    """'9:00' / '23:30:00' → '09:00' / '23:30' ; อ่านไม่ได้ = ''"""
+    m = re.match(r"^(\d{1,2}):(\d{2})", _txt(v))
+    return f"{int(m.group(1)):02d}:{m.group(2)}" if m else ""
+
+
+def parse_rates(text: str) -> dict:
+    """'DIESEL:+1.00 GASOHOL:+1.00' → {'DIESEL': 1.0, 'GASOHOL': 1.0}"""
+    out = {}
+    for k, v in re.findall(r"([A-Z0-9]+):([+-]?\d+(?:\.\d+)?)", _txt(text)):
+        out[k] = float(v)
+    return out
+
+
+def notices(headsup: pd.DataFrame, asof) -> list:
+    """ประกาศ 'มีปรับขึ้น/ลง' ของวันเดียวกับ asof ที่โพสต์ก่อน/เท่ากับ asof รวมเป็นหนึ่งรายการต่อ (ผู้ค้า, ทิศ)
+    ผู้ค้ามักโพสต์หลายข้อความต่อการปรับหนึ่งครั้ง (แจ้งก่อน → เรท → เวลา) จึงใช้เรท/เวลาล่าสุดที่ระบุ ; n = จำนวนข้อความ
+    pending = ยังไม่ถึงเวลามีผล ณ asof (ไม่ระบุเวลา = ถือว่ายังไม่มีผล ; เวลาที่ระบุน้อยกว่าเวลาโพสต์ = ของวันถัดไป เช่น 00:00)"""
+    asof = pd.Timestamp(asof)
+    need = {"ts", "provider", "direction"}
+    if headsup is None or headsup.empty or not need.issubset(headsup.columns):
+        return []
+    h = headsup[(headsup.ts >= asof.normalize()) & (headsup.ts <= asof) & headsup.direction.isin(["UP", "DOWN"])].sort_values("ts")
+    out = []
+    for (prov, direction), g in h.assign(_p=h.provider.map(_txt)).groupby(["_p", "direction"], sort=False):
+        col = lambda c: [x for x in (g[c].map(_txt) if c in g.columns else []) if x]
+        stated = ([_hhmm(x) for x in col("stated_time") if _hhmm(x)] or [""])[-1]
+        posted = g.ts.iloc[-1]
+        pending = True
+        if stated:
+            eff = posted.normalize() + pd.Timedelta(hours=int(stated[:2]), minutes=int(stated[3:]))
+            if eff < posted - pd.Timedelta(minutes=30):          # เวลาที่ระบุอยู่ก่อนเวลาโพสต์มาก = ของวันถัดไป
+                eff += pd.Timedelta(days=1)
+            pending = eff > asof
+        out.append({"provider": prov, "dir": direction, "at": f"{posted:%H:%M}", "n": int(len(g)), "rates": (col("rates") or [""])[-1],
+                    "stated": stated, "scope": (col("scope") or ["ALL"])[-1], "pending": bool(pending)})
+    return out
+
+
+def pending_rise(inp: dict, fuel: str) -> dict | None:
+    """ประกาศขึ้นที่ยังไม่มีผลและครอบคลุมชนิดนี้ : {'amt': เรทสูงสุดที่ประกาศ หรือ None, 'when': เวลามีผลที่เร็วที่สุด หรือ ''} ; ไม่มี = None"""
+    grp = FUEL_GROUP[fuel]
+    hits = [n for n in (inp.get("notices") or []) if n["dir"] == "UP" and n["pending"]
+            and (n["scope"] in ("ALL", grp) or grp in parse_rates(n["rates"]))]
+    if not hits:
+        return None
+    amts = [parse_rates(n["rates"]).get(grp) for n in hits if parse_rates(n["rates"]).get(grp) is not None]
+    whens = sorted((n["stated"] for n in hits if n["stated"]), key=lambda t: (t < "12:00", t))      # 23:30 มาก่อน 00:00 ของวันถัดไป
+    return {"amt": max(amts) if amts else None, "when": whens[0] if whens else ""}
 
 
 # ---------- ข้อความ ----------
@@ -124,20 +189,67 @@ def fuel_block(name: str, f: dict) -> list:
 AVG_PM_DISCOUNT = "โดยเฉลี่ยราคาช่วง 16:00 ถูกกว่า 08:00 ราว 0.10 บาท/ลิตร"
 
 
-def timing_line(f: dict) -> str:
-    """คำแนะนำช่วงเวลาซื้อของวันถัดจากจุดอ้างอิง จากโมเดลรายช่วงเวลา (12:30 / 16:30) — ใช้เฉพาะทิศที่ผ่านเกณฑ์ walk-forward (ok)
-    ลำดับ (ตรึงก่อนเห็นผล) : ขึ้นภายในเที่ยง → ซื้อก่อนเช้า ; ลงภายใน 16:30 → รอบ่าย ; ยังสูงถึง 16:30 → การรอไม่ช่วย ; ไม่เข้าข้อใด = '' """
+def advice_line(f: dict, rise: dict | None) -> str:
+    """คำตอบของคำถามที่ต้องตัดสินใจจริง : ซื้อก่อนราคาขึ้นคืนนี้ หรือรอช่วงบ่ายพรุ่งนี้ — เทียบกับราคา ณ จุดอ้างอิง 20:30 (ก่อนการขึ้นคืนนี้)
+    หลักฐานฝั่ง "รอ"   : แนวโน้ม 24 ชม. ลง/ลงแรง หรือโมเดลรายช่วงเวลาบอกว่าราคา 16:30 พรุ่งนี้ต่ำกว่าคืนนี้ (เฉพาะทิศที่ผ่านเกณฑ์ walk-forward)
+    หลักฐานฝั่ง "รีบ" : แนวโน้ม 24 ชม. ขึ้น/ขึ้นแรง หรือราคา 16:30 พรุ่งนี้ยังสูงกว่าคืนนี้ ; ขึ้นภายในเที่ยงอย่างเดียว = รีบแบบอ่อน
+    กติกาตรึงก่อนเห็นผล (16/11/2026) : ฝั่งเดียว = แนะนำฝั่งนั้น ; สองฝั่ง = บอกว่าขัดกัน ; ไม่มีเลย = ไม่แนะนำ บอกเฉพาะข้อเท็จจริงของประกาศ
+    rise = ประกาศขึ้นที่ยังไม่มีผล (pending_rise) ใช้บอกเส้นตายและเตือนไม่ให้ซื้อช่วงเช้าหลังราคาขึ้น ไม่ใช้เป็นหลักฐานของทิศสุทธิ"""
     pf = {p["hours"]: p for p in (f.get("profile") or []) if p.get("call") and p.get("ok")}
-    pct = lambda p: f" (ย้อนหลังถูก {p['right']:.0%} จาก {int(p['n'])} ครั้ง)" if p.get("right") is not None and p.get("n") else ""
-    day = f"{pd.Timestamp(f['ref']) + pd.Timedelta(days=1):%d/%m}"
+    pct = lambda p: f"ย้อนหลังถูก {p['right']:.0%} จาก {int(p['n'])} ครั้ง" if p.get("right") is not None and p.get("n") else "ผ่านเกณฑ์ย้อนหลัง"
     noon, pm = pf.get(16), pf.get(20)
-    if noon and noon["call"] == "UP":
-        return f"ราคามักขึ้นภายในเที่ยงวันที่ {day} → ถ้าต้องซื้อ ซื้อก่อนเช้าวันนั้น{pct(noon)}"
+    tier = (f.get("h24") or {}).get("tier") or "UNCLEAR"
+    grade = (f.get("h24") or {}).get("grade") or "ต่ำ"
+    mv = (f.get("h24") or {}).get("avg_move")              # ขยับเฉลี่ยตามทิศที่ทาย จาก walk-forward (รวมครั้งที่ทายพลาด) = ส่วนต่างที่คาดได้
+    gain = f" · ย้อนหลังราคาต่างจากคืนนี้เฉลี่ย {abs(mv):.2f} บาท/ลิตร" if mv is not None and mv == mv and mv > 0 else ""
+    wait, buy = [], []
+    if tier.startswith("DOWN"):
+        wait.append(f"แนวโน้ม 24 ชม. {CALL_WORD[tier]} (ความเชื่อมั่น {grade}){gain}")
+    if tier.startswith("UP"):
+        buy.append(f"แนวโน้ม 24 ชม. {CALL_WORD[tier]} (ความเชื่อมั่น {grade}){gain}")
     if pm and pm["call"] == "DOWN":
-        return f"ราคามักลงภายใน 16:30 น. วันที่ {day} → ถ้ารอได้ รอซื้อช่วงบ่ายแก่{pct(pm)}"
+        wait.append(f"ราคา 16:30 น. พรุ่งนี้มักต่ำกว่าคืนนี้ ({pct(pm)})")
     if pm and pm["call"] == "UP":
-        return f"ราคามักยังสูงกว่าคืนก่อนถึง 16:30 น. วันที่ {day} → การรอไม่ช่วย{pct(pm)}"
-    return ""
+        buy.append(f"ราคา 16:30 น. พรุ่งนี้มักยังสูงกว่าคืนนี้ ({pct(pm)})")
+    if noon and noon["call"] == "UP" and not wait and not buy:
+        buy.append(f"ราคามักขึ้นภายในเที่ยงพรุ่งนี้ ({pct(noon)})")
+    amt = f" {rise['amt']:+.2f}" if rise and rise["amt"] is not None else ""
+    at = f" เวลา {rise['when']} น." if rise and rise["when"] else ""
+    before = f"ก่อน {rise['when']} น. คืนนี้" if rise and rise["when"] else "คืนนี้"
+    why = lambda xs: [f"   • {x}" for x in xs]
+    known = [f"   ⚠ คืนนี้ราคาจะขึ้น{amt}{at} ตามประกาศ"] if rise else []
+    if wait and not buy:
+        out = ["⏳ รอซื้อบ่ายพรุ่งนี้ (หลัง 16:00 น.)"] + why(wait)
+        if rise:
+            out.append(known[0] + " — คำแนะนำนี้มองราคาสุทธิถึงบ่ายพรุ่งนี้ จึงให้เลี่ยงซื้อช่วงเช้าหลังราคาขึ้น")
+    elif buy and not wait:
+        out = [f"🛒 ซื้อ{before} ก่อนราคาขึ้น{amt}" if rise else "🛒 ซื้อเร็ว ไม่ควรรอถึงบ่ายพรุ่งนี้"] + why(buy)
+    elif buy and wait:
+        out = ["⚖ สัญญาณขัดกัน ยังไม่แนะนำ"] + why([f"ชี้ให้รีบ: {x}" for x in buy] + [f"ชี้ให้รอ: {x}" for x in wait]) + known
+    else:
+        out = ["❔ ยังบอกไม่ได้ว่าควรรีบหรือรอ"]
+        if rise:
+            out += [known[0], f"   • ถ้าต้องใช้น้ำมันก่อนบ่ายพรุ่งนี้ ซื้อ{before}", "   • ถ้ารอถึงบ่ายได้ ยังไม่มีหลักฐานว่าทางไหนถูกกว่า"]
+    # ข้อความนี้ถูกอ่านได้ถึง 24 ชม. หลังออก (เช่น พิมพ์ถามเช้าวันถัดไป) จึงระบุวันที่แทนคำว่า คืนนี้/พรุ่งนี้
+    ref = pd.Timestamp(f["ref"])
+    text = re.sub(r"พรุ่งนี้(?=\S)", f"วันที่ {ref + pd.Timedelta(days=1):%d/%m} ", "\n".join(out)).replace("พรุ่งนี้", f"วันที่ {ref + pd.Timedelta(days=1):%d/%m}")
+    return re.sub(r"คืนนี้(?=\S)", f"คืน {ref:%d/%m} ", text).replace("คืนนี้", f"คืน {ref:%d/%m}")
+
+
+def advice_lines(inp: dict, ok: list) -> list:
+    """ส่วน 'ควรซื้อเมื่อไร' : เฉพาะคำทายรอบ 20:30 (โมเดลรายช่วงเวลามีเฉพาะรอบนี้)"""
+    fuels = inp.get("fuels", {})
+    if not ok or pd.Timestamp(fuels[ok[0][0]]["ref"]).strftime("%H:%M") != "20:30":
+        return []
+    ref = pd.Timestamp(fuels[ok[0][0]]["ref"])
+    day = ref + pd.Timedelta(days=1)
+    same_night = pd.Timestamp(inp["asof"]).normalize() == ref.normalize()      # อ่านวันถัดไป : ประกาศในข้อมูลเข้าเป็นของวันใหม่ และช่วงซื้อก่อนขึ้นผ่านไปแล้ว
+    out = [f"🧭 ควรซื้อเมื่อไร (คืน {ref:%d/%m} หรือบ่าย {day:%d/%m}) [ทดลอง ยังไม่มีผลจริง]"]
+    if not same_night:
+        out.append(f"(ออกเมื่อ 20:30 น. {ref:%d/%m} — ช่วงซื้อก่อนราคาขึ้นของคืนนั้นผ่านไปแล้ว)")
+    for fuel, name in ok:
+        out.append(f"{name}: {advice_line(fuels[fuel], pending_rise(inp, fuel) if same_night else None)}")
+    return out + [f"(เทียบกับราคา ณ 20:30 น. {ref:%d/%m} · ไม่รวมเวลาเดินทางของรถและเงื่อนไขคลัง · {AVG_PM_DISCOUNT})", ""]
 
 
 def _mark(tier: str, delta: float) -> str:
@@ -247,7 +359,7 @@ def build_message(inp: dict, log: pd.DataFrame, on_demand: bool = False, retail:
     bad = {fuel: usable(fuels.get(fuel), asof, on_demand) for fuel, _ in FUELS}
     ok = [(fuel, name) for fuel, name in FUELS if not bad[fuel]]
     ref_id = f"{asof:%Y-%m-%d} 20:30"
-    lines = ["🛢 พยากรณ์ราคาน้ำมัน"] + section(("① " if retail is not None else "") + "ราคาส่ง (Jobber) · 24 ชม.ข้างหน้า", "ราคาต่ำสุดที่ผู้ค้าส่งประกาศหน้าคลัง จะขึ้นหรือลง")
+    lines = ["🛢 พยากรณ์ราคาน้ำมัน"] + advice_lines(inp, ok) + section(("① " if retail is not None else "") + "ราคาส่ง (Jobber) · 24 ชม.ข้างหน้า", "ราคาต่ำสุดที่ผู้ค้าส่งประกาศหน้าคลัง จะขึ้นหรือลง")
     if ok:
         ref = pd.Timestamp(fuels[ok[0][0]]["ref"])
         lines += [f"ข้อมูล {ref:%H:%M} น. {ref:%d/%m} · ใช้ได้ถึง {ref:%H:%M} น. {ref + pd.Timedelta(days=1):%d/%m}"]
@@ -256,16 +368,13 @@ def build_message(inp: dict, log: pd.DataFrame, on_demand: bool = False, retail:
         lines.append("")
     else:
         lines += [("ตอนนี้" if on_demand else f"คืนนี้ ({asof:%d/%m})") + " ไม่มีคำทาย", ""]
-    unclear, timing = [], []
+    unclear = []
     for fuel, name in FUELS:
         if bad[fuel]:
             lines += [f"{name}: ไม่มีคำทาย — {bad[fuel]}", ""]
             continue
         f = fuels[fuel]
         lines += fuel_block(name, f)
-        tl = timing_line(f)
-        if tl:
-            timing.append(f"⏰ {name}: {tl}")
         if f["h24"]["tier"] == "UNCLEAR":
             unclear.append(f)
         else:
@@ -278,11 +387,6 @@ def build_message(inp: dict, log: pd.DataFrame, on_demand: bool = False, retail:
         if ups or downs:
             lines += ["", "สัญญาณคืนนี้"] + ([f"• ชี้ขึ้น: {', '.join(ups[:2])}"] if ups else []) + ([f"• ชี้ลง: {', '.join(downs[:2])}"] if downs else [])
         lines.append("")
-    if ok:                                                # ช่วงเวลาซื้อของวันพรุ่งนี้ (เฉพาะคำทายรอบ 20:30 ; ไม่มีสัญญาณก็บอกข้อเท็จจริงเฉลี่ย)
-        is_eve = pd.Timestamp(fuels[ok[0][0]]["ref"]).strftime("%H:%M") == "20:30"
-        if is_eve:
-            day = pd.Timestamp(fuels[ok[0][0]]["ref"]) + pd.Timedelta(days=1)
-            lines += [f"เวลาซื้อวันที่ {day:%d/%m} [ทดลอง ยังไม่มีผลจริง]"] + (timing if timing else ["ไม่มีสัญญาณเรื่องเวลา"]) + [f"({AVG_PM_DISCOUNT})", ""]
     lines += ["ผลงานที่ผ่านมา (ราคาส่ง Jobber)"] + last_results(log) + [""] + live_summary(log) + [""]
     if retail is not None:
         lines += retail_lines(retail, asof) + [""]

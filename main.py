@@ -1631,10 +1631,10 @@ def main():
         retail_raw = pd.DataFrame()
     try:                                                   # ข้อมูลเข้าของข้อความไลน์ส่วนตัว (ช่วงทดสอบ ดู line_outlook.py) — ล้มเหลวต้องไม่กระทบหน้าเว็บ
         import line_outlook
-        line_outlook.write_input(outlook, asof)
+        line_outlook.write_input(outlook, asof, headsup=tables.headsup)
         # ข้อความสำหรับตอบเมื่อพิมพ์ "forecast" ในแชทส่วนตัว (Worker อ่านจาก outlook.json ช่อง line_text) — มีพยากรณ์ราคาขายปลีกต่อท้าย
         pub = json.loads(open("outlook.json", encoding="utf-8").read())
-        pub["line_text"] = line_outlook.build_message(line_outlook.make_input(outlook, asof), outlook_log, on_demand=True,
+        pub["line_text"] = line_outlook.build_message(line_outlook.make_input(outlook, asof, tables.headsup), outlook_log, on_demand=True,
                                                       retail=PS.prep_retail(retail_raw))[0]
         write_text("outlook.json", json.dumps(pub, ensure_ascii=False, indent=1))
     except Exception as e:
