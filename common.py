@@ -33,6 +33,7 @@ TABS = {
     "RETAIL_LOG": "RetailLog",
     "FORECAST_CARD": "ForecastCardLog",
     "RETAIL_FC": "RetailFcLog",
+    "LINE_TEST_LOG": "LineTestLog",     # บันทึกข้อความที่ส่งเข้าไลน์ส่วนตัว (ช่วงทดสอบ) กันส่งซ้ำ
 }
 
 TZ_NAME = "Asia/Bangkok"
