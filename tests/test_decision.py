@@ -238,6 +238,12 @@ class ModelCheckTests(unittest.TestCase):
         self.assertNotIn("FAIL", self.levels(t)); self.assertIn("WARN", self.levels(t))
         self.assertNotIn("FAIL", self.levels(self.C.judge(503, None, {"a": (429, "rate limit")})))
 
+    def test_default_text_model_is_listed_one(self):
+        import os
+        import news
+        if not os.environ.get("DEEPSEEK_MODEL"):
+            self.assertEqual((self.C.TEXT_MODEL, news.DEEPSEEK_MODEL), ("deepseek-flash", "deepseek-flash"))   # deepseek-chat หายจากรายชื่อของ key แล้ว
+
     def test_bad_key_fails(self):
         self.assertIn("FAIL", self.levels(self.C.judge(401, None, {"a": (401, "unauthorized")})))
 

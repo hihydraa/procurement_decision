@@ -42,7 +42,7 @@ python3 tests/smoke_offline.py <data_dir> <eppo_raw.json> "2026-10-20 20:35"   #
 ## Secrets
 
 `SA_EMAIL`, `SA_PRIVATE_KEY` (ชีท), `OILPRICEAPI_KEY` (WTI), `DEEPSEEK_API_KEY` (NEWS + ตรวจโมเดล)
-ตัวแปร repository (ไม่บังคับ): `DEEPSEEK_MODEL`, `DEEPSEEK_VISION_MODEL` — ตั้งให้ตรงกับที่ตั้งทับใน Cloudflare (ว่าง = deepseek-chat / deepseek-flash)
+ตัวแปร repository (ไม่บังคับ): `DEEPSEEK_MODEL`, `DEEPSEEK_VISION_MODEL` — ตั้งให้ตรงกับที่ตั้งทับใน Cloudflare (ว่าง = deepseek-flash ทั้งข้อความและรูป ; `deepseek-chat` หายจากรายชื่อโมเดลของ key แล้ว ต้องตั้ง `DEEPSEEK_MODEL` ของ Worker ให้ตรงด้วย)
 
 ## แนวโน้มราคา 24/48 ชม. (ข้อความกลาง)
 
