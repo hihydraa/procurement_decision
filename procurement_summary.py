@@ -331,7 +331,7 @@ def retail_live_stats(retail: pd.DataFrame, code: str) -> dict:
     out = {"n": 0, "n_called": 0, "n_right": 0}
     if retail is None or retail.empty or "filled_at" not in retail.columns:
         return out
-    r = retail[(retail["fuel"] == code) & (retail["filled_at"].astype(str).str.strip() != "")]
+    r = retail[(retail["fuel"] == code) & ~retail["filled_at"].fillna("").astype(str).str.strip().isin(["", "nan", "None"])]   # ช่องว่างจากชีทอ่านมาเป็น NaN
     out["n"] = int(len(r))
     called = r[r["call"].isin(["ลง", "นิ่ง", "ขึ้น"])]
     out["n_called"] = int(len(called))

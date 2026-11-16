@@ -3,7 +3,9 @@
 
 เนื้อหา : ใช้โมเดลเดียว คือแนวโน้ม Jobber 24 ชม. จากข้อมูล 20:30 (ตัวเดียวที่ผลจริงเริ่มเข้ากับผลทดสอบย้อนหลัง)
           + เหตุผลสั้น ๆ + ผลของคำทายล่าสุดที่รู้ผลแล้ว + สถิติผลจริงสะสมจาก OutlookLog
-          ไม่รวมแนวโน้ม 48 ชม. การ์ดต้นทุนขายส่ง และราคาขายปลีก (ยังไม่มีหลักฐานพอ)
+          ไม่รวมแนวโน้ม 48 ชม. และการ์ดต้นทุนขายส่ง (ยังไม่มีหลักฐานพอ)
+          ข้อความตอบเมื่อพิมพ์ "forecast" (on_demand) มีพยากรณ์ราคาขายปลีกจาก RetailFcLog ต่อท้ายด้วย ติดป้าย [ทดลอง] — ข้อความประจำคืนไม่มี
+          เพราะส่งก่อนการ์ดรอบ 21:30 ซึ่งเป็นรอบที่ออกพยากรณ์ปลีก
 ความปลอดภัย : ปลายทางมาจาก Secret LINE_TEST_USER_ID เท่านั้น และต้องเป็นรหัสผู้ใช้ (ขึ้นต้น U) — รหัสกลุ่ม/ห้อง (C/R) ถูกปฏิเสธ
               ไม่มี Secret = ไม่ส่ง (ไม่ถือเป็นข้อผิดพลาด) ; ส่งครั้งเดียวต่อจุดอ้างอิง (บันทึกในแท็บ LineTestLog)
 
@@ -154,8 +156,63 @@ def live_summary(log: pd.DataFrame) -> list:
     return [f"สถิติผลจริงตั้งแต่ {first:%d/%m} ({days}/{READY_DAYS} วัน)", f"ฟันธง {calls} ครั้ง · ถูก {right} · ผิดทิศ {wrong} · ราคานิ่ง {flat}"]
 
 
-def build_message(inp: dict, log: pd.DataFrame, on_demand: bool = False) -> tuple:
-    """(ข้อความ, รหัสจุดอ้างอิงสำหรับกันส่งซ้ำ) ; on_demand = ข้อความสำหรับตอบเมื่อพิมพ์ถาม (ใช้คำทายล่าสุดที่ยังไม่หมดอายุ)"""
+# ---------- ราคาขายปลีก (ทดลอง) : เฉพาะข้อความตอบเมื่อพิมพ์ถาม ----------
+RETAIL_CALL = {"ลง": "📉 น่าจะปรับลง", "ขึ้น": "📈 น่าจะปรับขึ้น", "นิ่ง": "➖ น่าจะไม่ปรับ"}
+RETAIL_NONE = "ยังไม่มีพยากรณ์ของวันถัดไป (ออกหลัง 21:30 น. คืนจันทร์–พฤหัสบดี)"
+
+
+def _f(v):
+    try:
+        x = float(v)
+        return None if x != x else x
+    except (TypeError, ValueError):
+        return None
+
+
+def _probs(r, keys) -> str:
+    p = [_f(r.get(k)) for k in keys]
+    return "" if None in p else f"ลง {p[0]:.0%} / ไม่ปรับ {p[1]:.0%} / ขึ้น {p[2]:.0%}"
+
+
+def retail_lines(retail: pd.DataFrame, asof: pd.Timestamp) -> list:
+    """ส่วนราคาขายปลีกของข้อความ จาก RetailFcLog ที่ผ่าน procurement_summary.prep_retail (มี asof_dt, target_dt)
+    ใช้แถวล่าสุดของแต่ละชนิด เฉพาะที่วันเป้าหมายยังไม่ผ่าน (วันนี้หรือพรุ่งนี้) ; วันเป้าหมาย = วันนี้และรู้ผลแล้ว จะบอกผลจริงด้วย
+    บรรทัดหลัก = วิธีที่แสดงบนหน้าเว็บ (โอกาสของราคาขายส่ง × ความถี่ที่ปลีกตาม) ; บรรทัด "โมเดลสัญญาณ" = โมเดลคู่ขนาน (sig_*) ถ้ามี"""
+    import procurement_summary as PS
+    out = ["⛽ ราคาขายปลีก [ทดลอง ยังไม่ผ่านการทดสอบเดินหน้า]"]
+    today, stats = pd.Timestamp(asof).normalize(), []
+    for fuel, name in FUELS:
+        r = PS.latest_retail(retail, fuel)
+        if not r or pd.Timestamp(r["target_dt"]).normalize() < today:
+            last = f" ; ล่าสุดเป็นของวันที่ {pd.Timestamp(r['target_dt']):%d/%m}" if r else ""
+            out.append(f"{name}: {RETAIL_NONE}{last}")
+        else:
+            call = str(r.get("call") or "").strip()
+            out.append(f"{name} (วันที่ {pd.Timestamp(r['target_dt']):%d/%m}): {RETAIL_CALL.get(call, '❓ ยังไม่ชัดเจน')}")
+            p, base = _probs(r, ("p_down", "p_flat", "p_up")), _f(r.get("retail_base"))
+            if p:
+                out.append(f"• โอกาส {p}")
+            sig = _probs(r, ("sig_p_down", "sig_p_flat", "sig_p_up"))
+            if sig:
+                out.append(f"• โมเดลสัญญาณ (คู่ขนาน): {sig}")
+            size = str(r.get("size_text") or "").strip()
+            detail = ([f"ปลีกล่าสุดใน EPPO {base:.2f}"] if base is not None else []) + ([size] if size and size != "nan" else [])
+            if detail:
+                out.append("• " + " · ".join(detail))
+            d = _f(r.get("outcome_dretail"))
+            if d is not None:
+                ok = str(r.get("outcome_cls") or "").strip()
+                mark = "" if call not in RETAIL_CALL else " ✅" if ok == call else " ❌"
+                out.append(f"• ผลจริง: {'ไม่ปรับ' if abs(d) < 0.005 else f'ปรับ {d:+.2f} บาท/ลิตร'}{mark}")
+        s = PS.retail_live_stats(retail, fuel)
+        if s["n"]:
+            stats.append(f"{name} รู้ผล {s['n']} วัน ฟันธง {s['n_called']} ถูก {s['n_right']}")
+    return out + ([f"ผลจริงสะสม: {' · '.join(stats)}"] if stats else [])
+
+
+def build_message(inp: dict, log: pd.DataFrame, on_demand: bool = False, retail: pd.DataFrame = None) -> tuple:
+    """(ข้อความ, รหัสจุดอ้างอิงสำหรับกันส่งซ้ำ) ; on_demand = ข้อความสำหรับตอบเมื่อพิมพ์ถาม (ใช้คำทายล่าสุดที่ยังไม่หมดอายุ)
+    retail = RetailFcLog ที่ผ่าน prep_retail แล้ว (None = ไม่ใส่ส่วนราคาขายปลีก เช่น ข้อความประจำคืน)"""
     asof = pd.Timestamp(inp["asof"])
     fuels = inp.get("fuels", {})
     bad = {fuel: usable(fuels.get(fuel), asof, on_demand) for fuel, _ in FUELS}
@@ -197,6 +254,8 @@ def build_message(inp: dict, log: pd.DataFrame, on_demand: bool = False) -> tupl
         if is_eve:
             day = pd.Timestamp(fuels[ok[0][0]]["ref"]) + pd.Timedelta(days=1)
             lines += [f"เวลาซื้อวันที่ {day:%d/%m} [ทดลอง ยังไม่มีผลจริง]"] + (timing if timing else ["ไม่มีสัญญาณเรื่องเวลา"]) + [f"({AVG_PM_DISCOUNT})", ""]
+    if retail is not None:
+        lines += retail_lines(retail, asof) + [""]
     lines += last_results(log) + [""] + live_summary(log) + ["", FOOTER]
     text = "\n".join(lines)
     return re.sub(r"\n{3,}", "\n\n", text), ref_id
