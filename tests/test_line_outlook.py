@@ -335,43 +335,51 @@ class AdviceTest(unittest.TestCase):
 
     def test_wait_buy_conflict_and_none(self):
         wait = L.advice_line(self._f("DOWN_STRONG", (20, "16:30", "DOWN", True, 163, 0.64)), self.RISE)
-        self.assertTrue(wait.startswith("⏳ รอซื้อบ่ายพรุ่งนี้ (หลัง 16:00 น.)"))
+        self.assertTrue(wait.startswith("⏳ รอซื้อบ่ายวันที่ 13/11 (หลัง 16:00 น.)"))
         self.assertIn("• แนวโน้ม 24 ชม. ลงแรง (ความเชื่อมั่น กลาง)\n", wait)
         f = self._f("DOWN_STRONG")
         f["h24"]["avg_move"] = 0.496
-        self.assertIn("• แนวโน้ม 24 ชม. ลงแรง (ความเชื่อมั่น กลาง) · ย้อนหลังราคาต่างจากคืนนี้เฉลี่ย 0.50 บาท/ลิตร", L.advice_line(f, None))
-        self.assertIn("• ราคา 16:30 น. พรุ่งนี้มักต่ำกว่าคืนนี้ (ย้อนหลังถูก 64% จาก 163 ครั้ง)", wait)
-        self.assertIn("⚠ คืนนี้ราคาจะขึ้น +1.00 เวลา 23:30 น. ตามประกาศ", wait)
+        self.assertIn("• แนวโน้ม 24 ชม. ลงแรง (ความเชื่อมั่น กลาง) · ย้อนหลังราคาต่างจากคืน 12/11 เฉลี่ย 0.50 บาท/ลิตร", L.advice_line(f, None))
+        self.assertIn("• ราคา 16:30 น. วันที่ 13/11 มักต่ำกว่าคืน 12/11 (ย้อนหลังถูก 64% จาก 163 ครั้ง)", wait)
+        self.assertIn("⚠ คืน 12/11 ราคาจะขึ้น +1.00 เวลา 23:30 น. ตามประกาศ", wait)
         self.assertIn("เลี่ยงซื้อช่วงเช้าหลังราคาขึ้น", wait)
         buy = L.advice_line(self._f("UP", (20, "16:30", "UP", True, 154, 0.68)), self.RISE)
-        self.assertTrue(buy.startswith("🛒 ซื้อก่อน 23:30 น. คืนนี้ ก่อนราคาขึ้น +1.00"))
-        self.assertTrue(L.advice_line(self._f("UP"), None).startswith("🛒 ซื้อเร็ว ไม่ควรรอถึงบ่ายพรุ่งนี้"))
+        self.assertTrue(buy.startswith("🛒 ซื้อก่อน 23:30 น. คืน 12/11 ก่อนราคาขึ้น +1.00"))
+        self.assertTrue(L.advice_line(self._f("UP"), None).startswith("🛒 ซื้อเร็ว ไม่ควรรอถึงบ่ายวันที่ 13/11"))
         both = L.advice_line(self._f("UP_STRONG", (20, "16:30", "DOWN", True, 186, 0.69)), self.RISE)
         self.assertTrue(both.startswith("⚖ สัญญาณขัดกัน ยังไม่แนะนำ"))
         self.assertIn("ชี้ให้รีบ: แนวโน้ม 24 ชม. ขึ้นแรง", both)
         self.assertIn("ชี้ให้รอ: ราคา 16:30 น.", both)
         none = L.advice_line(self._f("UNCLEAR", (20, "16:30", "DOWN", False, 110, 0.56)), self.RISE)      # ทิศที่ไม่ผ่านเกณฑ์ไม่ถูกใช้
         self.assertTrue(none.startswith("❔ ยังบอกไม่ได้ว่าควรรีบหรือรอ"))
-        self.assertIn("ถ้าต้องใช้น้ำมันก่อนบ่ายพรุ่งนี้ ซื้อก่อน 23:30 น. คืนนี้", none)
+        self.assertIn("ถ้าต้องใช้น้ำมันก่อนบ่ายวันที่ 13/11 ซื้อก่อน 23:30 น. คืน 12/11", none)
         self.assertEqual(L.advice_line(self._f(), None), "❔ ยังบอกไม่ได้ว่าควรรีบหรือรอ")
         noon = L.advice_line(self._f("UNCLEAR", (16, "12:30", "UP", True, 221, 0.75)), None)              # ขึ้นภายในเที่ยงอย่างเดียว = รีบแบบอ่อน
-        self.assertIn("ราคามักขึ้นภายในเที่ยงพรุ่งนี้ (ย้อนหลังถูก 75% จาก 221 ครั้ง)", noon)
+        self.assertIn("ราคามักขึ้นภายในเที่ยงวันที่ 13/11 (ย้อนหลังถูก 75% จาก 221 ครั้ง)", noon)
         noon_then_down = L.advice_line(self._f("UNCLEAR", (16, "12:30", "UP", True, 221, 0.75), (20, "16:30", "DOWN", True, 186, 0.69)), None)
-        self.assertTrue(noon_then_down.startswith("⏳ รอซื้อบ่ายพรุ่งนี้"))                              # ขึ้นเช้าแล้วลงบ่าย = รอ
+        self.assertTrue(noon_then_down.startswith("⏳ รอซื้อบ่ายวันที่ 13/11"))                              # ขึ้นเช้าแล้วลงบ่าย = รอ
 
     def test_message_section(self):
         inp = _inp(b7="UNCLEAR", g95="DOWN_STRONG")
         inp["fuels"]["G95"]["profile"] = self._f("x", (20, "16:30", "DOWN", True, 163, 0.64))["profile"]
         inp["notices"] = L.notices(_headsup(*HEADSUP), pd.Timestamp(inp["asof"]))
         text, _ = L.build_message(inp, _log())
-        self.assertTrue(text.startswith("🛢 พยากรณ์ราคาน้ำมัน\n🧭 ควรซื้อเมื่อไร (คืนนี้ หรือ 13/11) [ทดลอง ยังไม่มีผลจริง]"))
+        self.assertTrue(text.startswith("🛢 พยากรณ์ราคาน้ำมัน\n🧭 ควรซื้อเมื่อไร (คืน 12/11 หรือบ่าย 13/11) [ทดลอง ยังไม่มีผลจริง]"))
         self.assertNotIn("📢", text)                                                      # ไม่แสดงรายการประกาศซ้ำ (ผู้ซื้อเห็นอยู่แล้ว)
         self.assertNotIn("ไออาร์", text)
         self.assertLess(text.index("🧭"), text.index("ราคาส่ง (Jobber) · 24 ชม.ข้างหน้า"))
-        self.assertIn("ดีเซล: ❔ ยังบอกไม่ได้ว่าควรรีบหรือรอ\n   ⚠ คืนนี้ราคาจะขึ้น +1.00 เวลา 23:30 น. ตามประกาศ", text)
-        self.assertIn("แก๊สโซฮอล์ 95: ⏳ รอซื้อบ่ายพรุ่งนี้ (หลัง 16:00 น.)", text)
+        self.assertIn("ดีเซล: ❔ ยังบอกไม่ได้ว่าควรรีบหรือรอ\n   ⚠ คืน 12/11 ราคาจะขึ้น +1.00 เวลา 23:30 น. ตามประกาศ", text)
+        self.assertIn("แก๊สโซฮอล์ 95: ⏳ รอซื้อบ่ายวันที่ 13/11 (หลัง 16:00 น.)", text)
         self.assertIn(L.AVG_PM_DISCOUNT, text)
         self.assertNotIn("เวลาซื้อวันที่", text)                                           # ส่วนเดิมถูกแทนด้วยส่วนนี้
+        self.assertNotIn("คืนนี้", text.split(L.SEP)[0])                                  # ระบุวันที่เสมอ ไม่ใช้คำว่า คืนนี้/พรุ่งนี้
+        self.assertNotIn("พรุ่งนี้", text.split(L.SEP)[0])
+        morning = dict(inp, asof="2026-11-13 09:10")                                     # พิมพ์ถามเช้าวันถัดไป : เส้นตายคืนก่อนผ่านไปแล้ว
+        morning["notices"] = [{"provider": "SFL", "dir": "UP", "at": "08:30", "n": 1, "rates": "DIESEL:+0.50", "stated": "", "scope": "ALL", "pending": True}]
+        late, _ = L.build_message(morning, _log(), on_demand=True)
+        self.assertIn("(ออกเมื่อ 20:30 น. 12/11 — ช่วงซื้อก่อนราคาขึ้นของคืนนั้นผ่านไปแล้ว)", late)
+        self.assertNotIn("ตามประกาศ", late)                                              # ประกาศของวันใหม่ไม่ถูกนำมาอ้างเป็นของคืนก่อน
+        self.assertIn("แก๊สโซฮอล์ 95: ⏳ รอซื้อบ่ายวันที่ 13/11 (หลัง 16:00 น.)", late)
         pm, _ = L.build_message(_inp(asof="2026-11-13 16:00", ref="2026-11-13 15:30"), _log(), on_demand=True)
         self.assertNotIn("🧭", pm)                                                       # รอบบ่ายไม่มีโมเดลรายช่วงเวลา
         none, _ = L.build_message(_inp(ref="2026-11-11 20:30"), _log())

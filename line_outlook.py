@@ -230,7 +230,10 @@ def advice_line(f: dict, rise: dict | None) -> str:
         out = ["❔ ยังบอกไม่ได้ว่าควรรีบหรือรอ"]
         if rise:
             out += [known[0], f"   • ถ้าต้องใช้น้ำมันก่อนบ่ายพรุ่งนี้ ซื้อ{before}", "   • ถ้ารอถึงบ่ายได้ ยังไม่มีหลักฐานว่าทางไหนถูกกว่า"]
-    return "\n".join(out)
+    # ข้อความนี้ถูกอ่านได้ถึง 24 ชม. หลังออก (เช่น พิมพ์ถามเช้าวันถัดไป) จึงระบุวันที่แทนคำว่า คืนนี้/พรุ่งนี้
+    ref = pd.Timestamp(f["ref"])
+    text = re.sub(r"พรุ่งนี้(?=\S)", f"วันที่ {ref + pd.Timedelta(days=1):%d/%m} ", "\n".join(out)).replace("พรุ่งนี้", f"วันที่ {ref + pd.Timedelta(days=1):%d/%m}")
+    return re.sub(r"คืนนี้(?=\S)", f"คืน {ref:%d/%m} ", text).replace("คืนนี้", f"คืน {ref:%d/%m}")
 
 
 def advice_lines(inp: dict, ok: list) -> list:
@@ -238,11 +241,15 @@ def advice_lines(inp: dict, ok: list) -> list:
     fuels = inp.get("fuels", {})
     if not ok or pd.Timestamp(fuels[ok[0][0]]["ref"]).strftime("%H:%M") != "20:30":
         return []
-    day = pd.Timestamp(fuels[ok[0][0]]["ref"]) + pd.Timedelta(days=1)
-    out = [f"🧭 ควรซื้อเมื่อไร (คืนนี้ หรือ {day:%d/%m}) [ทดลอง ยังไม่มีผลจริง]"]
+    ref = pd.Timestamp(fuels[ok[0][0]]["ref"])
+    day = ref + pd.Timedelta(days=1)
+    same_night = pd.Timestamp(inp["asof"]).normalize() == ref.normalize()      # อ่านวันถัดไป : ประกาศในข้อมูลเข้าเป็นของวันใหม่ และช่วงซื้อก่อนขึ้นผ่านไปแล้ว
+    out = [f"🧭 ควรซื้อเมื่อไร (คืน {ref:%d/%m} หรือบ่าย {day:%d/%m}) [ทดลอง ยังไม่มีผลจริง]"]
+    if not same_night:
+        out.append(f"(ออกเมื่อ 20:30 น. {ref:%d/%m} — ช่วงซื้อก่อนราคาขึ้นของคืนนั้นผ่านไปแล้ว)")
     for fuel, name in ok:
-        out.append(f"{name}: {advice_line(fuels[fuel], pending_rise(inp, fuel))}")
-    return out + [f"(เทียบกับราคา ณ 20:30 น. คืนนี้ · ไม่รวมเวลาเดินทางของรถและเงื่อนไขคลัง · {AVG_PM_DISCOUNT})", ""]
+        out.append(f"{name}: {advice_line(fuels[fuel], pending_rise(inp, fuel) if same_night else None)}")
+    return out + [f"(เทียบกับราคา ณ 20:30 น. {ref:%d/%m} · ไม่รวมเวลาเดินทางของรถและเงื่อนไขคลัง · {AVG_PM_DISCOUNT})", ""]
 
 
 def _mark(tier: str, delta: float) -> str:
