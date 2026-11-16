@@ -92,6 +92,27 @@ class MessageTest(unittest.TestCase):
         self.assertIn("ดีเซล: ไม่มีคำทาย — ยังไม่มีโมเดล", text)
 
 
+class SheetReadTest(unittest.TestCase):
+    """OutlookLog อ่านจากชีทแบบ UNFORMATTED_VALUE : วันที่/เวลาเป็นเลขลำดับวัน (พบจริงตอน dry-run 16/11/2026 : สถิติว่างทั้งที่มีผล)"""
+
+    def test_serial_dates_are_converted(self):
+        from datetime import datetime
+        from common import EXCEL_EPOCH
+        ser = lambda s: (datetime.strptime(s, "%Y-%m-%d %H:%M") - EXCEL_EPOCH).total_seconds() / 86400
+        head = ["asof", "date", "ref", "fuel", "hours", "tier", "outcome_delta", "backfilled"]
+        values = [head,
+                  [ser("2026-11-11 20:45"), ser("2026-11-11 00:00"), ser("2026-11-11 20:30"), "B7", 24, "UP", 0.86, 0],
+                  ["2026-11-11 20:45", "2026-11-11", "2026-11-11 20:30", "G95", 24, "UNCLEAR", 0.63],          # แถวสั้น + เป็นข้อความ
+                  [ser("2026-11-12 20:45"), ser("2026-11-12 00:00"), ser("2026-11-12 20:30"), "B7", 24, "UP", "", 0]]
+        df = L.log_frame(values)
+        self.assertEqual(list(df.ref), ["2026-11-11 20:30", "2026-11-11 20:30", "2026-11-12 20:30"])
+        self.assertEqual(df.date[0], "2026-11-11")
+        text, _ = L.build_message(_inp(), df)
+        self.assertIn("ดีเซล: ทายขึ้น → จริง +0.86 ✅", text)
+        self.assertIn("ฟันธง 1 ครั้ง · ถูก 1", text)
+        self.assertTrue(L.log_frame([]).empty)
+
+
 class SendTest(unittest.TestCase):
     def test_only_personal_user_id(self):
         self.assertTrue(L.valid_user_id(UID))

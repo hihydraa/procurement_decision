@@ -21,7 +21,7 @@ import requests
 
 import engine as E
 import model as M
-from common import SHEET_ID, TABS, TZ_NAME, ensure_tab, get_token, sheets_append, sheets_get, sheets_update
+from common import SHEET_ID, TABS, TZ_NAME, ensure_tab, get_token, sheets_append, sheets_get, sheets_update, to_ts
 
 INPUT_FILE = "line_outlook_input.json"
 LOG_TAB = TABS.get("LINE_TEST_LOG", "LineTestLog")
@@ -196,7 +196,13 @@ def log_frame(values: list) -> pd.DataFrame:
     if not values or len(values) < 2:
         return pd.DataFrame()
     head = [str(h).strip() for h in values[0]]
-    return pd.DataFrame([[(r[i] if i < len(r) else "") for i in range(len(head))] for r in values[1:]], columns=head)
+    df = pd.DataFrame([[(r[i] if i < len(r) else "") for i in range(len(head))] for r in values[1:]], columns=head)
+    # ชีทอ่านแบบ UNFORMATTED_VALUE : วันที่/เวลามาเป็นเลขลำดับวัน (เช่น 46338.854) ต้องแปลงก่อน ไม่งั้นทุกแถวถูกมองว่าไม่ใช่รอบ 20:30
+    for c, fmt in (("asof", "%Y-%m-%d %H:%M"), ("ref", "%Y-%m-%d %H:%M"), ("date", "%Y-%m-%d")):
+        if c in df.columns:
+            ts = pd.to_datetime(df[c].map(to_ts), errors="coerce").dt.round("min")
+            df[c] = ts.dt.strftime(fmt).fillna("")
+    return df
 
 
 def already_sent(rows: list, ref_id: str) -> bool:
