@@ -278,6 +278,45 @@ def fit_outlook_into(book, tables, params, summary):
                   + " ".join(f"{M.OUTLOOK_TIERS[c]}:{t[c]['n']}" + (f"({t[c]['right10']:.0%}/{t[c]['wrong10']:.0%},{t[c]['grade']})" if t[c].get('grade') else "") for c in M.OUTLOOK_TIERS))
 
 
+def profile_dir_stats(y, up, dn):
+    """สถิติ walk-forward แยกทิศที่ฟันธง : n, right (ขยับตามทิศ >= 10 สต.), wrong (สวนทิศ >= 10 สต.), right ครึ่งแรก/ครึ่งหลัง"""
+    out, first = {}, np.arange(len(y)) < len(y) // 2
+    for name, m, sgn in (("up", up, 1.0), ("down", dn, -1.0)):
+        mv = y * sgn
+        r = lambda k: float((mv[k] >= M.OUTLOOK_SMALL).mean()) if k.sum() else None
+        out[name] = {"n": int(m.sum()), "right": r(m), "wrong": float((mv[m] <= -M.OUTLOOK_SMALL).mean()) if m.sum() else None,
+                     "right_h1": r(m & first), "right_h2": r(m & ~first)}
+        st = out[name]
+        st["ok"] = bool(st["n"] >= M.PROFILE_MIN_N and st["right"] >= M.PROFILE_MIN_RIGHT and st["wrong"] <= M.PROFILE_MAX_WRONG
+                        and min(st["right_h1"] or 0, st["right_h2"] or 0) >= 0.55)
+    return out
+
+
+def fit_profile_into(book, tables, params, summary):
+    """โมเดล "ราคา ณ ช่วงเวลาของวันพรุ่งนี้" จากจุดอ้างอิง 20:30 (key {ชนิด}_T{ชม.}) : ขึ้น/ลง >= 10 สต. ; ชุดฟีเจอร์ v2
+    เก็บใน params['outlook']['profile'] (ไม่กระทบ models/feature_set จึงไม่เปลี่ยนรหัสเวอร์ชันของแนวโน้ม) และสถิติต่อทิศใน summary['profile_results']"""
+    params.setdefault("outlook", {})["profile"] = {}
+    summary["profile_results"] = {}
+    for fuel in S.FUELS:
+        if tables.known(fuel).empty:
+            continue
+        for hz in M.OUTLOOK_PROFILE_HOURS:
+            key = f"{fuel}_T{hz}"
+            df = build_outlook_dataset(book, tables, fuel, hz, M.OUTLOOK_REF_HOUR, v2=True)
+            X = np.vstack([M.vectorize_v2(r) for r in df.to_dict("records")])
+            y = df.y.to_numpy()
+            yu, yd = (y >= M.OUTLOOK_SMALL).astype(float), (y <= -M.OUTLOOK_SMALL).astype(float)
+            pr, pf = _wf_proba(X, yu), _wf_proba(X, yd)
+            ok = ~np.isnan(pr)
+            up, dn = (pr >= M.OUTLOOK_MIN_P) & (pr > pf), (pf >= M.OUTLOOK_MIN_P) & (pf > pr)
+            st = profile_dir_stats(y[ok], up[ok], dn[ok])
+            summary["profile_results"][key] = {"n_train_days": int(len(df)), "n_oos_days": int(ok.sum()), "auc_r10": auc(yu[ok], pr[ok]), "auc_f10": auc(yd[ok], pf[ok]),
+                                               "base_up10": float(yu[ok].mean()), "base_down10": float(yd[ok].mean()), **st}
+            params["outlook"]["profile"][key] = {"r10": M.fit_logistic(X, yu), "f10": M.fit_logistic(X, yd)}
+            print(f"[profile {key}] oos={ok.sum()} AUC {summary['profile_results'][key]['auc_r10']:.2f}/{summary['profile_results'][key]['auc_f10']:.2f} | "
+                  + " ".join(f"{n}: n={st[n]['n']} ถูก {st[n]['right']:.0%} ผิด {st[n]['wrong']:.0%} {'ผ่าน' if st[n]['ok'] else 'ไม่ผ่าน'}" for n in ("up", "down")))
+
+
 def fit_everything(book, tables):
     """ฝึกทุกโมเดล (เดิม + แผนส่งรถ) จากข้อมูลชุดเดียว คืน (params, summary)"""
     today = datetime.now().strftime("%Y-%m-%d")
@@ -286,6 +325,7 @@ def fit_everything(book, tables):
     fit_legacy(book, tables, params, summary)
     fit_dispatch_into(book, tables, params, summary)
     fit_outlook_into(book, tables, params, summary)
+    fit_profile_into(book, tables, params, summary)
     return params, summary
 
 
@@ -302,6 +342,7 @@ def main():
     ap.add_argument("--outlook-only", action="store_true", help="ฝึกเฉพาะโมเดลแนวโน้ม 24/48 ชม. แล้วรวมเข้าไฟล์เดิม ไม่แตะโมเดลอื่น")
     ap.add_argument("--dispatch-only", action="store_true",
                     help="ฝึกเฉพาะโมเดลแผนส่งรถ (ช่วงเวลาออกรถ x ระยะเดินทาง) แล้วรวมเข้าไฟล์เดิม ไม่แตะโมเดลเดิม")
+    ap.add_argument("--profile-only", action="store_true", help="ฝึกเฉพาะโมเดลช่วงเวลาของวันพรุ่งนี้ แล้วรวมเข้าไฟล์เดิม (ไม่แตะโมเดลอื่น)")
     a = ap.parse_args()
 
     prices, tables = load(a.data_dir)
@@ -312,6 +353,13 @@ def main():
         with open(a.summary, encoding="utf-8") as fh:
             summary = json.load(fh)
         fit_outlook_into(book, tables, params, summary)
+        fit_profile_into(book, tables, params, summary)        # fit_outlook_into สร้าง params['outlook'] ใหม่ จึงต้องฝึกส่วนนี้ตาม
+    elif a.profile_only:
+        with open(a.out, encoding="utf-8") as fh:
+            params = json.load(fh)
+        with open(a.summary, encoding="utf-8") as fh:
+            summary = json.load(fh)
+        fit_profile_into(book, tables, params, summary)
     elif a.dispatch_only:
         with open(a.out, encoding="utf-8") as fh:
             params = json.load(fh)

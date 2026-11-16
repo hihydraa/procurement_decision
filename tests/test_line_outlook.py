@@ -209,3 +209,89 @@ class GeneratedTimeTest(unittest.TestCase):
                 gen = pd.Timestamp(json.load(fh)["generated"])
         bkk = pd.Timestamp(datetime.now(timezone.utc).replace(tzinfo=None)) + pd.Timedelta(hours=7)
         self.assertLess(abs((gen - bkk).total_seconds()), 180)
+
+
+class TimingProfileTest(unittest.TestCase):
+    """ช่วงเวลาซื้อของวันถัดไป : ใช้เฉพาะทิศที่ผ่านเกณฑ์ walk-forward และบอกวันที่ชัดเจน"""
+
+    def _f(self, *profile):
+        return {"ref": "2026-11-12 20:30", "profile": [dict(zip(("hours", "at", "call", "ok", "n", "right"), p)) for p in profile]}
+
+    def test_priority_and_ok_filter(self):
+        up_noon = self._f((16, "12:30", "UP", True, 221, 0.75), (20, "16:30", "DOWN", True, 186, 0.69))
+        self.assertIn("ขึ้นภายในเที่ยงวันที่ 13/11", L.timing_line(up_noon))
+        self.assertIn("ถูก 75% จาก 221 ครั้ง", L.timing_line(up_noon))
+        down_pm = self._f((16, "12:30", "DOWN", False, 102, 0.56), (20, "16:30", "DOWN", True, 186, 0.69))    # ลงภายในเที่ยงไม่ผ่านเกณฑ์ → ไม่ใช้
+        self.assertIn("ลงภายใน 16:30 น. วันที่ 13/11", L.timing_line(down_pm))
+        self.assertIn("การรอไม่ช่วย", L.timing_line(self._f((16, "12:30", None, False, None, None), (20, "16:30", "UP", True, 154, 0.68))))
+        self.assertEqual(L.timing_line(self._f((16, "12:30", "DOWN", False, 102, 0.56), (20, "16:30", "UP", False, 110, 0.63))), "")
+        self.assertEqual(L.timing_line({"ref": "2026-11-12 20:30"}), "")
+
+    def test_message_section(self):
+        inp = _inp()
+        inp["fuels"]["B7"]["profile"] = self._f((16, "12:30", "UP", True, 221, 0.75))["profile"]
+        text, _ = L.build_message(inp, _log())
+        self.assertIn("เวลาซื้อวันที่ 13/11 [ทดลอง ยังไม่มีผลจริง]", text)
+        self.assertIn("⏰ ดีเซล: ราคามักขึ้นภายในเที่ยงวันที่ 13/11", text)
+        self.assertIn(L.AVG_PM_DISCOUNT, text)
+        plain, _ = L.build_message(_inp(), _log())                                   # ไม่มีสัญญาณเรื่องเวลา : ยังบอกข้อเท็จจริงเฉลี่ย
+        self.assertIn("ไม่มีสัญญาณเรื่องเวลา", plain)
+        pm, _ = L.build_message(_inp(asof="2026-11-13 16:00", ref="2026-11-13 15:30"), _log(), on_demand=True)
+        self.assertNotIn("เวลาซื้อวันที่", pm)                                         # รอบบ่ายไม่มีส่วนนี้
+        none, _ = L.build_message(_inp(ref="2026-11-11 20:30"), _log())
+        self.assertNotIn("เวลาซื้อวันที่", none)                                       # ไม่มีคำทาย → ไม่มีส่วนนี้
+
+
+class ProfileModelTest(unittest.TestCase):
+    """โมเดลรายช่วงเวลาที่ใช้งานจริง + engine.decide_profile"""
+
+    @classmethod
+    def setUpClass(cls):
+        import json
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "model_params.json"), encoding="utf-8") as fh:
+            cls.params = json.load(fh)
+        with open(os.path.join(root, "backtest_summary.json"), encoding="utf-8") as fh:
+            cls.summary = json.load(fh)
+
+    def test_shipped_profile_models_and_gates(self):
+        import model as M
+        prof, res = self.params["outlook"]["profile"], self.summary["profile_results"]
+        self.assertEqual(set(prof), {f"{f}_T{h}" for f in ("B7", "G95") for h in M.OUTLOOK_PROFILE_HOURS})
+        for key, mm in prof.items():
+            self.assertEqual(len(mm["r10"]["w"]), len(M.FEATURES_V2))
+            for d in ("up", "down"):
+                st = res[key][d]
+                want = st["n"] >= M.PROFILE_MIN_N and st["right"] >= M.PROFILE_MIN_RIGHT and st["wrong"] <= M.PROFILE_MAX_WRONG and min(st["right_h1"], st["right_h2"]) >= 0.55
+                self.assertEqual(st["ok"], bool(want), key + d)
+        self.assertFalse(res["B7_T16"]["down"]["ok"])            # "ลงภายในเที่ยง" ไม่ผ่าน (ถูก 56%) ต้องไม่ถูกใช้
+        self.assertTrue(res["B7_T16"]["up"]["ok"] and res["B7_T20"]["down"]["ok"] and res["G95_T20"]["down"]["ok"])
+
+    def test_decide_profile_gating(self):
+        import engine as E
+        import signals as S
+        prices = pd.DataFrame([["A", "x", "B7", 39.0, "2026-11-10 05:00", "2026-11-09 17:00"], ["A", "x", "B7", 39.6, "2026-11-11 05:00", "2026-11-10 18:00"],
+                               ["B", "y", "B7", 39.2, "2026-11-10 05:00", "2026-11-09 17:10"]], columns=["provider", "warehouse", "fuel", "price", "effective", "posted"])
+        ref = pd.Timestamp("2026-11-10 20:30")
+        cfg = self.params["outlook"]
+        got = E.decide_profile("B7", ref, "E", S.Tables().set_prices(prices), cfg, self.summary)
+        self.assertEqual([g["hours"] for g in got], [16, 20])
+        self.assertEqual(str(got[0]["at"]), "2026-11-11 12:30:00")
+        for g in got:
+            self.assertTrue(0 <= g["p_up"] <= 1 and 0 <= g["p_down"] <= 1)
+            self.assertEqual(g["ok"], bool(g["call"]) and self.summary["profile_results"][f"B7_T{g['hours']}"][{"UP": "up", "DOWN": "down"}[g["call"]]]["ok"] if g["call"] else False)
+        self.assertEqual(E.decide_profile("B7", ref, "P", S.Tables().set_prices(prices), cfg, self.summary), [])     # รอบบ่ายไม่ใช้
+        self.assertEqual(E.decide_profile("B7", ref, "E", S.Tables(), cfg, self.summary), [])                        # ไม่มีฟีดราคา
+        self.assertEqual(E.decide_profile("B7", ref, "E", S.Tables().set_prices(prices), {}, self.summary), [])      # ไม่มีโมเดล
+
+    def test_snapshot_rows_for_log(self):
+        import json
+        import tempfile
+        import main
+        d = {"fuel": "B7", "asof": pd.Timestamp("2026-11-10 21:35"), "ref": pd.Timestamp("2026-11-10 20:30"), "horizons": [],
+             "profile": [{"hours": 16, "call": "UP", "p_up": 0.7, "p_down": 0.1, "ok": True}, {"hours": 20, "call": None, "p_up": 0.3, "p_down": 0.3, "ok": False}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = os.path.join(tmp, "s.json")
+            main.write_outlook_files({"DIESEL": d}, "v", snap_path=snap, pub_path=os.path.join(tmp, "o.json"))
+            rows = json.load(open(snap, encoding="utf-8"))
+        self.assertEqual([(r["hours"], r["tier"], r["p_rise10"]) for r in rows], [(16, "UP", 0.7), (20, "UNCLEAR", 0.3)])
