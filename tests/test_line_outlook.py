@@ -129,7 +129,9 @@ class RetailTest(unittest.TestCase):
         self.assertIn("ดีเซล (วันที่ 13/11): ➖ น่าจะไม่ปรับ", text)
         self.assertIn("• โอกาส ลง 12% / ไม่ปรับ 70% / ขึ้น 18%", text)
         self.assertIn("• โมเดลสัญญาณ (คู่ขนาน): ลง 5% / ไม่ปรับ 60% / ขึ้น 35%", text)                # แถวเก่า (ไม่มี model) : วิธีเดิมเป็นหลัก
-        self.assertIn("• คืนนี้โมเดลสัญญาณใช้ไม่ได้ จึงใช้วิธีเดิมเป็นคำทายหลัก", text)
+        self.assertNotIn("โมเดลสัญญาณใช้ไม่ได้", text)                                        # แถวก่อนการสลับ ไม่ใช่กรณีโมเดลสัญญาณล้ม
+        old = L.build_message(_inp(), _log(), on_demand=True, retail=_retail(model="OLD"))[0]
+        self.assertIn("• คืนนี้โมเดลสัญญาณใช้ไม่ได้ จึงใช้วิธีเดิมเป็นคำทายหลัก", old)
         self.assertIn("• ปลีกล่าสุดใน EPPO 40.79\n", text)                                  # size_text ว่าง (NaN จากชีท) ไม่ถูกพิมพ์
         self.assertIn("แก๊สโซฮอล์ 95 (วันที่ 13/11): 📈 น่าจะปรับขึ้น", text)
         self.assertIn("• ปลีกล่าสุดใน EPPO 40.79 · ถ้าปรับ มัธยฐาน 0.60 บาท/ลิตร", text)
