@@ -929,6 +929,10 @@ def write_outlook_files(outlook: dict, version: str = "", snap_path: str = "outl
             snap.append({"asof": d["asof"].strftime("%Y-%m-%d %H:%M"), "ref": d["ref"].strftime("%Y-%m-%d %H:%M"), "fuel": d["fuel"],
                          "hours": h["hours"], "tier": h["tier"], "p_rise10": clean(h["p"]["r10"]), "p_fall10": clean(h["p"]["f10"]),
                          "p_rise40": clean(h["p"]["r40"]), "p_fall40": clean(h["p"]["f40"]), "grade": h["grade"], "model_version": version})
+        for pf in d.get("profile") or []:              # ช่วงเวลาของวันพรุ่งนี้ : บันทึกลง OutlookLog (hours 16/20) เพื่อวัดผลจริง ไม่ขึ้นหน้าเว็บ
+            snap.append({"asof": d["asof"].strftime("%Y-%m-%d %H:%M"), "ref": d["ref"].strftime("%Y-%m-%d %H:%M"), "fuel": d["fuel"],
+                         "hours": pf["hours"], "tier": pf["call"] or "UNCLEAR", "p_rise10": clean(pf["p_up"]), "p_fall10": clean(pf["p_down"]),
+                         "p_rise40": None, "p_fall40": None, "grade": "ผ่าน" if pf["ok"] else "", "model_version": version})
         pub[d["fuel"]] = {"ref": d["ref"].strftime("%Y-%m-%d %H:%M"), "note": d.get("note"),
                           "horizons": [{"hours": h["hours"], "tier": h["tier"], "label": h["label"], "grade": h["grade"],
                                         "until": h["until"].strftime("%Y-%m-%d %H:%M")} for h in d.get("horizons", [])]}
