@@ -1619,6 +1619,11 @@ def main():
     except Exception:
         outlook_log = pd.DataFrame()
     write_outlook_files(outlook, M.outlook_version(params), extras=outlook_log_extras(tables, params, summary, asof, outlook))
+    try:                                                   # ข้อมูลเข้าของข้อความไลน์ส่วนตัว (ช่วงทดสอบ ดู line_outlook.py) — ล้มเหลวต้องไม่กระทบหน้าเว็บ
+        import line_outlook
+        line_outlook.write_input(outlook, asof)
+    except Exception as e:
+        print(f"[LINE] เขียนข้อมูลเข้าไม่สำเร็จ: {e}")
     dispatch_html = build_outlook_section(outlook, asof, build_outlook_live(outlook_log, summary)) + dispatch_html
 
     try:
