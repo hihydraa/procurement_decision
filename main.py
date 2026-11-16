@@ -1641,6 +1641,11 @@ def main():
         print(f"[LINE] เขียนข้อมูลเข้าไม่สำเร็จ: {e}")
     dispatch_html = build_outlook_section(outlook, asof, build_outlook_live(outlook_log, summary)) + dispatch_html
 
+    try:                                                   # รอบเที่ยงของดีเซลแบบเงา (ไม่แสดงผล ดู log_noon.py) — ล้มเหลวต้องไม่กระทบหน้าเว็บ
+        import log_noon
+        log_noon.write_snapshot(tables, asof)
+    except Exception as e:
+        print(f"[NOON] เขียน snapshot ไม่สำเร็จ: {e}")
     try:
         cards_raw = load_sheet_by_name("ForecastCardLog")          # การ์ดพยากรณ์ต้นทุนส่ง (ยังไม่มีแท็บ = ไม่ใช่ข้อผิดพลาด)
         if "card_id" not in cards_raw.columns:
