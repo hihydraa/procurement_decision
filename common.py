@@ -112,6 +112,24 @@ def excel_serial_to_date(v):
     return None
 
 
+def set_number_format(tok, spreadsheet_id, title, col_from, col_to, pattern="0.000"):
+    """ตั้งรูปแบบตัวเลขให้คอลัมน์ (เลขคอลัมน์เริ่ม 0 ; col_to ไม่รวม) ตั้งแต่แถว 2 ลงไป — กันชีทแสดงทศนิยมเป็นวันเวลา (เช่น 0.348 → 1899-12-30 8:21)"""
+    meta = requests.get(f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}",
+                        params={"fields": "sheets.properties(sheetId,title)"}, headers={"Authorization": f"Bearer {tok}"})
+    meta.raise_for_status()
+    sid = next((sh["properties"]["sheetId"] for sh in meta.json().get("sheets", []) if sh["properties"]["title"] == title), None)
+    if sid is None:
+        return False
+    r = requests.post(f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate",
+                      headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+                      json={"requests": [{"repeatCell": {
+                          "range": {"sheetId": sid, "startRowIndex": 1, "startColumnIndex": col_from, "endColumnIndex": col_to},
+                          "cell": {"userEnteredFormat": {"numberFormat": {"type": "NUMBER", "pattern": pattern}}},
+                          "fields": "userEnteredFormat.numberFormat"}}]})
+    r.raise_for_status()
+    return True
+
+
 def to_ts(v):
     """แปลงค่าจากชีทเป็น pandas.Timestamp (ไม่มี tz) — อ่านด้วย UNFORMATTED_VALUE วันที่/เวลาจะเป็นเลข serial ของ Sheets
     (เช่น 46317.5) ซึ่ง pd.Timestamp/to_datetime ตีเป็นนาโนวินาทีนับจากปี 1970 ทำให้ทุกเวลาเพี้ยนไปปี 1970 ; ข้อความวันที่ (เช่น '2026-10-22 15:45') แปลงตามปกติ ; ว่าง/แปลงไม่ได้ → NaT"""
