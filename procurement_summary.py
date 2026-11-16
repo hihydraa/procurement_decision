@@ -356,8 +356,9 @@ def _retail_block(r: dict | None, card: dict | None) -> str:
     now = f"ปลีกล่าสุดใน EPPO {base:.2f} บาท/ลิตร" if base is not None else ""
     ptt = (card or {}).get("retail_now")
     body += f"<div class='ps-cap muted'>{_e(now)}{' · ' if now and ptt else ''}{_e(ptt or '')}</div>"
-    body += ("<div class='ps-cap muted'>สำหรับ " + pd.to_datetime(r["target_dt"]).strftime("%d/%m") + " · คำนวณจากโอกาสของราคาขายส่ง × ความถี่ที่ปลีกปรับตามจริงในอดีต "
-             "(ปลีกปรับประมาณ 28% ของวัน ไม่ตามราคาส่งทุกครั้ง) · ยังไม่ผ่านการทดสอบเดินหน้า</div>")
+    how = ("คำนวณจากโมเดลสัญญาณ Jobber ของคืนก่อน (จำนวนผู้ค้าที่ประกาศขึ้น/ลง, MOPS ปิด, ประกาศกองทุน)" if str(r.get("model") or "").strip() == "SIG"
+           else "คำนวณจากโอกาสของราคาขายส่ง × ความถี่ที่ปลีกปรับตามจริงในอดีต (ปลีกปรับประมาณ 28% ของวัน ไม่ตามราคาส่งทุกครั้ง)")
+    body += ("<div class='ps-cap muted'>สำหรับ " + pd.to_datetime(r["target_dt"]).strftime("%d/%m") + f" · {how} · ยังไม่ผ่านการทดสอบเดินหน้า</div>")
     return body
 
 

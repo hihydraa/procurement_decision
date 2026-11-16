@@ -128,7 +128,8 @@ class RetailTest(unittest.TestCase):
         self.assertIn("⛽ ราคาขายปลีก วันถัดไป [ทดลอง", text)
         self.assertIn("ดีเซล (วันที่ 13/11): ➖ น่าจะไม่ปรับ", text)
         self.assertIn("• โอกาส ลง 12% / ไม่ปรับ 70% / ขึ้น 18%", text)
-        self.assertIn("• โมเดลสัญญาณ (คู่ขนาน): ลง 5% / ไม่ปรับ 60% / ขึ้น 35%", text)
+        self.assertIn("• โมเดลสัญญาณ (คู่ขนาน): ลง 5% / ไม่ปรับ 60% / ขึ้น 35%", text)                # แถวเก่า (ไม่มี model) : วิธีเดิมเป็นหลัก
+        self.assertIn("• คืนนี้โมเดลสัญญาณใช้ไม่ได้ จึงใช้วิธีเดิมเป็นคำทายหลัก", text)
         self.assertIn("• ปลีกล่าสุดใน EPPO 40.79\n", text)                                  # size_text ว่าง (NaN จากชีท) ไม่ถูกพิมพ์
         self.assertIn("แก๊สโซฮอล์ 95 (วันที่ 13/11): 📈 น่าจะปรับขึ้น", text)
         self.assertIn("• ปลีกล่าสุดใน EPPO 40.79 · ถ้าปรับ มัธยฐาน 0.60 บาท/ลิตร", text)
@@ -136,6 +137,12 @@ class RetailTest(unittest.TestCase):
         self.assertNotIn("nan", text)
         self.assertLess(text.index("⛽"), text.index("ผลของคำทาย"))
         self.assertTrue(text.endswith(L.FOOTER))
+
+    def test_signal_model_is_primary_when_logged(self):
+        sig = _retail(model="SIG", call="ขึ้น", p_down=0.05, p_flat=0.60, p_up=0.35, old_p_down=0.12, old_p_flat=0.70, old_p_up=0.18, old_call="นิ่ง")
+        text, _ = L.build_message(_inp(), _log(), on_demand=True, retail=sig)
+        self.assertIn("ดีเซล (วันที่ 13/11): 📈 น่าจะปรับขึ้น\n• โอกาส ลง 5% / ไม่ปรับ 60% / ขึ้น 35%\n• วิธีเดิม (คู่ขนาน): ลง 12% / ไม่ปรับ 70% / ขึ้น 18%", text)
+        self.assertNotIn("โมเดลสัญญาณใช้ไม่ได้", text.split("แก๊สโซฮอล์ 95 (วันที่")[0].split("⛽")[1])
 
     def test_nightly_message_has_no_retail(self):
         self.assertNotIn("⛽", L.build_message(_inp(), _log())[0])

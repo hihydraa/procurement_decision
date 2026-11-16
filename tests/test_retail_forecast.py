@@ -1,4 +1,5 @@
 import unittest
+import unittest.mock
 
 import numpy as np
 import pandas as pd
@@ -157,7 +158,27 @@ class SignalShadowTest(unittest.TestCase):
         r = fc.signal_shadow([row()], "21:30", pd.Timestamp("2026-11-10 21:35"), t, m)[0]    # ยังไม่ถึงเวลาตัดสัญญาณของวันเป้าหมาย
         self.assertEqual(r["sig_call"], "")
         self.assertEqual(fc.RETAIL_OUT_LAST, "R")                                             # ช่วงผลจริงคงตำแหน่งเดิม
-        self.assertEqual(fc.RETAIL_COLUMNS[-5:], list(fc.SIG_KEYS))
+        i = fc.RETAIL_COLUMNS.index("sig_p_down")
+        self.assertEqual(fc.RETAIL_COLUMNS[i:i + 5], list(fc.SIG_KEYS))
+        self.assertEqual(fc.RETAIL_COLUMNS[i + 5:], ["model", "old_p_down", "old_p_flat", "old_p_up", "old_call"])     # ต่อท้ายเท่านั้น ไม่ขยับคอลัมน์เดิม
+
+    def test_promote_signal_makes_signal_model_primary(self):
+        import pandas as pd
+        import forecast_card as fc
+        e = synthetic()
+        base = lambda **kw: {"card_id": "c", "fuel": "B7", "target_day": "2026-08-05", "p_down": 0.2, "p_flat": 0.7, "p_up": 0.1, "call": "นิ่ง",
+                             "size_text": "", "size_med": "", "sig_p_down": 0.1, "sig_p_flat": 0.3, "sig_p_up": 0.6, "sig_call": "ขึ้น", "sig_note": "x", **kw}
+        r = fc.promote_signal([base()], e)[0]
+        self.assertEqual((r["model"], r["call"], r["p_up"], r["p_flat"]), ("SIG", "ขึ้น", 0.6, 0.3))
+        self.assertEqual((r["old_call"], r["old_p_down"], r["old_p_flat"], r["old_p_up"]), ("นิ่ง", 0.2, 0.7, 0.1))
+        self.assertIn("ถ้าปรับ มัธยฐาน", r["size_text"])                                     # ขนาดการปรับตามทิศของคำทายหลักใหม่
+        self.assertGreater(r["size_med"], 0)
+        flat = fc.promote_signal([base(sig_call="นิ่ง", size_text="เดิม", size_med=0.8)], e)[0]
+        self.assertEqual((flat["call"], flat["size_text"], flat["size_med"]), ("นิ่ง", "", ""))
+        none = fc.promote_signal([base(sig_p_down="", sig_p_flat="", sig_p_up="", sig_call="", sig_note="ฟีดสัญญาณไม่สด")], e)[0]
+        self.assertEqual((none["model"], none["call"], none["p_flat"], none["old_call"]), ("OLD", "นิ่ง", 0.7, ""))  # โมเดลสัญญาณใช้ไม่ได้ → คงวิธีเดิม
+        with unittest.mock.patch.object(fc, "RETAIL_SIGNAL_PRIMARY", False):
+            self.assertEqual(fc.promote_signal([base()], e)[0]["model"], "OLD")
 
     def test_long_history_only_prepends_older_days(self):
         import pandas as pd

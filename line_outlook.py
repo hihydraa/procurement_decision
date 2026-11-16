@@ -177,7 +177,8 @@ def _probs(r, keys) -> str:
 def retail_lines(retail: pd.DataFrame, asof: pd.Timestamp) -> list:
     """ส่วนราคาขายปลีกของข้อความ จาก RetailFcLog ที่ผ่าน procurement_summary.prep_retail (มี asof_dt, target_dt)
     ใช้แถวล่าสุดของแต่ละชนิด เฉพาะที่วันเป้าหมายยังไม่ผ่าน (วันนี้หรือพรุ่งนี้) ; วันเป้าหมาย = วันนี้และรู้ผลแล้ว จะบอกผลจริงด้วย
-    บรรทัดหลัก = วิธีที่แสดงบนหน้าเว็บ (โอกาสของราคาขายส่ง × ความถี่ที่ปลีกตาม) ; บรรทัด "โมเดลสัญญาณ" = โมเดลคู่ขนาน (sig_*) ถ้ามี"""
+    บรรทัดหลัก = คำทายหลักของแถว (p_*/call) : model = SIG คือโมเดลสัญญาณ Jobber และวิธีเดิม (old_*) เป็นบรรทัดคู่ขนาน
+    แถวเก่า/แถวที่โมเดลสัญญาณใช้ไม่ได้ (model ≠ SIG) : วิธีเดิมเป็นหลัก และโมเดลสัญญาณ (sig_*) เป็นบรรทัดคู่ขนานถ้ามี"""
     import procurement_summary as PS
     out = ["⛽ ราคาขายปลีก วันถัดไป [ทดลอง ยังไม่ผ่านการทดสอบเดินหน้า]"]
     today, stats = pd.Timestamp(asof).normalize(), []
@@ -192,9 +193,12 @@ def retail_lines(retail: pd.DataFrame, asof: pd.Timestamp) -> list:
             p, base = _probs(r, ("p_down", "p_flat", "p_up")), _f(r.get("retail_base"))
             if p:
                 out.append(f"• โอกาส {p}")
-            sig = _probs(r, ("sig_p_down", "sig_p_flat", "sig_p_up"))
-            if sig:
-                out.append(f"• โมเดลสัญญาณ (คู่ขนาน): {sig}")
+            is_sig = str(r.get("model") or "").strip() == "SIG"
+            alt = _probs(r, ("old_p_down", "old_p_flat", "old_p_up") if is_sig else ("sig_p_down", "sig_p_flat", "sig_p_up"))
+            if alt:
+                out.append(f"• {'วิธีเดิม' if is_sig else 'โมเดลสัญญาณ'} (คู่ขนาน): {alt}")
+            if not is_sig:
+                out.append("• คืนนี้โมเดลสัญญาณใช้ไม่ได้ จึงใช้วิธีเดิมเป็นคำทายหลัก")
             size = str(r.get("size_text") or "").strip()
             detail = ([f"ปลีกล่าสุดใน EPPO {base:.2f}"] if base is not None else []) + ([size] if size and size != "nan" else [])
             if detail:

@@ -347,11 +347,15 @@ def summary_lines(rows: list) -> list:
 # ---------- พยากรณ์ราคาปลีก (ทดลอง ดู retail_forecast.py) ----------
 RETAIL_COLUMNS = ["card_id", "asof", "round", "fuel", "target_day", "retail_base", "p_down", "p_flat", "p_up", "call", "size_text", "size_med",
                   "n_hist", "dow_scale", "outcome_dretail", "outcome_cls", "right", "filled_at",
-                  "sig_p_down", "sig_p_flat", "sig_p_up", "sig_call", "sig_note"]       # sig_* = โมเดลสัญญาณ Jobber บันทึกคู่ขนาน (ยังไม่ใช้แสดงผล)
+                  "sig_p_down", "sig_p_flat", "sig_p_up", "sig_call", "sig_note",       # sig_* = ผลของโมเดลสัญญาณ Jobber
+                  "model", "old_p_down", "old_p_flat", "old_p_up", "old_call"]          # model = SIG/OLD (คำทายหลักมาจากวิธีใด) ; old_* = วิธีเดิม เก็บไว้เทียบเมื่อ model = SIG
 R_OUT_FROM, R_OUT_TO = RETAIL_COLUMNS.index("outcome_dretail"), RETAIL_COLUMNS.index("filled_at")
 RETAIL_OUT_LAST = col_letter(R_OUT_TO)          # คอลัมน์สุดท้ายของช่วงผลจริง (R) — คงตำแหน่งเดิม คอลัมน์ sig_* ต่อท้าย
 RETAIL_LAST = col_letter(len(RETAIL_COLUMNS) - 1)
 SIG_KEYS = ("sig_p_down", "sig_p_flat", "sig_p_up", "sig_call", "sig_note")
+# เจ้าของระบบอนุมัติ 16/11/2026 : ใช้โมเดลสัญญาณ Jobber เป็นคำทายหลักของราคาปลีก (ทั้งสองชนิด) แทนวิธีเดิม ยังติดป้ายทดลอง
+# หลักฐาน (exp_retail_search.py รอบ 2) : Brier และ AUC ดีกว่าวิธีเดิมทั้งสองชนิด ; เกณฑ์ข้อ 3 (ฟันธง >= 5 ครั้ง) ไม่ผ่าน จึงเป็นการตัดสินใจข้ามเกณฑ์โดยเจ้าของระบบ
+RETAIL_SIGNAL_PRIMARY = True
 
 
 def load_signal_tables():
@@ -437,6 +441,23 @@ def signal_shadow(rows: list, rnd: str, now: pd.Timestamp, tables=None, model=No
     return rows
 
 
+def promote_signal(rows: list, eppo_d: pd.DataFrame) -> list:
+    """ให้โมเดลสัญญาณเป็นคำทายหลักของแถวที่มีผล sig_* : ย้ายวิธีเดิมไป old_* แล้วเขียน p_*/call/ขนาดการปรับ จากโมเดลสัญญาณ (model = SIG)
+    แถวที่โมเดลสัญญาณคำนวณไม่ได้ (ฟีดไม่สด/นอกรอบ 21:30) คงวิธีเดิมไว้ (model = OLD) ; ต้องเรียกหลัง signal_shadow"""
+    sizes = {}
+    for r in rows:
+        r.update({"model": "OLD", "old_p_down": "", "old_p_flat": "", "old_p_up": "", "old_call": ""})
+        if not RETAIL_SIGNAL_PRIMARY or r.get("sig_call", "") == "" or r.get("sig_p_down", "") == "":
+            continue
+        if r["fuel"] not in sizes:
+            sizes[r["fuel"]] = RF.move_sizes(RF.history(RF.long_history(eppo_d), r["fuel"]))
+        sz = sizes[r["fuel"]].get(r["sig_call"]) if r["sig_call"] in ("ลง", "ขึ้น") else None
+        r.update({"model": "SIG", "old_p_down": r["p_down"], "old_p_flat": r["p_flat"], "old_p_up": r["p_up"], "old_call": r["call"],
+                  "p_down": r["sig_p_down"], "p_flat": r["sig_p_flat"], "p_up": r["sig_p_up"], "call": r["sig_call"],
+                  "size_text": RF.size_phrase(sz), "size_med": round(sz["med"], 2) if sz else ""})
+    return rows
+
+
 def retail_rows(cards: list, eppo_d: pd.DataFrame) -> list:
     """แถวพยากรณ์ปลีกต่อการ์ด (ใช้ความน่าจะเป็น WS ของการ์ดเป็นอินพุต) ; ข้ามถ้าประวัติไม่พอ"""
     out = []
@@ -471,7 +492,7 @@ def write_retail_log(tok, rows: list, eppo_d: pd.DataFrame):
         print(f"[RETAIL-FC] created tab {tab}")
     values = sheets_get(tok, SHEET_ID, f"{tab}!A1:{RETAIL_LAST}20000")
     head = values[0] if values else RETAIL_COLUMNS
-    if values and len(head) < len(RETAIL_COLUMNS) and list(head) == RETAIL_COLUMNS[:len(head)]:      # แท็บเดิมยังไม่มีคอลัมน์ sig_* → ต่อหัวตาราง
+    if values and len(head) < len(RETAIL_COLUMNS) and list(head) == RETAIL_COLUMNS[:len(head)]:      # แท็บเดิมยังไม่มีคอลัมน์ sig_* / model / old_* → ต่อหัวตาราง
         sheets_update(tok, SHEET_ID, f"{tab}!A1", [RETAIL_COLUMNS])
         head = RETAIL_COLUMNS
     have_rows = [dict(zip(head, r + [""] * (len(head) - len(r)))) for r in values[1:]]
@@ -561,11 +582,13 @@ def main(argv=None):
     for c in cards:
         print(c["card_text"])
         print("-" * 60)
-    rrows = signal_shadow(retail_rows(cards, eppo_d), rnd, now, tables=sig_tables)
+    rrows = promote_signal(signal_shadow(retail_rows(cards, eppo_d), rnd, now, tables=sig_tables), eppo_d)
     for r in rrows:
         print(retail_text(r))
-        if r.get("sig_call") or r.get("sig_note"):
-            print(f"   [คู่ขนาน] โมเดลสัญญาณ: {r.get('sig_call') or '-'} ลง {r.get('sig_p_down')} / ขึ้น {r.get('sig_p_up')} ({r.get('sig_note')})")
+        if r["model"] == "SIG":
+            print(f"   [หลัก = โมเดลสัญญาณ ; คู่ขนาน] วิธีเดิม: {r['old_call']} ลง {r['old_p_down']} / ขึ้น {r['old_p_up']}")
+        else:
+            print(f"   [หลัก = วิธีเดิม] โมเดลสัญญาณใช้ไม่ได้: {r.get('sig_note')}")
     if dry:
         print("[CARD] --dry : ไม่เขียนชีท")
         return
