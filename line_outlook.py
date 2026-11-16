@@ -3,6 +3,8 @@
 
 เนื้อหา : ใช้โมเดลเดียว คือแนวโน้ม Jobber 24 ชม. จากข้อมูล 20:30 (ตัวเดียวที่ผลจริงเริ่มเข้ากับผลทดสอบย้อนหลัง)
           + เหตุผลสั้น ๆ + ผลของคำทายล่าสุดที่รู้ผลแล้ว + สถิติผลจริงสะสมจาก OutlookLog
+รูปแบบ : แบ่งเป็นส่วนมีหัวข้อคั่น — ① ราคาส่ง (Jobber) พร้อมผลงานที่ผ่านมาของตัวเอง ② ราคาขายปลีก (เฉพาะข้อความตอบเมื่อพิมพ์ถาม)
+          ความน่าจะเป็นแสดงเป็นแถบข้อความ ▰▱ (ช่องข้อความของไลน์ส่งรูปไม่ได้)
           ไม่รวมแนวโน้ม 48 ชม. และการ์ดต้นทุนขายส่ง (ยังไม่มีหลักฐานพอ)
           ข้อความตอบเมื่อพิมพ์ "forecast" (on_demand) มีพยากรณ์ราคาขายปลีกจาก RetailFcLog ต่อท้ายด้วย ติดป้าย [ทดลอง] — ข้อความประจำคืนไม่มี
           เพราะส่งก่อนการ์ดรอบ 21:30 ซึ่งเป็นรอบที่ออกพยากรณ์ปลีก
@@ -50,7 +52,8 @@ def make_input(outlook: dict, asof) -> dict:
             "profile": [{"hours": int(pf["hours"]), "at": pd.Timestamp(pf["at"]).strftime("%H:%M"), "call": pf["call"], "ok": bool(pf["ok"]),
                          "n": pf.get("n"), "right": pf.get("right")} for pf in (d.get("profile") or [])],
             "h24": None if h is None else {"tier": h["tier"], "grade": h.get("grade"), "reasons": list(h.get("reasons") or []),
-                                           "n": ev.get("n"), "right10": ev.get("right10"), "wrong10": ev.get("wrong10")}}
+                                           "n": ev.get("n"), "right10": ev.get("right10"), "wrong10": ev.get("wrong10"),
+                                           "p_up": (h.get("p") or {}).get("r10"), "p_down": (h.get("p") or {}).get("f10")}}
     return {"asof": pd.Timestamp(asof).strftime("%Y-%m-%d %H:%M"), "fuels": fuels}
 
 
@@ -83,12 +86,35 @@ def usable(f: dict, asof: pd.Timestamp, on_demand: bool = False) -> str:
     return ""
 
 
+SEP = "━━━━━━━━━━━━━━"
+BAR_N = 10
+
+
+def bar(p: float, n: int = BAR_N) -> str:
+    """แถบสัดส่วนแบบข้อความ (ไลน์ส่งรูปไม่ได้ในช่องข้อความ) : 0.62 → ▰▰▰▰▰▰▱▱▱▱ ; ค่าที่มากกว่า 0 ได้อย่างน้อย 1 ช่อง"""
+    p = min(max(float(p), 0.0), 1.0)
+    k = min(n, max(int(round(p * n)), 1 if p > 0 else 0))
+    return "▰" * k + "▱" * (n - k)
+
+
+def section(title: str, sub: str) -> list:
+    return [SEP, title, sub, SEP]
+
+
+def jobber_bars(h: dict) -> list:
+    """โอกาสตามโมเดลที่ราคาส่งจะขยับเกิน 10 สต./ลิตร ใน 24 ชม. (ขึ้น / ลง) — ไม่มีค่าในข้อมูลเข้า = ไม่แสดง"""
+    pu, pd_ = h.get("p_up"), h.get("p_down")
+    if pu is None or pd_ is None:
+        return []
+    return [f"⬆ ขึ้น {bar(pu)} {pu:.0%}", f"⬇ ลง  {bar(pd_)} {pd_:.0%}"]
+
+
 def fuel_block(name: str, f: dict) -> list:
     h = f["h24"]
     tier = h["tier"]
     if tier == "UNCLEAR":
-        return [f"{name}: ❓ ไม่มีสัญญาณชัด"]
-    out = [f"{name}: {TIER_TEXT[tier]}", f"ความเชื่อมั่น: {h.get('grade') or 'ต่ำ'}"]
+        return [f"{name}: ❓ ไม่มีสัญญาณชัด"] + jobber_bars(h)
+    out = [f"{name}: {TIER_TEXT[tier]}"] + jobber_bars(h) + [f"ความเชื่อมั่น: {h.get('grade') or 'ต่ำ'}"]
     out += [f"• {r}" for r in _reasons(h["reasons"], UP_MARK if tier.startswith("UP") else DOWN_MARK, 2)]
     if h.get("n") and h.get("right10") is not None:
         out.append(f"ย้อนหลังเมื่อระบบบอกแบบนี้ ({int(h['n'])} ครั้ง): ถูก {h['right10']:.0%} ผิดทิศ {h['wrong10']:.0%}")
@@ -153,7 +179,8 @@ def live_summary(log: pd.DataFrame) -> list:
         flat += int((mv.abs() < M.OUTLOOK_SMALL).sum())
     if first is None:
         return ["สถิติผลจริง: ยังไม่มี"]
-    return [f"สถิติผลจริงตั้งแต่ {first:%d/%m} ({days}/{READY_DAYS} วัน)", f"ฟันธง {calls} ครั้ง · ถูก {right} · ผิดทิศ {wrong} · ราคานิ่ง {flat}"]
+    return ([f"สถิติผลจริงตั้งแต่ {first:%d/%m} ({days}/{READY_DAYS} วัน)", f"ฟันธง {calls} ครั้ง · ถูก {right} · ผิดทิศ {wrong} · ราคานิ่ง {flat}"]
+            + ([f"ถูก {bar(right / calls)} {right}/{calls}"] if calls else []))
 
 
 # ---------- ราคาขายปลีก (ทดลอง) : เฉพาะข้อความตอบเมื่อพิมพ์ถาม ----------
@@ -169,18 +196,13 @@ def _f(v):
         return None
 
 
-def _probs(r, keys) -> str:
-    p = [_f(r.get(k)) for k in keys]
-    return "" if None in p else f"ลง {p[0]:.0%} / ไม่ปรับ {p[1]:.0%} / ขึ้น {p[2]:.0%}"
-
-
 def retail_lines(retail: pd.DataFrame, asof: pd.Timestamp) -> list:
     """ส่วนราคาขายปลีกของข้อความ จาก RetailFcLog ที่ผ่าน procurement_summary.prep_retail (มี asof_dt, target_dt)
     ใช้แถวล่าสุดของแต่ละชนิด เฉพาะที่วันเป้าหมายยังไม่ผ่าน (วันนี้หรือพรุ่งนี้) ; วันเป้าหมาย = วันนี้และรู้ผลแล้ว จะบอกผลจริงด้วย
     บรรทัดหลัก = คำทายหลักของแถว (p_*/call) : model = SIG คือโมเดลสัญญาณ Jobber และวิธีเดิม (old_*) เป็นบรรทัดคู่ขนาน
     แถวเก่า/แถวที่โมเดลสัญญาณใช้ไม่ได้ (model ≠ SIG) : วิธีเดิมเป็นหลัก และโมเดลสัญญาณ (sig_*) เป็นบรรทัดคู่ขนานถ้ามี"""
     import procurement_summary as PS
-    out = ["⛽ ราคาขายปลีก วันถัดไป [ทดลอง ยังไม่ผ่านการทดสอบเดินหน้า]"]
+    out = section("② ราคาขายปลีก (หน้าปั๊ม) · วันถัดไป", "ราคาหน้าปั๊มจะปรับหรือไม่ [ทดลอง ยังไม่ผ่านการทดสอบเดินหน้า]")
     today, stats = pd.Timestamp(asof).normalize(), []
     for fuel, name in FUELS:
         r = PS.latest_retail(retail, fuel)
@@ -190,14 +212,10 @@ def retail_lines(retail: pd.DataFrame, asof: pd.Timestamp) -> list:
         else:
             call = str(r.get("call") or "").strip()
             out.append(f"{name} (วันที่ {pd.Timestamp(r['target_dt']):%d/%m}): {RETAIL_CALL.get(call, '❓ ยังไม่ชัดเจน')}")
-            p, base = _probs(r, ("p_down", "p_flat", "p_up")), _f(r.get("retail_base"))
-            if p:
-                out.append(f"• โอกาส {p}")
+            p, base = [_f(r.get(k)) for k in ("p_down", "p_flat", "p_up")], _f(r.get("retail_base"))
+            if None not in p:
+                out += [f"⬇ ลง      {bar(p[0])} {p[0]:.0%}", f"➖ ไม่ปรับ {bar(p[1])} {p[1]:.0%}", f"⬆ ขึ้น     {bar(p[2])} {p[2]:.0%}"]
             model = str(r.get("model") or "").strip()
-            is_sig = model == "SIG"
-            alt = _probs(r, ("old_p_down", "old_p_flat", "old_p_up") if is_sig else ("sig_p_down", "sig_p_flat", "sig_p_up"))
-            if alt:
-                out.append(f"• {'วิธีเดิม' if is_sig else 'โมเดลสัญญาณ'} (คู่ขนาน): {alt}")
             if model == "OLD":                               # แถวก่อนการสลับโมเดล (model ว่าง) ไม่ใส่หมายเหตุนี้
                 out.append("• คืนนี้โมเดลสัญญาณใช้ไม่ได้ จึงใช้วิธีเดิมเป็นคำทายหลัก")
             size = str(r.get("size_text") or "").strip()
@@ -209,10 +227,11 @@ def retail_lines(retail: pd.DataFrame, asof: pd.Timestamp) -> list:
                 ok = str(r.get("outcome_cls") or "").strip()
                 mark = "" if call not in RETAIL_CALL else " ✅" if ok == call else " ❌"
                 out.append(f"• ผลจริง: {'ไม่ปรับ' if abs(d) < 0.005 else f'ปรับ {d:+.2f} บาท/ลิตร'}{mark}")
+            out.append("")
         s = PS.retail_live_stats(retail, fuel)
         if s["n"]:
             stats.append(f"{name} รู้ผล {s['n']} วัน ฟันธง {s['n_called']} ถูก {s['n_right']}")
-    return out + ([f"ผลจริงสะสม: {' · '.join(stats)}"] if stats else [])
+    return out + ([f"ผลจริงสะสม (ราคาปลีก): {' · '.join(stats)}"] if stats else [])
 
 
 def build_message(inp: dict, log: pd.DataFrame, on_demand: bool = False, retail: pd.DataFrame = None) -> tuple:
@@ -223,7 +242,7 @@ def build_message(inp: dict, log: pd.DataFrame, on_demand: bool = False, retail:
     bad = {fuel: usable(fuels.get(fuel), asof, on_demand) for fuel, _ in FUELS}
     ok = [(fuel, name) for fuel, name in FUELS if not bad[fuel]]
     ref_id = f"{asof:%Y-%m-%d} 20:30"
-    lines = ["🛢 แนวโน้มราคาส่ง (Jobber) 24 ชม."]
+    lines = ["🛢 พยากรณ์ราคาน้ำมัน"] + section(("① " if retail is not None else "") + "ราคาส่ง (Jobber) · 24 ชม.ข้างหน้า", "ราคาต่ำสุดที่ผู้ค้าส่งประกาศหน้าคลัง จะขึ้นหรือลง")
     if ok:
         ref = pd.Timestamp(fuels[ok[0][0]]["ref"])
         lines += [f"ข้อมูล {ref:%H:%M} น. {ref:%d/%m} · ใช้ได้ถึง {ref:%H:%M} น. {ref + pd.Timedelta(days=1):%d/%m}"]
@@ -259,9 +278,10 @@ def build_message(inp: dict, log: pd.DataFrame, on_demand: bool = False, retail:
         if is_eve:
             day = pd.Timestamp(fuels[ok[0][0]]["ref"]) + pd.Timedelta(days=1)
             lines += [f"เวลาซื้อวันที่ {day:%d/%m} [ทดลอง ยังไม่มีผลจริง]"] + (timing if timing else ["ไม่มีสัญญาณเรื่องเวลา"]) + [f"({AVG_PM_DISCOUNT})", ""]
+    lines += ["ผลงานที่ผ่านมา (ราคาส่ง Jobber)"] + last_results(log) + [""] + live_summary(log) + [""]
     if retail is not None:
         lines += retail_lines(retail, asof) + [""]
-    lines += last_results(log) + [""] + live_summary(log) + ["", FOOTER]
+    lines += [FOOTER]
     text = "\n".join(lines)
     return re.sub(r"\n{3,}", "\n\n", text), ref_id
 
