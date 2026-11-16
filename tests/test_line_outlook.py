@@ -191,3 +191,21 @@ class SendTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GeneratedTimeTest(unittest.TestCase):
+    """outlook.json ช่อง generated ต้องเป็นเวลาไทย (เครื่องรันของ GitHub เป็นเวลาสากล : เคยแสดงช้าไป 7 ชม.)"""
+
+    def test_generated_is_bangkok_time(self):
+        import json
+        import tempfile
+        from datetime import datetime, timezone
+        import main
+        with tempfile.TemporaryDirectory() as tmp:
+            pub = os.path.join(tmp, "o.json")
+            with mock.patch.dict(os.environ, {"TZ": "UTC"}):
+                main.write_outlook_files({}, snap_path=os.path.join(tmp, "s.json"), pub_path=pub)
+            with open(pub, encoding="utf-8") as fh:
+                gen = pd.Timestamp(json.load(fh)["generated"])
+        bkk = pd.Timestamp(datetime.now(timezone.utc).replace(tzinfo=None)) + pd.Timedelta(hours=7)
+        self.assertLess(abs((gen - bkk).total_seconds()), 180)
