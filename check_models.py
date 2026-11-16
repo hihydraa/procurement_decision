@@ -20,7 +20,7 @@ import zlib
 import requests
 
 BASE = "https://api.deepseek.com"
-TEXT_MODEL = os.environ.get("DEEPSEEK_MODEL") or "deepseek-chat"
+TEXT_MODEL = os.environ.get("DEEPSEEK_MODEL") or "deepseek-flash"      # ต้องตรงกับ news.py ; Worker ของ oil-bot ต้องตั้ง DEEPSEEK_MODEL ให้ตรงด้วย
 VISION_MODEL = os.environ.get("DEEPSEEK_VISION_MODEL") or "deepseek-flash"
 FAIL_STATUSES = {400, 401, 403, 404, 422}
 

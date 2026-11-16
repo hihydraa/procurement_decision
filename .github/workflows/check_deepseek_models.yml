@@ -19,7 +19,7 @@ jobs:
       - name: Check DeepSeek model names
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          # ถ้าตั้งชื่อโมเดลทับใน Cloudflare ให้ตั้งตัวแปร repository ชื่อเดียวกัน (ว่าง = ใช้ค่าเริ่มต้น deepseek-chat / deepseek-flash)
+          # ถ้าตั้งชื่อโมเดลทับใน Cloudflare ให้ตั้งตัวแปร repository ชื่อเดียวกัน (ว่าง = ใช้ค่าเริ่มต้น deepseek-flash ทั้งข้อความและรูป)
           DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL }}
           DEEPSEEK_VISION_MODEL: ${{ vars.DEEPSEEK_VISION_MODEL }}
         run: python check_models.py

@@ -88,6 +88,11 @@ def build_prompt(lines):
 ตอบเป็นข้อความสรุปเท่านั้น ไม่ต้องมีคำอธิบายอื่น"""
 
 
+# เดิมใช้ "deepseek-chat" ซึ่งหายจากรายชื่อโมเดลของ key (GET /models) ตั้งแต่ ต.ค. 2026 แม้ยังเรียกได้ — เปลี่ยนก่อนถูกปิดจริง
+# ตั้งทับได้ด้วยตัวแปร DEEPSEEK_MODEL (ชื่อเดียวกับที่ check_models.py และ Worker ใช้)
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL") or "deepseek-flash"
+
+
 def call_deepseek(prompt):
     # ใช้ DeepSeek ตัวเดียวกับที่ worker.js ของ OIL BOT ใช้อยู่แล้ว (ประหยัดกว่า ไม่ต้องเปิดบัญชีใหม่)
     api_key = os.environ["DEEPSEEK_API_KEY"]
@@ -95,7 +100,7 @@ def call_deepseek(prompt):
         "https://api.deepseek.com/chat/completions",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         json={
-            "model": "deepseek-chat", "temperature": 0.7, "max_tokens": 800,
+            "model": DEEPSEEK_MODEL, "temperature": 0.7, "max_tokens": 800,
             "messages": [{"role": "user", "content": prompt}],
         },
         timeout=60,
