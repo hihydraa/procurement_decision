@@ -938,7 +938,7 @@ def write_outlook_files(outlook: dict, version: str = "", snap_path: str = "outl
                          "hours": h["hours"], "tier": h["tier"], "p_rise10": clean(h["p"]["r10"]), "p_fall10": clean(h["p"]["f10"]),
                          "p_rise40": clean(h["p"]["r40"]), "p_fall40": clean(h["p"]["f40"]), "grade": h["grade"], "model_version": version})
     write_text(snap_path, json.dumps(snap, ensure_ascii=False, indent=1))
-    write_text(pub_path, json.dumps({"generated": datetime.now().strftime("%Y-%m-%d %H:%M"), "text": engine.outlook_text(outlook), "fuels": pub},
+    write_text(pub_path, json.dumps({"generated": datetime.now(TZ).strftime("%Y-%m-%d %H:%M"), "text": engine.outlook_text(outlook), "fuels": pub},
                                     ensure_ascii=False, indent=1))
 
 
