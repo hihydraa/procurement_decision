@@ -229,3 +229,26 @@ class RetailRows(unittest.TestCase):
         self.assertEqual(r["filled_at"], "")
         self.assertIn("ปลีกดีเซล", fc.retail_text(r))
         self.assertIn("[ทดลอง]", fc.retail_text(r))
+
+
+class WritableTest(unittest.TestCase):
+    """รอบ 11:00 ไม่ออกการ์ด ; วันเป้าหมายเสาร์–จันทร์วัดผลกับ EPPO ไม่ได้จึงไม่บันทึก (พบจริง 14–16/11/2026)"""
+
+    def test_round_and_weekend_targets(self):
+        card = lambda d: {"card_id": f"{d} x", "target_day": d}
+        days = ["2026-11-13", "2026-11-14", "2026-11-15", "2026-11-16", "2026-11-17"]          # ศ ส อา จ อ
+        self.assertEqual(fc.writable([card(d) for d in days], "11:00"), [])
+        kept = [c["target_day"] for c in fc.writable([card(d) for d in days], "21:30")]
+        self.assertEqual(kept, ["2026-11-13", "2026-11-17"])
+        self.assertEqual(fc.writable([], "11:00"), [])
+
+    def test_number_format_request(self):
+        import common
+        from unittest import mock
+        meta = mock.Mock(json=lambda: {"sheets": [{"properties": {"sheetId": 7, "title": "ForecastCardLog"}}]})
+        with mock.patch("common.requests.get", return_value=meta), mock.patch("common.requests.post") as post:
+            self.assertTrue(common.set_number_format("t", "sid", "ForecastCardLog", fc.COLUMNS.index("sig_p_down"), fc.COLUMNS.index("sig_p_up") + 1))
+            self.assertFalse(common.set_number_format("t", "sid", "NoSuchTab", 0, 1))
+        rc = post.call_args_list[0].kwargs["json"]["requests"][0]["repeatCell"]
+        self.assertEqual((rc["range"]["sheetId"], rc["range"]["startRowIndex"], rc["range"]["endColumnIndex"] - rc["range"]["startColumnIndex"]), (7, 1, 2))
+        self.assertEqual(rc["cell"]["userEnteredFormat"]["numberFormat"]["type"], "NUMBER")

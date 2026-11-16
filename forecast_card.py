@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
-from common import OILBOT_SHEET_ID, SHEET_ID, TABS, TZ_NAME, ensure_tab, get_token, sheets_append, sheets_get, sheets_update, to_ts
+from common import OILBOT_SHEET_ID, SHEET_ID, TABS, TZ_NAME, ensure_tab, get_token, set_number_format, sheets_append, sheets_get, sheets_update, to_ts
 from diag_rule_backtest import MEDIAN_MM, add_deltas, eppo_daily, mops_daily, wti_daily
 from diag_wf_components import FEATS, build_dataset, eppo_components, ridge_fit, walk_forward
 from ingest import cell_time
@@ -304,6 +304,26 @@ def drop_known(cards: list, eppo: pd.DataFrame) -> list:
     return kept
 
 
+WRITE_ROUND = "21:30"          # รอบเดียวที่ออกการ์ดใหม่ ; รอบ 11:00 ใช้เติมผลจริงเท่านั้น
+NO_EPPO_TARGET_DOW = (5, 6, 0)  # เสาร์ อาทิตย์ จันทร์ : EPPO ไม่ออกไฟล์เสาร์–อาทิตย์ จึงคำนวณ ΔWS ของ 3 วันนี้ไม่ได้ (วันจันทร์ไม่มีราคาวันอาทิตย์ให้เทียบ)
+
+
+def writable(cards: list, rnd: str) -> list:
+    """การ์ดที่ควรบันทึก : เฉพาะรอบ 21:30 และวันเป้าหมายที่วัดผลกับ EPPO ได้
+    (พบ 14–16/11/2026 : รอบ 11:00 เขียนการ์ดของ "วันนี้เอง" ช่วงเสาร์–จันทร์ เพราะ drop_known ตัดสินไม่ได้เมื่อไม่มีไฟล์ EPPO วันหยุด และการ์ดเหล่านั้นไม่มีวันได้ผลจริง)"""
+    if rnd != WRITE_ROUND:
+        if cards:
+            print(f"[CARD] รอบ {rnd} ไม่ออกการ์ดใหม่ (เติมผลจริงอย่างเดียว) — ข้าม {len(cards)} ใบ")
+        return []
+    kept = []
+    for c in cards:
+        if pd.Timestamp(c["target_day"]).dayofweek in NO_EPPO_TARGET_DOW:
+            print(f"[CARD] ข้าม {c['card_id']}: วันเป้าหมาย {c['target_day']} วัดผลกับ EPPO ไม่ได้ (ไม่มีไฟล์ราคาเสาร์–อาทิตย์)")
+        else:
+            kept.append(c)
+    return kept
+
+
 def summary_lines(rows: list) -> list:
     done = [r for r in rows if str(r.get("filled_at", "")) != ""]
     hind = [r for r in done if is_hindcast(r)]
@@ -537,7 +557,7 @@ def main(argv=None):
         sig, sig_note = ws_signal(fuel, target, rnd, now, sig_tables, ws_model)
         cards.append(build_card(fuel, rnd, now, f, known, notice_msg, pred, resid, model, profile, retail_now_text(retail_vals, fuel), out_of_range(ds, fuel, f),
                                 sig=sig, sig_note=sig_note))
-    cards = drop_known(cards, eppo)
+    cards = writable(drop_known(cards, eppo), rnd)
     for c in cards:
         print(c["card_text"])
         print("-" * 60)
@@ -564,6 +584,10 @@ def main(argv=None):
     if add:
         sheets_append(tok, SHEET_ID, f"{tab}!A1:{LAST_COL}1", [[c[k] for k in COLUMNS] for c in add])
         rows += add
+        try:                                                 # ชีทเคยแสดง sig_p_* เป็นวันเวลา (0.348 → 1899-12-30 8:21) — ตั้งรูปแบบตัวเลขให้ชัด
+            set_number_format(tok, SHEET_ID, tab, COLUMNS.index("sig_p_down"), COLUMNS.index("sig_p_up") + 1)
+        except Exception as e:                                # noqa: BLE001 — รูปแบบการแสดงผลล้มเหลวต้องไม่กระทบการ์ด
+            print(f"[CARD] ตั้งรูปแบบคอลัมน์ไม่สำเร็จ: {e}")
     print(f"[CARD] new cards: +{len(add)}")
     filled = 0
     for i, r in enumerate(rows):
