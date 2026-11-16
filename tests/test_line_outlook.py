@@ -124,7 +124,8 @@ class RetailTest(unittest.TestCase):
 
     def test_on_demand_includes_retail(self):
         text, _ = L.build_message(_inp(), _log(), on_demand=True, retail=_retail())
-        self.assertIn("⛽ ราคาขายปลีก [ทดลอง", text)
+        self.assertTrue(text.startswith("🛢 แนวโน้มราคาส่ง (Jobber) 24 ชม."))
+        self.assertIn("⛽ ราคาขายปลีก วันถัดไป [ทดลอง", text)
         self.assertIn("ดีเซล (วันที่ 13/11): ➖ น่าจะไม่ปรับ", text)
         self.assertIn("• โอกาส ลง 12% / ไม่ปรับ 70% / ขึ้น 18%", text)
         self.assertIn("• โมเดลสัญญาณ (คู่ขนาน): ลง 5% / ไม่ปรับ 60% / ขึ้น 35%", text)
@@ -152,42 +153,6 @@ class RetailTest(unittest.TestCase):
         self.assertIn("• ผลจริง: ปรับ -0.50 บาท/ลิตร ✅", done)
         miss = _retail(call="ขึ้น", outcome_dretail=0.0, outcome_cls="นิ่ง", filled_at="2026-11-13 11:05")
         self.assertIn("• ผลจริง: ไม่ปรับ ❌", L.build_message(_inp(asof="2026-11-13 12:00", ref="2026-11-12 20:30"), _log(), on_demand=True, retail=miss)[0])
-
-
-def _cards(target="2026-11-13", **kw):
-    import procurement_summary as PS
-    def row(fuel, **o):
-        r = {"card_id": f"{target} 21:30 {fuel}", "asof": "2026-11-12 21:40", "fuel": fuel, "target_day": target, "lo": -0.05, "hi": 0.45,
-             "p_down": 0.08, "p_flat": 0.32, "p_up": 0.60, "call": "ขึ้น", "confidence": "กลาง", "outcome_dws": float("nan"),
-             "outcome_cls": float("nan"), "filled_at": float("nan")}
-        r.update(o)
-        return r
-    old = {"card_id": "2026-11-11 21:30 B7", "asof": "2026-11-10 21:40", "target_day": "2026-11-11", "call": "ลง", "outcome_dws": -0.93,
-           "outcome_cls": "ลง", "filled_at": "2026-11-11 11:05"}
-    return PS.prep_cards(pd.DataFrame([row("B7", **old), row("B7", **kw), row("G95", call="ไม่ชัด", confidence=float("nan"))]))
-
-
-class WholesaleTest(unittest.TestCase):
-    """ข้อความตอบคำสั่ง forecast มีทั้งราคาขายส่ง EPPO และราคาขายปลีก"""
-
-    def test_on_demand_includes_wholesale_then_retail(self):
-        text, _ = L.build_message(_inp(), _log(), on_demand=True, retail=_retail(), cards=_cards())
-        self.assertIn("🏭 ราคาขายส่ง EPPO [ทดลอง", text)
-        self.assertIn("ดีเซล (วันที่ 13/11): 📈 น่าจะขึ้น · ความเชื่อมั่น กลาง", text)
-        self.assertIn("• โอกาส ลง 8% / นิ่ง 32% / ขึ้น 60%", text)
-        self.assertIn("• คาดเปลี่ยน -0.05 ถึง +0.45 บาท/ลิตร", text)
-        self.assertIn("แก๊สโซฮอล์ 95 (วันที่ 13/11): ❓ ยังไม่ชัดเจน\n", text)
-        self.assertIn("ผลจริงสะสม: ดีเซล รู้ผล 1 วัน ฟันธง 1 ถูก 1\n\n⛽", text)
-        self.assertLess(text.index("🏭"), text.index("⛽"))
-        self.assertNotIn("nan", text)
-
-    def test_stale_outcome_and_nightly(self):
-        self.assertNotIn("🏭", L.build_message(_inp(), _log())[0])
-        late, _ = L.build_message(_inp(asof="2026-11-14 10:00", ref="2026-11-13 20:30"), _log(), on_demand=True, cards=_cards())
-        self.assertIn("ดีเซล: ยังไม่มีพยากรณ์ของวันถัดไป (ออกหลัง 21:30 น. คืนจันทร์–พฤหัสบดี) ; ล่าสุดเป็นของวันที่ 13/11", late)
-        done = _cards(outcome_dws=0.0, outcome_cls="นิ่ง", filled_at="2026-11-13 11:05")
-        self.assertIn("• ผลจริง: +0.00 บาท/ลิตร ❌", L.build_message(_inp(asof="2026-11-13 12:00", ref="2026-11-12 20:30"), _log(), on_demand=True, cards=done)[0])
-        self.assertIn("ดีเซล: ยังไม่มีพยากรณ์", L.build_message(_inp(), _log(), on_demand=True, cards=pd.DataFrame())[0])
 
 
 class SheetReadTest(unittest.TestCase):

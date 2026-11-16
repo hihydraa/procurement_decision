@@ -1624,12 +1624,6 @@ def main():
         outlook_log = pd.DataFrame()
     write_outlook_files(outlook, M.outlook_version(params), extras=outlook_log_extras(tables, params, summary, asof, outlook))
     try:
-        cards_raw = load_sheet_by_name("ForecastCardLog")          # การ์ดพยากรณ์ต้นทุนส่ง (ยังไม่มีแท็บ = ไม่ใช่ข้อผิดพลาด)
-        if "card_id" not in cards_raw.columns:
-            cards_raw = pd.DataFrame()
-    except Exception:
-        cards_raw = pd.DataFrame()
-    try:
         retail_raw = load_sheet_by_name("RetailFcLog")             # พยากรณ์ราคาปลีก (ทดลอง) ยังไม่มีแท็บ = ไม่ใช่ข้อผิดพลาด
         if "card_id" not in retail_raw.columns:
             retail_raw = pd.DataFrame()
@@ -1638,15 +1632,21 @@ def main():
     try:                                                   # ข้อมูลเข้าของข้อความไลน์ส่วนตัว (ช่วงทดสอบ ดู line_outlook.py) — ล้มเหลวต้องไม่กระทบหน้าเว็บ
         import line_outlook
         line_outlook.write_input(outlook, asof)
-        # ข้อความสำหรับตอบเมื่อพิมพ์ "forecast" ในแชทส่วนตัว (Worker อ่านจาก outlook.json ช่อง line_text) — มีพยากรณ์ราคาขายส่ง EPPO และราคาขายปลีกต่อท้าย
+        # ข้อความสำหรับตอบเมื่อพิมพ์ "forecast" ในแชทส่วนตัว (Worker อ่านจาก outlook.json ช่อง line_text) — มีพยากรณ์ราคาขายปลีกต่อท้าย
         pub = json.loads(open("outlook.json", encoding="utf-8").read())
         pub["line_text"] = line_outlook.build_message(line_outlook.make_input(outlook, asof), outlook_log, on_demand=True,
-                                                      retail=PS.prep_retail(retail_raw), cards=PS.prep_cards(cards_raw))[0]
+                                                      retail=PS.prep_retail(retail_raw))[0]
         write_text("outlook.json", json.dumps(pub, ensure_ascii=False, indent=1))
     except Exception as e:
         print(f"[LINE] เขียนข้อมูลเข้าไม่สำเร็จ: {e}")
     dispatch_html = build_outlook_section(outlook, asof, build_outlook_live(outlook_log, summary)) + dispatch_html
 
+    try:
+        cards_raw = load_sheet_by_name("ForecastCardLog")          # การ์ดพยากรณ์ต้นทุนส่ง (ยังไม่มีแท็บ = ไม่ใช่ข้อผิดพลาด)
+        if "card_id" not in cards_raw.columns:
+            cards_raw = pd.DataFrame()
+    except Exception:
+        cards_raw = pd.DataFrame()
     summary_html = PS.build_summary(outlook, summary, outlook_log, cards_raw, asof, engine, price_feed, retail_raw)
 
     trend_snaps = {fuel: trend_snapshot(tables, fuel, asof) for fuel in S.FUELS}
