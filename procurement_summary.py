@@ -79,7 +79,7 @@ def card_live_stats(cards: pd.DataFrame, fuel: str) -> dict:
         return out
     c = cards[cards["fuel"] == fuel]
     out["n_hind"] = int((~c["valid_forward"]).sum())
-    c = c[c["valid_forward"] & (c.get("outcome_cls", pd.Series("", index=c.index)).astype(str).str.strip() != "")]
+    c = c[c["valid_forward"] & ~c.get("outcome_cls", pd.Series("", index=c.index)).fillna("").astype(str).str.strip().isin(["", "nan", "None"])]
     out["n_cards"] = int(len(c))
     called = c[c["call"].isin(["ลง", "ขึ้น"])]
     out["n_called"] = int(len(called))
