@@ -105,6 +105,63 @@ class MessageTest(unittest.TestCase):
         self.assertIn("ดีเซล: ไม่มีคำทาย — ยังไม่มีโมเดล", text)
 
 
+def _retail(target="2026-11-13", **kw):
+    import procurement_summary as PS
+    def row(fuel, **o):
+        r = {"card_id": f"{target} 21:30 {fuel}", "asof": "2026-11-12 21:40", "round": "21:30", "fuel": fuel, "target_day": target, "retail_base": 40.79,
+             "p_down": 0.12, "p_flat": 0.70, "p_up": 0.18, "call": "นิ่ง", "size_text": float("nan"), "outcome_dretail": float("nan"),
+             "outcome_cls": float("nan"), "filled_at": float("nan"), "sig_p_down": 0.05, "sig_p_flat": 0.60, "sig_p_up": 0.35}
+        r.update(o)
+        return r
+    old = {"card_id": "2026-11-11 21:30 B7", "asof": "2026-11-10 21:40", "target_day": "2026-11-11", "call": "ลง", "outcome_dretail": -1.0,
+           "outcome_cls": "ลง", "filled_at": "2026-11-11 11:05"}
+    return PS.prep_retail(pd.DataFrame([row("B7", **old), row("B7", **kw), row("G95", call="ขึ้น", p_down=0.1, p_flat=0.4, p_up=0.5,
+                                                                              size_text="ถ้าปรับ มัธยฐาน 0.60 บาท/ลิตร (ช่วงที่พบบ่อย 0.50–1.00)")]))
+
+
+class RetailTest(unittest.TestCase):
+    """ข้อความตอบคำสั่ง forecast มีพยากรณ์ราคาขายปลีก ; ข้อความประจำคืนไม่มี"""
+
+    def test_on_demand_includes_retail(self):
+        text, _ = L.build_message(_inp(), _log(), on_demand=True, retail=_retail())
+        self.assertTrue(text.startswith("🛢 แนวโน้มราคาส่ง (Jobber) 24 ชม."))
+        self.assertIn("⛽ ราคาขายปลีก วันถัดไป [ทดลอง", text)
+        self.assertIn("ดีเซล (วันที่ 13/11): ➖ น่าจะไม่ปรับ", text)
+        self.assertIn("• โอกาส ลง 12% / ไม่ปรับ 70% / ขึ้น 18%", text)
+        self.assertIn("• โมเดลสัญญาณ (คู่ขนาน): ลง 5% / ไม่ปรับ 60% / ขึ้น 35%", text)                # แถวเก่า (ไม่มี model) : วิธีเดิมเป็นหลัก
+        self.assertIn("• คืนนี้โมเดลสัญญาณใช้ไม่ได้ จึงใช้วิธีเดิมเป็นคำทายหลัก", text)
+        self.assertIn("• ปลีกล่าสุดใน EPPO 40.79\n", text)                                  # size_text ว่าง (NaN จากชีท) ไม่ถูกพิมพ์
+        self.assertIn("แก๊สโซฮอล์ 95 (วันที่ 13/11): 📈 น่าจะปรับขึ้น", text)
+        self.assertIn("• ปลีกล่าสุดใน EPPO 40.79 · ถ้าปรับ มัธยฐาน 0.60 บาท/ลิตร", text)
+        self.assertIn("ผลจริงสะสม: ดีเซล รู้ผล 1 วัน ฟันธง 1 ถูก 1", text)                    # แถวที่ยังไม่มีผล (NaN) ไม่ถูกนับ
+        self.assertNotIn("nan", text)
+        self.assertLess(text.index("⛽"), text.index("ผลของคำทาย"))
+        self.assertTrue(text.endswith(L.FOOTER))
+
+    def test_signal_model_is_primary_when_logged(self):
+        sig = _retail(model="SIG", call="ขึ้น", p_down=0.05, p_flat=0.60, p_up=0.35, old_p_down=0.12, old_p_flat=0.70, old_p_up=0.18, old_call="นิ่ง")
+        text, _ = L.build_message(_inp(), _log(), on_demand=True, retail=sig)
+        self.assertIn("ดีเซล (วันที่ 13/11): 📈 น่าจะปรับขึ้น\n• โอกาส ลง 5% / ไม่ปรับ 60% / ขึ้น 35%\n• วิธีเดิม (คู่ขนาน): ลง 12% / ไม่ปรับ 70% / ขึ้น 18%", text)
+        self.assertNotIn("โมเดลสัญญาณใช้ไม่ได้", text.split("แก๊สโซฮอล์ 95 (วันที่")[0].split("⛽")[1])
+
+    def test_nightly_message_has_no_retail(self):
+        self.assertNotIn("⛽", L.build_message(_inp(), _log())[0])
+        self.assertNotIn("⛽", L.build_message(_inp(), _log(), on_demand=True)[0])
+
+    def test_stale_empty_and_outcome(self):
+        late, _ = L.build_message(_inp(asof="2026-11-14 10:00", ref="2026-11-13 20:30"), _log(), on_demand=True, retail=_retail())
+        self.assertIn("ดีเซล: ยังไม่มีพยากรณ์ของวันถัดไป (ออกหลัง 21:30 น. คืนจันทร์–พฤหัสบดี) ; ล่าสุดเป็นของวันที่ 13/11", late)
+        self.assertNotIn("น่าจะ", late)
+        empty, _ = L.build_message(_inp(), _log(), on_demand=True, retail=pd.DataFrame())
+        self.assertIn("ดีเซล: ยังไม่มีพยากรณ์ของวันถัดไป (ออกหลัง 21:30 น. คืนจันทร์–พฤหัสบดี)\n", empty)
+        today = _retail(call="ลง", outcome_dretail=-0.5, outcome_cls="ลง", filled_at="2026-11-13 11:05")
+        done, _ = L.build_message(_inp(asof="2026-11-13 12:00", ref="2026-11-12 20:30"), _log(), on_demand=True, retail=today)
+        self.assertIn("ดีเซล (วันที่ 13/11): 📉 น่าจะปรับลง", done)
+        self.assertIn("• ผลจริง: ปรับ -0.50 บาท/ลิตร ✅", done)
+        miss = _retail(call="ขึ้น", outcome_dretail=0.0, outcome_cls="นิ่ง", filled_at="2026-11-13 11:05")
+        self.assertIn("• ผลจริง: ไม่ปรับ ❌", L.build_message(_inp(asof="2026-11-13 12:00", ref="2026-11-12 20:30"), _log(), on_demand=True, retail=miss)[0])
+
+
 class SheetReadTest(unittest.TestCase):
     """OutlookLog อ่านจากชีทแบบ UNFORMATTED_VALUE : วันที่/เวลาเป็นเลขลำดับวัน (พบจริงตอน dry-run 16/11/2026 : สถิติว่างทั้งที่มีผล)"""
 

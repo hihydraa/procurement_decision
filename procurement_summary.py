@@ -79,7 +79,7 @@ def card_live_stats(cards: pd.DataFrame, fuel: str) -> dict:
         return out
     c = cards[cards["fuel"] == fuel]
     out["n_hind"] = int((~c["valid_forward"]).sum())
-    c = c[c["valid_forward"] & (c.get("outcome_cls", pd.Series("", index=c.index)).astype(str).str.strip() != "")]
+    c = c[c["valid_forward"] & ~c.get("outcome_cls", pd.Series("", index=c.index)).fillna("").astype(str).str.strip().isin(["", "nan", "None"])]
     out["n_cards"] = int(len(c))
     called = c[c["call"].isin(["ลง", "ขึ้น"])]
     out["n_called"] = int(len(called))
@@ -331,7 +331,7 @@ def retail_live_stats(retail: pd.DataFrame, code: str) -> dict:
     out = {"n": 0, "n_called": 0, "n_right": 0}
     if retail is None or retail.empty or "filled_at" not in retail.columns:
         return out
-    r = retail[(retail["fuel"] == code) & (retail["filled_at"].astype(str).str.strip() != "")]
+    r = retail[(retail["fuel"] == code) & ~retail["filled_at"].fillna("").astype(str).str.strip().isin(["", "nan", "None"])]   # ช่องว่างจากชีทอ่านมาเป็น NaN
     out["n"] = int(len(r))
     called = r[r["call"].isin(["ลง", "นิ่ง", "ขึ้น"])]
     out["n_called"] = int(len(called))
@@ -356,8 +356,9 @@ def _retail_block(r: dict | None, card: dict | None) -> str:
     now = f"ปลีกล่าสุดใน EPPO {base:.2f} บาท/ลิตร" if base is not None else ""
     ptt = (card or {}).get("retail_now")
     body += f"<div class='ps-cap muted'>{_e(now)}{' · ' if now and ptt else ''}{_e(ptt or '')}</div>"
-    body += ("<div class='ps-cap muted'>สำหรับ " + pd.to_datetime(r["target_dt"]).strftime("%d/%m") + " · คำนวณจากโอกาสของราคาขายส่ง × ความถี่ที่ปลีกปรับตามจริงในอดีต "
-             "(ปลีกปรับประมาณ 28% ของวัน ไม่ตามราคาส่งทุกครั้ง) · ยังไม่ผ่านการทดสอบเดินหน้า</div>")
+    how = ("คำนวณจากโมเดลสัญญาณ Jobber ของคืนก่อน (จำนวนผู้ค้าที่ประกาศขึ้น/ลง, MOPS ปิด, ประกาศกองทุน)" if str(r.get("model") or "").strip() == "SIG"
+           else "คำนวณจากโอกาสของราคาขายส่ง × ความถี่ที่ปลีกปรับตามจริงในอดีต (ปลีกปรับประมาณ 28% ของวัน ไม่ตามราคาส่งทุกครั้ง)")
+    body += ("<div class='ps-cap muted'>สำหรับ " + pd.to_datetime(r["target_dt"]).strftime("%d/%m") + f" · {how} · ยังไม่ผ่านการทดสอบเดินหน้า</div>")
     return body
 
 

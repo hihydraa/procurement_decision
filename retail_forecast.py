@@ -87,6 +87,10 @@ def decide(p: dict) -> str:
     return "ไม่ชัด"
 
 
+def size_phrase(sz: dict | None) -> str:
+    return f"ถ้าปรับ มัธยฐาน {sz['med']:.2f} บาท/ลิตร (ช่วงที่พบบ่อย {sz['p25']:.2f}–{sz['p75']:.2f})" if sz else ""
+
+
 def forecast(eppo: pd.DataFrame, fuel: str, p_ws: dict, target_day: pd.Timestamp, retail_base: float | None) -> dict | None:
     """p_ws = {'ลง','นิ่ง','ขึ้น'} ของ WS วันเป้าหมาย (จากการ์ด) ; None ถ้าประวัติไม่พอ"""
     h = history(eppo, fuel)
@@ -97,7 +101,7 @@ def forecast(eppo: pd.DataFrame, fuel: str, p_ws: dict, target_day: pd.Timestamp
     sizes = move_sizes(h)
     call = decide(p)
     sz = sizes.get(call) if call in ("ลง", "ขึ้น") else None
-    size_text = f"ถ้าปรับ มัธยฐาน {sz['med']:.2f} บาท/ลิตร (ช่วงที่พบบ่อย {sz['p25']:.2f}–{sz['p75']:.2f})" if sz else ""
+    size_text = size_phrase(sz)
     return {"p_down": p["ลง"], "p_flat": p["นิ่ง"], "p_up": p["ขึ้น"], "call": call, "size_text": size_text,
             "size_med": sz["med"] if sz else "", "retail_base": "" if retail_base is None else float(retail_base),
             "n_hist": int(len(h)), "dow_scale": round(scale, 2), "dow_n": n_dow}
@@ -179,7 +183,7 @@ def signals_fresh(tables, asof: pd.Timestamp) -> bool:
 
 
 def signal_forecast(model: dict, tables, fuel: str, target_day: pd.Timestamp) -> dict | None:
-    """ความน่าจะเป็นของปลีกวันเป้าหมายจากสัญญาณคืนก่อน (บันทึกคู่ขนาน ยังไม่ใช้แสดงผล) ; None ถ้าไม่มีโมเดล/ฟีดไม่สด"""
+    """ความน่าจะเป็นของปลีกวันเป้าหมายจากสัญญาณคืนก่อน (คำทายหลักตั้งแต่ 16/11/2026 ดู forecast_card.promote_signal) ; None ถ้าไม่มีโมเดล/ฟีดไม่สด"""
     import model as M
     m = (model or {}).get(fuel)
     eve = pd.Timestamp(target_day).normalize() - pd.Timedelta(days=1)
