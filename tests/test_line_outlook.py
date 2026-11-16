@@ -124,31 +124,45 @@ class RetailTest(unittest.TestCase):
 
     def test_on_demand_includes_retail(self):
         text, _ = L.build_message(_inp(), _log(), on_demand=True, retail=_retail())
-        self.assertTrue(text.startswith("🛢 แนวโน้มราคาส่ง (Jobber) 24 ชม."))
-        self.assertIn("⛽ ราคาขายปลีก วันถัดไป [ทดลอง", text)
-        self.assertIn("ดีเซล (วันที่ 13/11): ➖ น่าจะไม่ปรับ", text)
-        self.assertIn("• โอกาส ลง 12% / ไม่ปรับ 70% / ขึ้น 18%", text)
-        self.assertIn("• โมเดลสัญญาณ (คู่ขนาน): ลง 5% / ไม่ปรับ 60% / ขึ้น 35%", text)                # แถวเก่า (ไม่มี model) : วิธีเดิมเป็นหลัก
+        self.assertTrue(text.startswith("🛢 พยากรณ์ราคาน้ำมัน\n" + L.SEP + "\n① ราคาส่ง (Jobber) · 24 ชม.ข้างหน้า"))
+        self.assertIn(L.SEP + "\n② ราคาขายปลีก (หน้าปั๊ม) · วันถัดไป", text)
+        self.assertIn("ดีเซล (วันที่ 13/11): ➖ น่าจะไม่ปรับ\n⬇ ลง      ▰▱▱▱▱▱▱▱▱▱ 12%\n➖ ไม่ปรับ ▰▰▰▰▰▰▰▱▱▱ 70%\n⬆ ขึ้น     ▰▰▱▱▱▱▱▱▱▱ 18%", text)
+        self.assertNotIn("คู่ขนาน", text)                                                    # ข้อความไลน์แสดงเฉพาะคำทายหลัก
         self.assertNotIn("โมเดลสัญญาณใช้ไม่ได้", text)                                        # แถวก่อนการสลับ ไม่ใช่กรณีโมเดลสัญญาณล้ม
         old = L.build_message(_inp(), _log(), on_demand=True, retail=_retail(model="OLD"))[0]
         self.assertIn("• คืนนี้โมเดลสัญญาณใช้ไม่ได้ จึงใช้วิธีเดิมเป็นคำทายหลัก", old)
         self.assertIn("• ปลีกล่าสุดใน EPPO 40.79\n", text)                                  # size_text ว่าง (NaN จากชีท) ไม่ถูกพิมพ์
         self.assertIn("แก๊สโซฮอล์ 95 (วันที่ 13/11): 📈 น่าจะปรับขึ้น", text)
         self.assertIn("• ปลีกล่าสุดใน EPPO 40.79 · ถ้าปรับ มัธยฐาน 0.60 บาท/ลิตร", text)
-        self.assertIn("ผลจริงสะสม: ดีเซล รู้ผล 1 วัน ฟันธง 1 ถูก 1", text)                    # แถวที่ยังไม่มีผล (NaN) ไม่ถูกนับ
+        self.assertIn("ผลจริงสะสม (ราคาปลีก): ดีเซล รู้ผล 1 วัน ฟันธง 1 ถูก 1", text)          # แถวที่ยังไม่มีผล (NaN) ไม่ถูกนับ
         self.assertNotIn("nan", text)
-        self.assertLess(text.index("⛽"), text.index("ผลของคำทาย"))
+        # ผลงานของราคาส่งอยู่ในส่วนราคาส่ง ก่อนส่วนราคาปลีก — ไม่ปนกัน
+        self.assertLess(text.index("ผลงานที่ผ่านมา (ราคาส่ง Jobber)"), text.index("② ราคาขายปลีก"))
+        self.assertLess(text.index("ถูก ▰▰▰▰▰▰▰▱▱▱ 2/3"), text.index("② ราคาขายปลีก"))
         self.assertTrue(text.endswith(L.FOOTER))
 
     def test_signal_model_is_primary_when_logged(self):
         sig = _retail(model="SIG", call="ขึ้น", p_down=0.05, p_flat=0.60, p_up=0.35, old_p_down=0.12, old_p_flat=0.70, old_p_up=0.18, old_call="นิ่ง")
         text, _ = L.build_message(_inp(), _log(), on_demand=True, retail=sig)
-        self.assertIn("ดีเซล (วันที่ 13/11): 📈 น่าจะปรับขึ้น\n• โอกาส ลง 5% / ไม่ปรับ 60% / ขึ้น 35%\n• วิธีเดิม (คู่ขนาน): ลง 12% / ไม่ปรับ 70% / ขึ้น 18%", text)
-        self.assertNotIn("โมเดลสัญญาณใช้ไม่ได้", text.split("แก๊สโซฮอล์ 95 (วันที่")[0].split("⛽")[1])
+        self.assertIn("ดีเซล (วันที่ 13/11): 📈 น่าจะปรับขึ้น\n⬇ ลง      ▰▱▱▱▱▱▱▱▱▱ 5%\n➖ ไม่ปรับ ▰▰▰▰▰▰▱▱▱▱ 60%\n⬆ ขึ้น     ▰▰▰▰▱▱▱▱▱▱ 35%", text)
+        self.assertNotIn("โมเดลสัญญาณใช้ไม่ได้", text)
+
+    def test_bars_and_jobber_probabilities(self):
+        self.assertEqual((L.bar(0), L.bar(0.004), L.bar(0.62), L.bar(1.7)), ("▱" * 10, "▰" + "▱" * 9, "▰" * 6 + "▱" * 4, "▰" * 10))
+        inp = _inp()
+        inp["fuels"]["B7"]["h24"].update(p_up=0.62, p_down=0.08)
+        text, _ = L.build_message(inp, _log())
+        self.assertIn("ดีเซล: 📈 ขึ้น (คาดขยับ 10–40 สต./ลิตร)\n⬆ ขึ้น ▰▰▰▰▰▰▱▱▱▱ 62%\n⬇ ลง  ▰▱▱▱▱▱▱▱▱▱ 8%\nความเชื่อมั่น: กลาง", text)
+        self.assertNotIn("①", text)                                                          # ข้อความประจำคืนมีส่วนเดียว ไม่ใส่เลขลำดับ
+        self.assertIn("แก๊สโซฮอล์ 95: ❓ ไม่มีสัญญาณชัด\nราคาอาจขยับ", text)                  # ไม่มีค่าความน่าจะเป็น = ไม่มีแถบ
+        d = {"DIESEL": {"fuel": "B7", "ref": pd.Timestamp("2026-11-12 20:30"), "horizons": [
+            {"hours": 24, "tier": "UNCLEAR", "reasons": [], "p": {"r10": 0.31, "f10": 0.36, "r40": 0.1, "f40": 0.1}}]}}
+        h = L.make_input(d, pd.Timestamp("2026-11-12 21:35"))["fuels"]["B7"]["h24"]
+        self.assertEqual((h["p_up"], h["p_down"]), (0.31, 0.36))
 
     def test_nightly_message_has_no_retail(self):
-        self.assertNotIn("⛽", L.build_message(_inp(), _log())[0])
-        self.assertNotIn("⛽", L.build_message(_inp(), _log(), on_demand=True)[0])
+        self.assertNotIn("ราคาขายปลีก", L.build_message(_inp(), _log())[0])
+        self.assertNotIn("ราคาขายปลีก", L.build_message(_inp(), _log(), on_demand=True)[0])
 
     def test_stale_empty_and_outcome(self):
         late, _ = L.build_message(_inp(asof="2026-11-14 10:00", ref="2026-11-13 20:30"), _log(), on_demand=True, retail=_retail())
