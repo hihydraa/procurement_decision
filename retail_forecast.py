@@ -133,6 +133,11 @@ SIGNAL_MODEL_FILE = "retail_signal_model.json"
 WS_SIGNAL_MODEL_FILE = "ws_signal_model.json"       # เป้า = ราคาขายส่ง EPPO ; ฝึกเฉพาะปี 2026 (กลไกกองทุนต่างจากปีก่อน ดู exp_ws_search.py)
 WS_TRAIN_FROM = "2026-01-01"
 LONG_HISTORY_FILE = "data/eppo_daily_long.csv"
+# โมเดลฝั่ง "ลง" ของราคาปลีก ใช้ระดับกองทุน (บาท/ลิตร จากโครงสร้างราคา EPPO ของวันก่อนวันเป้าหมาย) เพิ่มอีกตัว เฉพาะชนิดที่ผ่านเกณฑ์
+# exp_leads.py (17/11/2026 ; เจ้าของระบบอนุมัติ) : G95 AUC ฝั่งลง 0.63 → 0.68 , Brier ดีขึ้นโดยช่วงเชื่อมั่นไม่คร่อมศูนย์ ; ดีเซลไม่ผ่าน จึงไม่ใช้
+DOWN_FUND_FUELS = ("G95",)
+FUND_CLIP = (-25.0, 25.0)
+FUND_MAX_AGE_DAYS = 4       # ใช้ค่ากองทุนของไฟล์ EPPO ล่าสุดที่ไม่เก่ากว่านี้ (ไม่มีไฟล์เสาร์–อาทิตย์) ; เก่ากว่านี้ถอยไปใช้โมเดลฝั่งลงชุดเดิม
 SIGNAL_MAX_AGE_H = 12.0     # ฟีดสัญญาณต้องมีข้อความใหม่ภายในกี่ชั่วโมงก่อนเวลาตัด จึงถือว่าใช้ได้
 
 
@@ -172,8 +177,24 @@ def fit_signal_model(tables, eppo: pd.DataFrame, fuel: str, last_signal_day: pd.
     yu, yd = (y >= MOVE).astype(float), (y <= -MOVE).astype(float)
     if not (0 < yu.sum() < len(y) and 0 < yd.sum() < len(y)):
         return None
-    return {"up": M.fit_logistic(X, yu), "down": M.fit_logistic(X, yd), "n": int(len(y)), "n_up": int(yu.sum()), "n_down": int(yd.sum()),
-            "from": str(min(days).date()), "to": str(max(days).date())}
+    out = {"up": M.fit_logistic(X, yu), "down": M.fit_logistic(X, yd), "n": int(len(y)), "n_up": int(yu.sum()), "n_down": int(yd.sum()),
+           "from": str(min(days).date()), "to": str(max(days).date())}
+    if col == "retail" and fuel in DOWN_FUND_FUELS and "fund" in g.columns:
+        fund = np.array([float(g.fund[d]) for d in days])
+        ok = ~np.isnan(fund)
+        if ok.sum() >= 100 and 0 < yd[ok].sum() < ok.sum():
+            out["down_fund"] = M.fit_logistic(np.column_stack([X[ok], np.clip(fund[ok], *FUND_CLIP)]), yd[ok])
+            out["down_fund_n"] = int(ok.sum())
+    return out
+
+
+def fund_level(eppo: pd.DataFrame, fuel: str, eve: pd.Timestamp):
+    """ระดับกองทุน (บาท/ลิตร) ของไฟล์ EPPO ล่าสุดที่วันที่ <= eve และไม่เก่ากว่า FUND_MAX_AGE_DAYS ; None ถ้าไม่มี"""
+    if eppo is None or eppo.empty or "fund" not in eppo.columns:
+        return None
+    eve = pd.Timestamp(eve).normalize()
+    g = eppo[(eppo.fuel == fuel) & (eppo.day <= eve) & (eppo.day >= eve - pd.Timedelta(days=FUND_MAX_AGE_DAYS)) & eppo.fund.notna()].sort_values("day")
+    return None if g.empty else float(g.fund.iloc[-1])
 
 
 def signals_fresh(tables, asof: pd.Timestamp) -> bool:
@@ -182,7 +203,7 @@ def signals_fresh(tables, asof: pd.Timestamp) -> bool:
     return bool(newest) and (asof - max(newest)) <= pd.Timedelta(hours=SIGNAL_MAX_AGE_H)
 
 
-def signal_forecast(model: dict, tables, fuel: str, target_day: pd.Timestamp) -> dict | None:
+def signal_forecast(model: dict, tables, fuel: str, target_day: pd.Timestamp, eppo: pd.DataFrame = None) -> dict | None:
     """ความน่าจะเป็นของปลีกวันเป้าหมายจากสัญญาณคืนก่อน (คำทายหลักตั้งแต่ 16/11/2026 ดู forecast_card.promote_signal) ; None ถ้าไม่มีโมเดล/ฟีดไม่สด"""
     import model as M
     m = (model or {}).get(fuel)
@@ -192,11 +213,14 @@ def signal_forecast(model: dict, tables, fuel: str, target_day: pd.Timestamp) ->
         return None
     x = signal_vector(signal_features(tables, fuel, eve))
     pu, pd_ = float(M.predict_proba(m["up"], x)[0]), float(M.predict_proba(m["down"], x)[0])
+    fund = fund_level(eppo, fuel, eve) if m.get("down_fund") else None          # โมเดลฝั่งลงที่มีระดับกองทุน (ถ้ามีโมเดลและมีค่ากองทุนที่สดพอ)
+    if fund is not None:
+        pd_ = float(M.predict_proba(m["down_fund"], np.append(x, min(max(fund, FUND_CLIP[0]), FUND_CLIP[1])))[0])
     if pu + pd_ > 0.98:
         k = 0.98 / (pu + pd_)
         pu, pd_ = pu * k, pd_ * k
     p = {"ลง": pd_, "นิ่ง": 1.0 - pu - pd_, "ขึ้น": pu}
-    return {"p_down": pd_, "p_flat": p["นิ่ง"], "p_up": pu, "call": decide(p)}
+    return {"p_down": pd_, "p_flat": p["นิ่ง"], "p_up": pu, "call": decide(p), "down_model": "fund" if fund is not None else "base"}
 
 
 def main(argv):
