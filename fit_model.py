@@ -249,10 +249,12 @@ def fit_outlook_into(book, tables, params, summary):
         if True:
             key = f"{fuel}_{tag}H{hz}"
             v2 = key in M.OUTLOOK_V2_KEYS and not tables.known(fuel).empty           # ชุด v2 ต้องมีตารางราคาพร้อมเวลาโพสต์
+            v1s = key in M.OUTLOOK_STALE_KEYS and not v2
             df = build_outlook_dataset(book, tables, fuel, hz, ref_hour, v2=v2)
             recs = df.to_dict("records")
             X1 = np.vstack([M.vectorize(r) for r in recs])
-            X = np.vstack([M.vectorize_v2(r) for r in recs]) if v2 else X1
+            X = np.vstack([M.vectorize_v2(r) for r in recs]) if v2 else np.vstack([M.vectorize_stale(r) for r in recs]) if v1s else X1
+            fset = "v2" if v2 else "v1s" if v1s else None
             y = df.y.to_numpy()
             tg = {"r10": (y >= M.OUTLOOK_SMALL), "f10": (y <= -M.OUTLOOK_SMALL), "r40": (y >= M.OUTLOOK_BIG), "f40": (y <= -M.OUTLOOK_BIG)}
             tg = {k: v.astype(float) for k, v in tg.items()}
@@ -268,11 +270,11 @@ def fit_outlook_into(book, tables, params, summary):
             params["outlook"]["models"][key] = {k: M.fit_logistic(X, v) for k, v in tg.items()}
             params["outlook"].get("feature_set", {}).pop(key, None)
             params["outlook"].get("models_v1", {}).pop(key, None)
-            if v2:      # เก็บโมเดลชุดเดิมไว้ใช้เมื่อฟีดราคาไม่พร้อม (วันทดสอบชุดเดียวกัน)
-                params["outlook"].setdefault("feature_set", {})[key] = "v2"
+            if fset:    # เก็บโมเดลชุดเดิม : v2 ใช้เมื่อฟีดราคาไม่พร้อม ; v1s ใช้ทายคู่ขนานเพื่อเทียบผลจริง (วันทดสอบชุดเดียวกัน)
+                params["outlook"].setdefault("feature_set", {})[key] = fset
                 params["outlook"].setdefault("models_v1", {})[key] = {k: M.fit_logistic(X1, v) for k, v in tg.items()}
                 P1 = {k: _wf_proba(X1, tg[k]) for k in ("r10", "f10")}
-                summary["outlook_results"][key].update({"feature_set": "v2", "auc_r10_v1": auc(tg["r10"][ok], P1["r10"][ok]), "auc_f10_v1": auc(tg["f10"][ok], P1["f10"][ok])})
+                summary["outlook_results"][key].update({"feature_set": fset, "auc_r10_v1": auc(tg["r10"][ok], P1["r10"][ok]), "auc_f10_v1": auc(tg["f10"][ok], P1["f10"][ok])})
             t = summary["outlook_results"][key]["tiers"]
             print(f"[outlook {key}] n={len(df)} oos={ok.sum()} AUC r10={summary['outlook_results'][key]['auc_r10']:.2f} f10={summary['outlook_results'][key]['auc_f10']:.2f} | "
                   + " ".join(f"{M.OUTLOOK_TIERS[c]}:{t[c]['n']}" + (f"({t[c]['right10']:.0%}/{t[c]['wrong10']:.0%},{t[c]['grade']})" if t[c].get('grade') else "") for c in M.OUTLOOK_TIERS))

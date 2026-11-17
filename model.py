@@ -30,6 +30,19 @@ def vectorize(f: dict) -> np.ndarray:
     return np.array([val("trend"), trend_missing, val("up_n"), val("dn_n"), cl, close_sign, val("close_3"), val("fund_next")], dtype=float)
 
 
+def close_stale(f: dict) -> bool:
+    """MOPS ปิดล่าสุดค้าง (ไม่มีค่า หรือเก่ากว่า STALE_CLOSE_H ชม.) ณ เวลาที่สร้างฟีเจอร์"""
+    age = f.get("close_age_h")
+    return age is None or (isinstance(age, float) and np.isnan(age)) or float(age) > STALE_CLOSE_H
+
+
+def vectorize_stale(f: dict) -> np.ndarray:
+    """ชุด v1s : ชุดเดิม + [stale, close_last × stale] ให้โมเดลเรียนเองว่าควรเชื่อ MOPS ที่ค้างแค่ไหน (exp_weekend.py)"""
+    x = vectorize(f)
+    s = float(close_stale(f))
+    return np.concatenate([x, [s, x[FEATURES.index("close_last")] * s]])
+
+
 # ---------- ฟีเจอร์ชุด v2 (โมเดลแนวโน้ม 24 ชม.) : ชุดเดิม 8 ตัว + ราคาที่รู้ ณ เวลาตัดสินใจ (ดู signals.build_features_v2, exp_model_search.py) ----------
 FEATURES_V2 = FEATURES + ["pend", "pend_pos", "pend_neg", "pend_up_n", "pend_dn_n", "mom1", "mom3", "intra",
                           "close_5", "close_10", "mom5", "mom10", "disp", "dow_mon", "dow_fri", "dow_sat", "dow_sun"]
@@ -159,6 +172,10 @@ PROFILE_MIN_RIGHT, PROFILE_MAX_WRONG, PROFILE_MIN_N = 0.60, 0.12, 40
 # โมเดลแนวโน้มที่ใช้ฟีเจอร์ชุด v2 : เฉพาะ key ที่ผ่านทั้งเกณฑ์ของการทดลอง (exp_model_search.py) และประตูตรวจของ retrain (ระดับคำทายไม่แย่ลง)
 # ผล 2026-11-12 : G95_H24 ผ่าน ; B7_H24, B7_P_H24, G95_P_H24 AUC ดีขึ้นแต่ระดับ "ขึ้นแรง/ขึ้น" แม่นน้อยลง จึงยังไม่ใช้ ; 48 ชม. ไม่ดีขึ้น
 OUTLOOK_V2_KEYS = ("G95_H24",)
+# ชุดฟีเจอร์ v1s = ชุดเดิม 8 ตัว + stale (MOPS ปิดล่าสุดเก่ากว่า STALE_CLOSE_H ชม. ณ เวลาตัดสินใจ : เสาร์–อาทิตย์/วันหยุดสิงคโปร์) + close_last × stale
+# ผล exp_weekend.py (17/11/2026) : B7_H24 วันค้างผิดทิศ 20% เทียบวันสด 8% ; v1s AUC 0.760 → 0.793 ; เจ้าของระบบอนุมัติ 17/11/2026 (ติดป้าย "ทดลอง" + บันทึกโมเดลเดิมคู่ขนาน)
+OUTLOOK_STALE_KEYS = ("B7_H24",)
+STALE_CLOSE_H = 12.0      # ใช้กับรอบ 20:30 เท่านั้น (วันปกติ MOPS ปิดออก ~18:00–19:30 → อายุ 1–2 ชม.)
 OUTLOOK_SMALL, OUTLOOK_BIG = 0.10, 0.40   # บาท/ลิตร: ขยับ >= SMALL นับเป็นขึ้น/ลง ; >= BIG นับเป็น "แรง"
 OUTLOOK_MIN_P = 0.50               # โอกาสขั้นต่ำที่จะทายว่าขึ้น/ลง (ต่ำกว่านี้ = ยังไม่ชัดเจน ไม่ฝืนทาย)
 OUTLOOK_STRONG_P = 0.30            # โอกาสขยับ >= BIG ขั้นต่ำที่จะเรียก "แรง"

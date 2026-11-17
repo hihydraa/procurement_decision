@@ -98,13 +98,13 @@ class ShippedModelTest(unittest.TestCase):
 
     def test_only_gated_key_uses_v2(self):
         o = self.params["outlook"]
-        self.assertEqual(o.get("feature_set"), {k: "v2" for k in M.OUTLOOK_V2_KEYS})
+        self.assertEqual(o.get("feature_set"), {**{k: "v2" for k in M.OUTLOOK_V2_KEYS}, **{k: "v1s" for k in M.OUTLOOK_STALE_KEYS}})
         for key, mm in o["models"].items():
-            n = len(M.FEATURES_V2) if key in M.OUTLOOK_V2_KEYS else len(M.FEATURES)
+            n = len(M.FEATURES_V2) if key in M.OUTLOOK_V2_KEYS else len(M.FEATURES) + 2 if key in M.OUTLOOK_STALE_KEYS else len(M.FEATURES)
             for side in mm.values():
                 if isinstance(side, dict) and "w" in side:
                     self.assertEqual(len(side["w"]), n, key)
-        for key in M.OUTLOOK_V2_KEYS:
+        for key in M.OUTLOOK_V2_KEYS + M.OUTLOOK_STALE_KEYS:
             for side in o["models_v1"][key].values():
                 if isinstance(side, dict) and "w" in side:
                     self.assertEqual(len(side["w"]), len(M.FEATURES))
@@ -125,7 +125,64 @@ class ShippedModelTest(unittest.TestCase):
         self.assertIn("ใช้โมเดลชุดเดิม", out1["note"])
         self.assertTrue(all(0.0 <= v <= 1.0 for v in out1["horizons"][0]["p"].values()))
         d = self._run("DIESEL", S.Tables().set_prices(_feed()))
-        self.assertTrue(d["horizons"] and all(x["feature_set"] == "v1" for x in d["horizons"]))
+        self.assertEqual([x["feature_set"] for x in d["horizons"]], ["v1s", "v1"])     # ดีเซล 24 ชม. = ชุด v1s ; 48 ชม. คงเดิม
+
+
+class StaleFeatureTest(unittest.TestCase):
+    """ชุด v1s (exp_weekend.py) : ตัวแปร MOPS ค้าง + โมเดลเดิมทายคู่ขนาน + ป้ายทดลอง"""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(ROOT, "model_params.json"), encoding="utf-8") as fh:
+            cls.params = json.load(fh)
+
+    def test_vectorize_stale(self):
+        f = {"trend": 0.5, "up_n": 2, "dn_n": 0, "close_last": 3.0, "close_3": 4.0, "fund_next": 0.0}
+        fresh, old, none = M.vectorize_stale({**f, "close_age_h": 1.5}), M.vectorize_stale({**f, "close_age_h": 49.0}), M.vectorize_stale(f)
+        np.testing.assert_array_equal(fresh[:len(M.FEATURES)], M.vectorize(f))
+        self.assertEqual(list(fresh[-2:]), [0.0, 0.0])
+        self.assertEqual(list(old[-2:]), [1.0, 3.0])
+        self.assertEqual(list(none[-2:]), [1.0, 3.0])          # ไม่รู้อายุ = ถือว่าค้าง
+        self.assertEqual(list(M.vectorize_stale({**f, "close_age_h": 12.0})[-2:]), [0.0, 0.0])
+
+    def _tables(self, close_at):
+        mops = pd.DataFrame([["2026-11-06", "19:00", "2026-11-06", 110.0, -7.5, 160.0, -7.5]],
+                            columns=["msg_date", "msg_time", "mops_date", "g95", "g95_chg", "diesel", "diesel_chg"])
+        mops["msg_date"], mops["msg_time"] = close_at.strftime("%Y-%m-%d"), close_at.strftime("%H:%M")
+        return S.Tables(mops_close=mops).set_prices(_feed())
+
+    def _run(self, asof, tables):
+        with mock.patch("engine.feed_status", return_value={"alive": True, "newest": None}):
+            return E.decide_outlook("DIESEL", asof, tables, self.params)
+
+    def test_stale_weekend_vs_fresh(self):
+        sat = pd.Timestamp("2026-11-07 21:00")                      # เสาร์ : MOPS ปิดล่าสุดคือวันศุกร์ 19:00
+        h = self._run(sat, self._tables(pd.Timestamp("2026-11-06 19:00")))["horizons"][0]
+        self.assertEqual(h["feature_set"], "v1s")
+        self.assertTrue(h["trial"])
+        self.assertIn(h["old"]["tier"], M.OUTLOOK_TIERS)
+        self.assertTrue(any("MOPS ปิดล่าสุดเป็นค่าเก่า" in r for r in h["reasons"]), h["reasons"])
+        # MOPS เดียวกันแต่เพิ่งออก (วันธรรมดา) : ไม่ติดเหตุผลค่าเก่า และโมเดลใหม่ = โมเดลเดิม + 0 ของตัวแปรค้าง
+        fri = self._run(pd.Timestamp("2026-11-06 21:00"), self._tables(pd.Timestamp("2026-11-06 19:00")))["horizons"][0]
+        self.assertFalse(any("ค่าเก่า" in r for r in fri["reasons"]))
+        # วันค้าง โมเดลใหม่เชื่อ MOPS ลบน้อยกว่าวันสด (ข้อค้นพบหลักของ exp_weekend.py)
+        self.assertLess(h["p"]["f10"], fri["p"]["f10"])
+
+    def test_old_columns_in_snapshot(self):
+        import main
+        import tempfile
+        d = self._run(pd.Timestamp("2026-11-07 21:00"), self._tables(pd.Timestamp("2026-11-06 19:00")))
+        with tempfile.TemporaryDirectory() as tmp:
+            snap, pub = os.path.join(tmp, "s.json"), os.path.join(tmp, "p.json")
+            main.write_outlook_files({"DIESEL": d}, "v", snap, pub)
+            with open(snap, encoding="utf-8") as fh:
+                rows = json.load(fh)
+            with open(pub, encoding="utf-8") as fh:
+                text = json.load(fh)["text"]
+        r24 = next(r for r in rows if r["hours"] == 24)
+        self.assertEqual(r24["old_tier"], d["horizons"][0]["old"]["tier"])
+        self.assertNotIn("old_tier", next(r for r in rows if r["hours"] == 48))
+        self.assertIn("(ทดลอง)", text)
 
 
 class RetrainV2Test(unittest.TestCase):

@@ -52,6 +52,8 @@ def feed_status(tables: S.Tables, asof: pd.Timestamp) -> dict:
 def _reason_lines(fuel: str, f: dict, model_rise: dict, model_fall: dict) -> list:
     """เหตุผลที่แปลงจากฟีเจอร์ที่ active จริง เรียงตามแรงที่ดัน logit (ขึ้น/ลง)"""
     x = M.vectorize(f)
+    if len(model_rise["mu"]) > len(x):          # ชุด v1s : ชุดเดิม + ตัวแปร MOPS ค้าง (ตัวต่อท้ายไม่นำมาอธิบายในลูปนี้)
+        x = M.vectorize_stale(f)
     mu, sd = np.array(model_rise["mu"]), np.array(model_rise["sd"])
     z = (x - mu) / sd
     c_rise = np.array(model_rise["w"]) * z
@@ -489,6 +491,13 @@ def decide_outlook(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params, 
                 out["note"] = "ฟีดราคา Jobber ไม่พร้อม — ใช้โมเดลชุดเดิม (ไม่มีข้อมูลราคาที่ประกาศล่วงหน้า)"
             else:
                 continue
+        old = None
+        if (cfg.get("feature_set") or {}).get(key) == "v1s":
+            xx, fset = M.vectorize_stale(f), "v1s"
+            m1 = (cfg.get("models_v1") or {}).get(key)
+            if m1:                                                # โมเดลเดิม (ชุด v1) ทายคู่ขนาน → OutlookLog old_* ไว้เทียบผลจริง
+                po = {k: float(M.predict_proba(m1[k], x)[0]) for k in ("r10", "f10", "r40", "f40")}
+                old = {"p": po, "tier": M.classify_outlook(po["r10"], po["f10"], po["r40"], po["f40"])}
         p = {k: float(M.predict_proba(mm[k], xx)[0]) for k in ("r10", "f10", "r40", "f40")}
         tier = M.classify_outlook(p["r10"], p["f10"], p["r40"], p["f40"])
         ev = _outlook_evidence(summary, key, tier)
@@ -497,7 +506,14 @@ def decide_outlook(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params, 
                    else _reason_lines(fuel, f, mm["r10"], mm["f10"]))        # ปัจจัยจริงที่ดันทิศทางของโมเดลนี้ (เรียงตามแรง)
         if f["trend"] is None or (isinstance(f["trend"], float) and np.isnan(f["trend"])):
             reasons.append("ยังไม่มี Trend Mops ของวันนี้ — ความมั่นใจต่ำกว่าปกติ")
-        out["horizons"].append({"reasons": reasons, "feature_set": fset,
+        trial = None
+        if fset == "v1s":
+            trial = "รุ่นทดลอง: ลดน้ำหนัก MOPS ที่ค้างช่วงวันหยุด"
+            if M.close_stale(f):
+                age = f.get("close_age_h")
+                reasons.append("MOPS ปิดล่าสุดเป็นค่าเก่า" + (f" ({age:.0f} ชม.)" if age is not None and not np.isnan(age) else "")
+                               + " — โมเดลลดน้ำหนัก MOPS")
+        out["horizons"].append({"reasons": reasons, "feature_set": fset, "trial": trial, "old": old,
             "hours": hz, "tier": tier, "label": M.OUTLOOK_TIERS[tier], "headline": f"{OUTLOOK_HEADLINE[tier]} ภายใน {hz} ชม.",
             "size": OUTLOOK_SIZE.get(tier), "until": until, "p": p, "grade": (ev or {}).get("grade", "ต่ำ"), "evidence": ev,
             "base_up": ((summary or {}).get("outlook_results", {}).get(key) or {}).get("base_up10"),
@@ -555,7 +571,7 @@ def outlook_text(per_fuel: dict, now: pd.Timestamp = None) -> str:
         for h in d["horizons"]:
             size = f" ({h['size']})" if h.get("size") else ""
             conf = "" if h["tier"] == "UNCLEAR" else f" {GRADE_EMOJI[h['grade']]} ความเชื่อมั่น: {h['grade']}"
-            lines.append(f"{h['hours']} ชม.: {TIER_EMOJI[h['tier']]} {h['label']}{size}{conf}")
+            lines.append(f"{h['hours']} ชม.: {TIER_EMOJI[h['tier']]} {h['label']}{size}{conf}" + (" (ทดลอง)" if h.get("trial") else ""))
             ev = outlook_evidence_text(h)
             if ev and h["hours"] == 24:
                 lines.append(f"   {ev}")

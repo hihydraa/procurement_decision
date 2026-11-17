@@ -818,6 +818,7 @@ def _outlook_horizon_html(h):
     return (f"<div class='{cls}'><div class='dispatch-head'><span class='badge text-bg-{color}'>{html_escape(h['label'])}</span>"
             + ("" if h["tier"] == "UNCLEAR" else f"<span class='qtag qtag-{gmap[h['grade']]}'>ความเชื่อมั่น: {h['grade']}</span>") + "</div>"
             f"<div class='dispatch-headline'>{html_escape(h['headline'])}</div>{size}{evidence}"
+            + (f"<div class='muted'>🧪 {html_escape(h['trial'])}</div>" if h.get("trial") else "") +
             f"<div class='muted'>ครอบคลุมถึง {h['until'].strftime('%d/%m %H:%M')}</div></div>")
 
 
@@ -919,6 +920,14 @@ def outlook_log_extras(tables, params, summary, asof, main_outlook: dict) -> dic
     return extras
 
 
+def _old_cols(h: dict, clean) -> dict:
+    """คำทายของโมเดลเดิมที่รันคู่ขนาน (เฉพาะ key ชุด v1s) สำหรับ OutlookLog old_*"""
+    o = h.get("old")
+    if not o:
+        return {}
+    return {"old_tier": o["tier"], "old_p_rise10": clean(o["p"]["r10"]), "old_p_fall10": clean(o["p"]["f10"])}
+
+
 def write_outlook_files(outlook: dict, version: str = "", snap_path: str = "outlook_snapshot.json", pub_path: str = "outlook.json",
                         extras: dict = None) -> None:
     """snapshot ให้ log_outlook.py บันทึกลง OutlookLog ; outlook.json = ข้อความ + ระดับ (ไม่มีข้อมูลดิบ) ให้ส่งต่อเข้าไลน์/หน้าอื่น"""
@@ -928,7 +937,8 @@ def write_outlook_files(outlook: dict, version: str = "", snap_path: str = "outl
         for h in d.get("horizons", []):
             snap.append({"asof": d["asof"].strftime("%Y-%m-%d %H:%M"), "ref": d["ref"].strftime("%Y-%m-%d %H:%M"), "fuel": d["fuel"],
                          "hours": h["hours"], "tier": h["tier"], "p_rise10": clean(h["p"]["r10"]), "p_fall10": clean(h["p"]["f10"]),
-                         "p_rise40": clean(h["p"]["r40"]), "p_fall40": clean(h["p"]["f40"]), "grade": h["grade"], "model_version": version})
+                         "p_rise40": clean(h["p"]["r40"]), "p_fall40": clean(h["p"]["f40"]), "grade": h["grade"], "model_version": version,
+                         **_old_cols(h, clean)})
         for pf in d.get("profile") or []:              # ช่วงเวลาของวันพรุ่งนี้ : บันทึกลง OutlookLog (hours 16/20) เพื่อวัดผลจริง ไม่ขึ้นหน้าเว็บ
             snap.append({"asof": d["asof"].strftime("%Y-%m-%d %H:%M"), "ref": d["ref"].strftime("%Y-%m-%d %H:%M"), "fuel": d["fuel"],
                          "hours": pf["hours"], "tier": pf["call"] or "UNCLEAR", "p_rise10": clean(pf["p_up"]), "p_fall10": clean(pf["p_down"]),
@@ -940,7 +950,8 @@ def write_outlook_files(outlook: dict, version: str = "", snap_path: str = "outl
         for h in d.get("horizons", []):
             snap.append({"asof": d["asof"].strftime("%Y-%m-%d %H:%M"), "ref": d["ref"].strftime("%Y-%m-%d %H:%M"), "fuel": d["fuel"],
                          "hours": h["hours"], "tier": h["tier"], "p_rise10": clean(h["p"]["r10"]), "p_fall10": clean(h["p"]["f10"]),
-                         "p_rise40": clean(h["p"]["r40"]), "p_fall40": clean(h["p"]["f40"]), "grade": h["grade"], "model_version": version})
+                         "p_rise40": clean(h["p"]["r40"]), "p_fall40": clean(h["p"]["f40"]), "grade": h["grade"], "model_version": version,
+                         **_old_cols(h, clean)})
     write_text(snap_path, json.dumps(snap, ensure_ascii=False, indent=1))
     write_text(pub_path, json.dumps({"generated": datetime.now(TZ).strftime("%Y-%m-%d %H:%M"), "text": engine.outlook_text(outlook), "fuels": pub},
                                     ensure_ascii=False, indent=1))
