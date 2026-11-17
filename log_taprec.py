@@ -17,7 +17,7 @@ import pandas as pd
 
 from common import OILBOT_SHEET_ID, SHEET_ID, TABS, TZ_NAME, ensure_tab, get_token, sheets_append, sheets_get, sheets_update, to_ts
 from pricelog_frame import build_frame
-from tap_policy import DEPOTS, FIXED_TAPS, FLAT, POLICY_MAPS, depot_series, diff_ci, load_outlook, pred_of, window_regrets
+from tap_policy import DEPOTS, FIXED_TAPS, FLAT, POLICY_MAPS, TAPS, depot_series, diff_ci, load_outlook, pred_of, window_regrets
 
 COLUMNS = ["ref", "day", "fuel", "tier", "pred", "rec_A", "rec_B", "rec_C", "model_version", "logged_at",
            "n_depots", "delta", "regret_A", "regret_B", "regret_C", "fixed_2230", "fixed_0700", "fixed_1630", "actual_cls", "filled_at",
@@ -59,6 +59,21 @@ def new_rows(existing: set, outlook: pd.DataFrame, now: pd.Timestamp) -> list:
     return out
 
 
+def tap_key(v) -> str:
+    """ชื่อจุดแตะจากค่าในชีท : เขียนแบบ USER_ENTERED ทำให้ "16:30"/"07:00" กลายเป็นเวลา และอ่านแบบ UNFORMATTED ได้เศษส่วนของวัน (0.6875)
+    → แปลงกลับเป็น "HH:MM" ; ข้อความเช่น "ก่อน22:30" คงเดิม ; ไม่ตรงกับ TAPS = ValueError (ไม่เดา)"""
+    s = str(v).strip()
+    if s not in TAPS:
+        try:
+            m = round(float(s) % 1 * 24 * 60)
+            s = f"{m // 60:02d}:{m % 60:02d}"
+        except ValueError:
+            pass
+    if s not in TAPS:
+        raise ValueError(f"จุดแตะไม่รู้จัก: {v!r}")
+    return s
+
+
 def fill_outcome(row: dict, prices: pd.DataFrame, now: pd.Timestamp):
     """regret ที่เกิดจริงของแต่ละนโยบายและของเวลาคงที่ เฉลี่ยข้ามคลัง ; None ถ้ายังไม่ครบกำหนด/ราคายังไม่พอ"""
     day = pd.Timestamp(row["day"])
@@ -70,7 +85,7 @@ def fill_outcome(row: dict, prices: pd.DataFrame, now: pd.Timestamp):
     mean = lambda k: float(np.mean([w[k] for w in regs]))
     delta = mean("delta")
     out = {"n_depots": len(regs), "delta": round(delta, 3),
-           **{f"regret_{k}": round(mean(row[f"rec_{k}"]), 3) for k in POLICY_MAPS},
+           **{f"regret_{k}": round(mean(tap_key(row[f"rec_{k}"])), 3) for k in POLICY_MAPS},
            **{col: round(mean(tap), 3) for tap, col in FIXED_COLS.items()},
            "actual_cls": "ขึ้น" if delta >= FLAT else "ลง" if delta <= -FLAT else "ทรง", "filled_at": now.strftime("%Y-%m-%d %H:%M")}
     return out
