@@ -403,7 +403,7 @@ def load_json_model(name: str) -> dict:
         return {}
 
 
-def signal_shadow(rows: list, rnd: str, now: pd.Timestamp, tables=None, model=None) -> list:
+def signal_shadow(rows: list, rnd: str, now: pd.Timestamp, tables=None, model=None, eppo_d: pd.DataFrame = None) -> list:
     """เติมคอลัมน์ sig_* ให้แถวพยากรณ์ปลีก (เฉพาะรอบ 21:30 ซึ่งสัญญาณของคืนนี้ออกครบแล้ว) ; ผิดพลาดใด ๆ = เว้นว่างพร้อมเหตุผล"""
     if not rows:
         return rows
@@ -430,12 +430,12 @@ def signal_shadow(rows: list, rnd: str, now: pd.Timestamp, tables=None, model=No
             r["sig_note"] = "ยังไม่ถึงเวลาตัดสัญญาณ 20:30"
             continue
         try:
-            f = RF.signal_forecast(model, tables, r["fuel"], tgt)
+            f = RF.signal_forecast(model, tables, r["fuel"], tgt, eppo_d)
         except Exception as e:                                         # noqa: BLE001
             f, r["sig_note"] = None, f"คำนวณไม่สำเร็จ: {e}"[:120]
         if f:
             r.update({"sig_p_down": round(f["p_down"], 3), "sig_p_flat": round(f["p_flat"], 3), "sig_p_up": round(f["p_up"], 3), "sig_call": f["call"],
-                      "sig_note": f"โมเดลสัญญาณ n={model[r['fuel']]['n']} ถึง {model[r['fuel']]['to']}"})
+                      "sig_note": f"โมเดลสัญญาณ n={model[r['fuel']]['n']} ถึง {model[r['fuel']]['to']}" + (" +กองทุน" if f.get("down_model") == "fund" else "")})
         elif not r["sig_note"]:
             r["sig_note"] = "ไม่มีโมเดลของชนิดนี้ หรือฟีดสัญญาณไม่สด"
     return rows
@@ -582,7 +582,7 @@ def main(argv=None):
     for c in cards:
         print(c["card_text"])
         print("-" * 60)
-    rrows = promote_signal(signal_shadow(retail_rows(cards, eppo_d), rnd, now, tables=sig_tables), eppo_d)
+    rrows = promote_signal(signal_shadow(retail_rows(cards, eppo_d), rnd, now, tables=sig_tables, eppo_d=eppo_d), eppo_d)
     for r in rrows:
         print(retail_text(r))
         if r["model"] == "SIG":

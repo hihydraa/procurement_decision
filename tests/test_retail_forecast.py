@@ -144,6 +144,31 @@ class SignalShadowTest(unittest.TestCase):
         self.assertIsNone(RF.signal_forecast(m, t, "B7", pd.Timestamp("2026-11-14")))      # ฟีดค้าง 2 วัน
         self.assertIsNone(RF.signal_forecast({}, t, "B7", pd.Timestamp("2026-11-12")))
 
+    def test_down_model_uses_fund_level_only_for_g95_and_when_fresh(self):
+        import pandas as pd
+        import retail_forecast as RF
+        m, t = self._model(), self._tables()
+        self.assertEqual(RF.DOWN_FUND_FUELS, ("G95",))
+        self.assertIn("down_fund", m["G95"])
+        self.assertNotIn("down_fund", m["B7"])                                             # ดีเซลไม่ผ่านเกณฑ์ใน exp_leads.py
+        self.assertEqual(len(m["G95"]["down_fund"]["w"]), len(RF.SIGNAL_FEATURES) + 1)
+        self.assertGreater(m["G95"]["down_fund"]["w"][-1], 0)                              # เก็บเข้ากองทุนสูง → โอกาสปลีกลงมากขึ้น
+        tgt = pd.Timestamp("2026-11-12")
+        e = lambda fund, day="2026-11-11": pd.DataFrame([{"day": pd.Timestamp(day), "fuel": "G95", "retail": 39.34, "fund": fund},
+                                                           {"day": pd.Timestamp(day), "fuel": "B7", "retail": 40.79, "fund": fund}])
+        base = RF.signal_forecast(m, t, "G95", tgt)
+        hi, lo = RF.signal_forecast(m, t, "G95", tgt, e(8.0)), RF.signal_forecast(m, t, "G95", tgt, e(-2.0))
+        self.assertEqual((base["down_model"], hi["down_model"]), ("base", "fund"))
+        self.assertGreater(hi["p_down"], lo["p_down"])
+        self.assertEqual(hi["p_up"], base["p_up"])                                         # โมเดลฝั่งขึ้นไม่ถูกแตะ
+        self.assertAlmostEqual(hi["p_down"] + hi["p_flat"] + hi["p_up"], 1.0)
+        stale = RF.signal_forecast(m, t, "G95", tgt, e(8.0, "2026-11-05"))                 # ไฟล์ EPPO เก่าเกิน 4 วัน → ถอยไปชุดเดิม
+        self.assertEqual((stale["down_model"], stale["p_down"]), ("base", base["p_down"]))
+        b7 = RF.signal_forecast(m, t, "B7", tgt, e(8.0))
+        self.assertEqual((b7["down_model"], b7["p_down"]), ("base", RF.signal_forecast(m, t, "B7", tgt)["p_down"]))
+        self.assertIsNone(RF.fund_level(pd.DataFrame(), "G95", tgt))
+        self.assertEqual(RF.fund_level(e(3.2, "2026-11-09"), "G95", pd.Timestamp("2026-11-11")), 3.2)   # จันทร์ใช้ไฟล์วันศุกร์ได้
+
     def test_shadow_columns_and_rounds(self):
         import pandas as pd
         import forecast_card as fc
