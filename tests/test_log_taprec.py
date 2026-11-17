@@ -75,6 +75,17 @@ class Fill(unittest.TestCase):
         self.assertEqual(res["actual_cls"], "ขึ้น")           # 20:30 วัน D = 30.5 เทียบ 30.0
         self.assertAlmostEqual(res["delta"], 0.5)
 
+    def test_time_cells_read_back_as_day_fraction(self):
+        """ชีทเก็บ "16:30"/"07:00" เป็นเวลา → อ่านแบบ UNFORMATTED ได้ 0.6875/0.2916… (เคยล้มด้วย KeyError: 0.6875 ใน workflow 17/11/2026)"""
+        p = prices("2026-11-11", self.SHAPE)
+        row = {**self.ROW, "rec_B": 7 / 24, "rec_C": 0.6875}
+        self.assertEqual(lt.fill_outcome(row, p, pd.Timestamp("2026-11-11 23:00")),
+                         lt.fill_outcome(self.ROW, p, pd.Timestamp("2026-11-11 23:00")))
+        self.assertEqual([lt.tap_key(v) for v in ("ก่อน22:30", "16:30", 0.6875, "0.6875", 0.2916666666666667)],
+                         ["ก่อน22:30", "16:30", "16:30", "16:30", "07:00"])
+        with self.assertRaises(ValueError):
+            lt.tap_key(0.5)                                    # 12:00 ไม่ใช่จุดแตะที่ติดตาม
+
     def test_not_due_or_insufficient(self):
         p = prices("2026-11-11", self.SHAPE)
         self.assertIsNone(lt.fill_outcome(self.ROW, p, pd.Timestamp("2026-11-11 22:00")))
