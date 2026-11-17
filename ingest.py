@@ -39,21 +39,29 @@ def _key_str(v):
 # ============================================================
 # EPPO PRICE STRUCTURE
 # ============================================================
+def eppo_xlsx_urls(d: date) -> list:
+    """ชื่อไฟล์ที่เป็นไปได้ของวัน d : EPPO เปลี่ยนเป็นวันที่ 2 หลัก (pt-price-st-2026-11-04) ตั้งแต่ ~31/10/2026 ; เดิมไม่มี 0 นำหน้า (2026-10-4)
+    ไฟล์ที่ถูกอัปโหลดซ้ำได้ชื่อ -1/-2/-3 (ตรวจแล้วเนื้อหาเท่าไฟล์หลัก 17/11/2026) จึงใช้ไฟล์หลัก"""
+    folder = f"https://www.eppo.go.th/wp-content/uploads/{d.year}/{d.month:02d}"
+    names = [f"pt-price-st-{d.year}-{d.month}-{d.day:02d}", f"pt-price-st-{d.year}-{d.month}-{d.day}"]
+    return [f"{folder}/{n}.xlsx" for n in dict.fromkeys(names)]
+
+
 def eppo_xlsx_url(d: date) -> str:
-    return f"https://www.eppo.go.th/wp-content/uploads/{d.year}/{d.month:02d}/pt-price-st-{d.year}-{d.month}-{d.day}.xlsx"
+    return eppo_xlsx_urls(d)[0]
 
 
 def fetch_eppo_workbook(d: date):
-    url = eppo_xlsx_url(d)
-    try:
-        r = requests.get(url, timeout=30)
-    except requests.RequestException as e:
-        print(f"[EPPO] {d}: request failed ({type(e).__name__})")
-        return None
-    if r.status_code != 200:
+    for url in eppo_xlsx_urls(d):
+        try:
+            r = requests.get(url, timeout=30)
+        except requests.RequestException as e:
+            print(f"[EPPO] {d}: request failed ({type(e).__name__}) {url}")
+            continue
+        if r.status_code == 200:
+            return openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
         print(f"[EPPO] {d}: HTTP {r.status_code} {url}")
-        return None
-    return openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    return None
 
 
 def parse_eppo_rows(wb, d: date):

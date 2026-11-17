@@ -101,5 +101,36 @@ class HealTests(unittest.TestCase):
         self.assertNotIn(date(2026, 10, 20), calls)
 
 
+class EppoUrlTest(unittest.TestCase):
+    """EPPO เปลี่ยนชื่อไฟล์เป็นวันที่ 2 หลักตั้งแต่ ~31/10/2026 (ไฟล์ 2–9/11 จริงได้ 404 จากชื่อเดิม) ; ต้องลองทั้งสองแบบ"""
+
+    def test_zero_padded_first_then_legacy(self):
+        self.assertEqual(ingest.eppo_xlsx_urls(date(2026, 11, 4)), [
+            "https://www.eppo.go.th/wp-content/uploads/2026/11/pt-price-st-2026-11-04.xlsx",
+            "https://www.eppo.go.th/wp-content/uploads/2026/11/pt-price-st-2026-11-4.xlsx"])
+        self.assertEqual(ingest.eppo_xlsx_urls(date(2026, 11, 17)),
+                         ["https://www.eppo.go.th/wp-content/uploads/2026/11/pt-price-st-2026-11-17.xlsx"])
+
+    def test_fetch_falls_back_to_legacy_name(self):
+        tried = []
+
+        class R:
+            def __init__(self, code):
+                self.status_code, self.content = code, b""
+
+        orig_get, orig_load = ingest.requests.get, ingest.openpyxl.load_workbook
+        try:
+            ingest.requests.get = lambda url, timeout: tried.append(url) or R(200 if url.endswith("-4.xlsx") else 404)
+            ingest.openpyxl.load_workbook = lambda f, data_only: "wb"
+            self.assertEqual(ingest.fetch_eppo_workbook(date(2026, 10, 4)), "wb")
+            self.assertEqual([u.rsplit("/", 1)[1] for u in tried], ["pt-price-st-2026-10-04.xlsx", "pt-price-st-2026-10-4.xlsx"])
+            tried.clear()
+            ingest.requests.get = lambda url, timeout: tried.append(url) or R(404)
+            self.assertIsNone(ingest.fetch_eppo_workbook(date(2026, 11, 7)))
+            self.assertEqual(len(tried), 2)
+        finally:
+            ingest.requests.get, ingest.openpyxl.load_workbook = orig_get, orig_load
+
+
 if __name__ == "__main__":
     unittest.main()
