@@ -101,6 +101,46 @@ class HealTests(unittest.TestCase):
         self.assertNotIn(date(2026, 10, 20), calls)
 
 
+class RecarryTests(unittest.TestCase):
+    """เสาร์–อาทิตย์ที่ลากค่าจากวันเก่า ต้องลากใหม่เมื่อวันทำการก่อนหน้าถูกแทนด้วยไฟล์จริง (7–8/11/2026 ค้างค่า 30/10)"""
+
+    setUp, tearDown = HealTests.setUp, HealTests.tearDown
+
+    def weekend_sheet(self):
+        fri, sat, sun, mon = date(2026, 11, 6), date(2026, 11, 7), date(2026, 11, 8), date(2026, 11, 9)
+        old = lambda d, ot, rank, src: row(d, ot, 1.0, src, rank)
+        return [HEAD, old(fri, "A", 5, "CARRIED"), old(fri, "B", 5, "CARRIED"), old(sat, "A", 6, "CARRIED"), old(sat, "B", 6, "CARRIED"),
+                old(sun, "A", 7, "CARRIED"), old(sun, "B", 7, "CARRIED"), row(mon, "A", 9.0, "FRESH", 8), row(mon, "B", 9.0, "FRESH", 8)]
+
+    def test_weekend_recarried_after_friday_healed(self):
+        ingest.fetch_eppo_workbook = lambda d: object() if d == date(2026, 11, 6) else None
+        ingest.sheets_get = lambda tok, sid, rng: self.weekend_sheet()
+        ingest.ingest_eppo("t", date(2026, 11, 9))
+        rngs = [r for r, _ in self.writes]
+        self.assertTrue(rngs[0].endswith("!A2:S3"))                     # ศุกร์ = ไฟล์จริง
+        self.assertTrue(rngs[1].endswith("!A4:S5") and rngs[2].endswith("!A6:S7"))   # เสาร์ แล้วอาทิตย์ ลากใหม่จากศุกร์
+        for _, rows in self.writes[1:]:
+            self.assertEqual([r[10] for r in rows], [2.5, 3.5])          # MARKETING MARGIN ของไฟล์ศุกร์
+            self.assertEqual([r[18] for r in rows], ["CARRIED", "CARRIED"])
+        self.assertEqual([r[17] for r in self.writes[1][1]], [6, 6])    # Obs Rank เดิม
+        self.assertEqual(len(self.writes), 3)
+
+    def test_recarry_runs_without_heal_and_is_idempotent(self):
+        ingest.fetch_eppo_workbook = lambda d: None
+        s = self.weekend_sheet()
+        for r in s[1:3]:
+            r[18], r[10] = "FRESH", 2.0                                  # ศุกร์จริงแล้ว แต่เสาร์–อาทิตย์ยังเป็นค่าเก่า
+        ingest.sheets_get = lambda tok, sid, rng: s
+        ingest.ingest_eppo("t", date(2026, 11, 9))
+        self.assertEqual([r for r, _ in self.writes], [self.writes[0][0], self.writes[1][0]])
+        self.assertTrue(all(r[10] == 2.0 for _, rows in self.writes for r in rows))
+        self.writes.clear()
+        for r in s[3:7]:
+            r[10] = 2.0
+        ingest.ingest_eppo("t", date(2026, 11, 9))
+        self.assertEqual(self.writes, [])                                # ตรงกันแล้ว ไม่เขียนซ้ำ
+
+
 class EppoUrlTest(unittest.TestCase):
     """EPPO เปลี่ยนชื่อไฟล์เป็นวันที่ 2 หลักตั้งแต่ ~31/10/2026 (ไฟล์ 2–9/11 จริงได้ 404 จากชื่อเดิม) ; ต้องลองทั้งสองแบบ"""
 

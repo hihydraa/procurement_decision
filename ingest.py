@@ -218,11 +218,53 @@ def heal_carried_eppo(tok, existing, existing_dicts, today, consumption=None):
         for nr, (_, old) in zip(new_rows, rows):
             nr[17] = old.get("Obs Rank")
         sheets_update(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!A{first}:S{last}", new_rows)
-        for _, r in rows:
+        head = [str(h) for h in existing[0]] if existing else []
+        for nr, (_, r) in zip(new_rows, rows):
+            if len(head) >= len(nr):
+                r.update({k: v for k, v in zip(head, nr) if k != "Date"})
             r["Source"] = "FRESH"
         healed += 1
         print(f"[EPPO] replaced carried rows of {d} with the real file ({len(rows)} rows)")
+    recarry_eppo(tok, by_date, today)          # ทุกรอบ : เขียนเฉพาะวันที่ค่าที่ลากมาไม่ตรงกับวันก่อนหน้า
     return healed
+
+
+def recarry_eppo(tok, by_date: dict, today: date) -> int:
+    """แถว CARRIED หลังวันที่เพิ่งถูกแทนด้วยไฟล์จริง (เช่น เสาร์–อาทิตย์ 7–8/11 ที่ลากค่า 30/10 มา เพราะตอนนั้นไฟล์ 2–6/11 ยังหาไม่เจอ)
+    ต้องลากค่าใหม่จากวันก่อนหน้าที่ถูกต้อง ; ไล่วันจากเก่าไปใหม่ให้ต่อกันเป็นทอด ; คง Date/Obs Rank และป้าย CARRIED
+    ทำเฉพาะเมื่อชนิดน้ำมันตรงกันครบและแถวติดกัน (ไม่ทำแถวอื่นเลื่อน)"""
+    vals = EPPO_PRICE_COLS + ["Avg Consumption (mn L/day)", "Estimated Subsidy (mn baht/day)", "Estimated Collection (mn baht/day)"]
+    fixed = 0
+    days = sorted(d for d in by_date if today - timedelta(days=EPPO_HEAL_DAYS) <= d <= today)
+    for d in days:
+        rows = by_date[d]
+        if {str(r.get("Source") or "").strip().upper() for _, r in rows} != {"CARRIED"}:
+            continue
+        prev = max((p for p in by_date if p < d), default=None)
+        if prev is None:
+            continue
+        src = {str(r.get("oil type")): r for _, r in by_date[prev]}
+        if sorted(src) != sorted(str(r.get("oil type")) for _, r in rows):
+            print(f"[EPPO] {d}: oil types differ from {prev} — not re-carrying")
+            continue
+        if all(all(r.get(c) == src[str(r.get("oil type"))].get(c) for c in vals) for _, r in rows):
+            continue
+        first, last = rows[0][0], rows[-1][0]
+        if last - first + 1 != len(rows):
+            print(f"[EPPO] {d}: carried rows are not contiguous — not re-carrying")
+            continue
+        out = []
+        for _, r in rows:
+            s = src[str(r.get("oil type"))]
+            subsidy = s.get("Estimated Subsidy (mn baht/day)") or 0
+            collection = s.get("Estimated Collection (mn baht/day)") or 0
+            out.append([fmt_date_us(d)] + [s.get(c) for c in EPPO_PRICE_COLS]
+                       + [s.get("Avg Consumption (mn L/day)"), subsidy, collection, round(collection - subsidy, 2), r.get("Obs Rank"), "CARRIED"])
+            r.update({c: s.get(c) for c in vals})
+        sheets_update(tok, SHEET_ID, f"{TABS['ENTRY_EPPO']}!A{first}:S{last}", out)
+        fixed += 1
+        print(f"[EPPO] re-carried {d} from {prev} ({len(rows)} rows)")
+    return fixed
 
 
 def ingest_eppo(tok, today: date):
