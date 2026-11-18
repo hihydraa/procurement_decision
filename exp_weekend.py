@@ -106,8 +106,8 @@ def fmt(st):
     return f"{st['days']:>4} วัน ฟันธง {st['n']:>3} ({st['share']:.0%}) ถูก {st['right']:.0%} ผิดทิศ {st['wrong']:.0%}"
 
 
-def run_key(book, tables, key, fuel, ref_hour, v2, n_boot):
-    df = F.build_outlook_dataset(book, tables, fuel, 24, ref_hour, v2=v2)
+def run_key(book, tables, key, fuel, ref_hour, v2, n_boot, hz=24):
+    df = F.build_outlook_dataset(book, tables, fuel, hz, ref_hour, v2=v2)
     vec = M.vectorize_v2 if v2 else M.vectorize
     recs = df.to_dict("records")
     X = np.vstack([vec(r) for r in recs])
