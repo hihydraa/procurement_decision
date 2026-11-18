@@ -15,6 +15,7 @@ import re
 import pandas as pd
 
 import live_check as LC
+import retail_forecast as RF
 
 FUELS = [("DIESEL", "B7", "ดีเซล"), ("GASOHOL95", "G95", "แก๊สโซฮอล์ 95")]
 TIER_TH = {"UP_STRONG": "ขึ้นแรง", "UP": "ขึ้น", "UNCLEAR": "ยังไม่ชัดเจน", "DOWN": "ลง", "DOWN_STRONG": "ลงแรง"}
@@ -348,6 +349,9 @@ def _retail_block(r: dict | None, card: dict | None) -> str:
     pd_, pf, pu = (_num(r.get(k)) for k in ("p_down", "p_flat", "p_up"))
     text = {"ลง": "ปลีกน่าจะลง", "ขึ้น": "ปลีกน่าจะขึ้น", "นิ่ง": "ปลีกน่าจะไม่ปรับ"}.get(call, "ปลีกยังไม่ชัดเจน")
     body = title + _badge(meta, text)
+    ev = RF.elevated(r.get("fuel") or "", call, pd_, pu, r.get("model"))
+    if ev:
+        body += f"<div class='ps-cap ps-warn'>{_e(RF.elevated_text(ev))}</div>"
     if None not in (pd_, pf, pu):
         body += f"<div class='ps-cap'>โอกาสปลีกปรับ ลง / ไม่ปรับ / ขึ้น</div>{_prob_bar(pd_, pf, pu)}"
     if r.get("size_text"):
@@ -622,6 +626,7 @@ CSS = """
     .ps-key { width:92px; color:#475569; font-size:.9rem; flex:none; }
     .ps-sep { border-top:1px dashed #cbd5e1; margin:10px 0; }
     .ps-cap { font-size:.88rem; color:#334155; margin:8px 0 4px; }
+    .ps-warn { color:#9a3412; background:#fff7ed; border-left:3px solid #f97316; padding:4px 8px; border-radius:4px; }
     .ps-badge { display:inline-flex; align-items:center; gap:8px; padding:5px 12px 5px 8px; border-radius:999px; font-weight:600; color:#fff; font-size:.95rem; }
     .ps-badge.ps-down { background:#006300; } .ps-badge.ps-up { background:#b02a2a; } .ps-badge.ps-flat, .ps-badge.ps-none { background:#64645e; }
     .ps-ico { font-size:.95rem; letter-spacing:-2px; }
