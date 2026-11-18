@@ -26,6 +26,7 @@ import requests
 
 import engine as E
 import model as M
+import retail_forecast as RF
 from common import SHEET_ID, TABS, TZ_NAME, ensure_tab, get_token, sheets_append, sheets_get, sheets_update, to_ts
 
 INPUT_FILE = "line_outlook_input.json"
@@ -334,6 +335,9 @@ def retail_lines(retail: pd.DataFrame, asof: pd.Timestamp) -> list:
             call = str(r.get("call") or "").strip()
             out.append(f"{name} (วันที่ {pd.Timestamp(r['target_dt']):%d/%m}): {RETAIL_CALL.get(call, '❓ ยังไม่ชัดเจน')}")
             p, base = [_f(r.get(k)) for k in ("p_down", "p_flat", "p_up")], _f(r.get("retail_base"))
+            ev = RF.elevated(fuel, call, p[0], p[2], r.get("model"))
+            if ev:
+                out.append(RF.elevated_text(ev))
             if None not in p:
                 out += [f"⬇ ลง      {bar(p[0])} {p[0]:.0%}", f"➖ ไม่ปรับ {bar(p[1])} {p[1]:.0%}", f"⬆ ขึ้น     {bar(p[2])} {p[2]:.0%}"]
             model = str(r.get("model") or "").strip()

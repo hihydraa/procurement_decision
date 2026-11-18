@@ -187,6 +187,15 @@ class RetailSection(unittest.TestCase):
         for t in ("ปลีกน่าจะลง", "ทดลอง", "มัธยฐาน 0.80", "40.79", "ลง 42%", "ยังไม่ผ่านการทดสอบเดินหน้า"):
             self.assertIn(t, html)
 
+    def test_block_warns_when_flat_but_down_elevated(self):
+        """คืน 17/11/2026 : นิ่ง แต่โอกาสลงดีเซล 17% (ปกติ ~3%) → ต้องเตือน ; ปลีกลดจริง 18/11"""
+        r = ps.latest_retail(ps.prep_retail(self.raw(call="นิ่ง", p_down=0.172, p_flat=0.828, p_up=0.0, size_text="", model="SIG")), "B7")
+        html = ps._retail_block(r, None)
+        self.assertIn("ps-warn", html)
+        self.assertIn("โอกาสปรับลงสูงกว่าปกติ 17%", html)
+        quiet = ps.latest_retail(ps.prep_retail(self.raw(call="นิ่ง", p_down=0.025, p_flat=0.961, p_up=0.014, size_text="", model="SIG")), "B7")
+        self.assertNotIn("ps-warn", ps._retail_block(quiet, None))
+
     def test_block_without_data(self):
         self.assertIn("ยังไม่มีพยากรณ์ปลีก", ps._retail_block(None, None))
         self.assertIsNone(ps.latest_retail(ps.prep_retail(pd.DataFrame()), "B7"))

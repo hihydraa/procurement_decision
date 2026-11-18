@@ -10,6 +10,9 @@
 """
 from __future__ import annotations
 
+import json
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -130,6 +133,54 @@ def signal_vector(f: dict) -> np.ndarray:
 
 
 SIGNAL_MODEL_FILE = "retail_signal_model.json"
+
+# ---------- เตือน "โอกาสปรับสูงกว่าปกติ" เมื่อคำทายหลักยังเป็น นิ่ง/ไม่ชัด (เฉพาะแสดงผล ไม่เปลี่ยนคำทาย) ----------
+# ที่มา : 18/11/2026 ปลีกลดจริง แต่คำทาย = นิ่ง ทั้งที่โอกาสลงขึ้นจาก 2.5% เป็น 17% (ดีเซล) ; ระบบแสดงแค่ "นิ่ง"
+# เกณฑ์ : โอกาส ≥ ELEVATED_MIN_P และ ≥ ELEVATED_RATIO × ความถี่ในอดีต (n_down/n , n_up/n ของ retail_signal_model.json)
+# เปิดเฉพาะฝั่งที่ walk-forward (502 วัน 04/2024–10/2026 ; โมเดลสัญญาณที่ใช้จริง) แสดงว่าวันที่เตือนปรับจริงบ่อยกว่าวันที่ไม่เตือนชัดเจน
+#   (ชนิด, ฝั่ง) : (จำนวนวันที่เตือน, อัตราที่ปรับจริงในวันที่เตือน, อัตราในวันที่ไม่เตือนแต่ทาย นิ่ง)
+#   G95 ฝั่งขึ้น : เตือน 43 วัน ปรับจริง 9% เทียบ 8% → ไม่เปิด ; เกณฑ์เลือกหลังดูผลชุดนี้ จึงยังต้องติดตามผลจริง
+ELEVATED_MIN_P, ELEVATED_RATIO = 0.15, 2.0
+ELEVATED_EVIDENCE = {("B7", "ลง"): (15, 0.20, 0.031), ("B7", "ขึ้น"): (10, 0.60, 0.031), ("G95", "ลง"): (56, 0.21, 0.084)}
+_BASE_CACHE = {}
+
+
+def base_rates(fuel: str) -> dict:
+    """ความถี่ในอดีตที่ปลีกลง/ขึ้น ≥ 10 สต. (จากข้อมูลฝึกโมเดลสัญญาณ)"""
+    if fuel not in _BASE_CACHE:
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), SIGNAL_MODEL_FILE), encoding="utf-8") as fh:
+                m = json.load(fh)[fuel]
+            _BASE_CACHE[fuel] = {"ลง": m["n_down"] / m["n"], "ขึ้น": m["n_up"] / m["n"]}
+        except (OSError, KeyError, ValueError, ZeroDivisionError):
+            _BASE_CACHE[fuel] = {}
+    return _BASE_CACHE[fuel]
+
+
+def elevated(fuel: str, call: str, p_down, p_up, model: str = "SIG"):
+    """คืน {dir, p, base, n, hit, other} ถ้าคำทายเป็น นิ่ง/ไม่ชัด แต่โอกาสฝั่งหนึ่งสูงกว่าปกติตามเกณฑ์ ; ไม่เข้าเกณฑ์ = None
+    ใช้กับคำทายจากโมเดลสัญญาณเท่านั้น (model = SIG) เพราะหลักฐานย้อนหลังวัดจากโมเดลนี้"""
+    if str(model or "").strip() != "SIG" or str(call or "").strip() not in ("นิ่ง", "ไม่ชัด"):
+        return None
+    base = base_rates(fuel)
+    best = None
+    for d, p in (("ลง", p_down), ("ขึ้น", p_up)):
+        try:
+            p = float(p)
+        except (TypeError, ValueError):
+            continue
+        ev = ELEVATED_EVIDENCE.get((fuel, d))
+        if ev is None or d not in base or p != p:
+            continue
+        if p >= max(ELEVATED_MIN_P, ELEVATED_RATIO * base[d]) and (best is None or p > best["p"]):
+            best = {"dir": d, "p": p, "base": base[d], "n": ev[0], "hit": ev[1], "other": ev[2]}
+    return best
+
+
+def elevated_text(e: dict) -> str:
+    return (f"⚠️ โอกาสปรับ{e['dir']}สูงกว่าปกติ {e['p']:.0%} (ปกติ ~{e['base']:.0%}) · "
+            f"ย้อนหลังวันที่เตือนแบบนี้ ปลีกปรับ{e['dir']}จริง {e['hit']:.0%} ของครั้ง (วันอื่น ~{e['other']:.0%})")
+
 WS_SIGNAL_MODEL_FILE = "ws_signal_model.json"       # เป้า = ราคาขายส่ง EPPO ; ฝึกเฉพาะปี 2026 (กลไกกองทุนต่างจากปีก่อน ดู exp_ws_search.py)
 WS_TRAIN_FROM = "2026-01-01"
 LONG_HISTORY_FILE = "data/eppo_daily_long.csv"
