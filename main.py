@@ -1647,6 +1647,13 @@ def main():
         pub = json.loads(open("outlook.json", encoding="utf-8").read())
         pub["line_text"] = line_outlook.build_message(line_outlook.make_input(outlook, asof, tables.headsup), outlook_log, on_demand=True,
                                                       retail=PS.prep_retail(retail_raw))[0]
+        try:                                               # การ์ด Flex ของคำสั่ง forecast (ล้มเหลว = Worker ใช้ line_text แทน)
+            import line_flex
+            flex = line_flex.build_flex(line_outlook.make_input(outlook, asof, tables.headsup), outlook_log, PS.prep_retail(retail_raw), on_demand=True)
+            if flex:
+                pub["line_flex"] = flex
+        except Exception as e:
+            print(f"[LINE] สร้างการ์ด Flex ไม่สำเร็จ: {e}")
         write_text("outlook.json", json.dumps(pub, ensure_ascii=False, indent=1))
     except Exception as e:
         print(f"[LINE] เขียนข้อมูลเข้าไม่สำเร็จ: {e}")
