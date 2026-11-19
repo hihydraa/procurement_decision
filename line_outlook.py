@@ -343,6 +343,9 @@ def retail_lines(retail: pd.DataFrame, asof: pd.Timestamp) -> list:
             model = str(r.get("model") or "").strip()
             if model == "OLD":                               # แถวก่อนการสลับโมเดล (model ว่าง) ไม่ใส่หมายเหตุนี้
                 out.append("• คืนนี้โมเดลสัญญาณใช้ไม่ได้ จึงใช้วิธีเดิมเป็นคำทายหลัก")
+            why = str(r.get("sig_reason") or "").strip()
+            if why and why != "nan" and model == "SIG":
+                out.append(f"• เหตุผล: {why}")
             size = str(r.get("size_text") or "").strip()
             detail = ([f"ปลีกล่าสุดใน EPPO {base:.2f}"] if base is not None else []) + ([size] if size and size != "nan" else [])
             if detail:
@@ -441,6 +444,17 @@ def log_frame(values: list) -> pd.DataFrame:
     return df
 
 
+def retail_frame(values: list) -> pd.DataFrame:
+    """RetailFcLog จาก sheets_get (UNFORMATTED_VALUE : วันที่เป็นเลขลำดับวัน) → รูปแบบเดียวกับ procurement_summary.prep_retail"""
+    import procurement_summary as PS
+    df = log_frame(values)
+    if df.empty or "target_day" not in df.columns:
+        return pd.DataFrame()
+    df = df.copy()
+    df["target_day"] = pd.to_datetime(df["target_day"].map(to_ts), errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
+    return PS.prep_retail(df)
+
+
 def already_sent(rows: list, ref_id: str) -> bool:
     return any(len(r) >= 3 and str(r[0]) == ref_id and str(r[2]) == "sent" for r in rows[1:])
 
@@ -455,7 +469,12 @@ def main(argv=None) -> int:
         inp = json.load(fh)
     tok = get_token()
     log = log_frame(sheets_get(tok, SHEET_ID, "OutlookLog!A1:R20000"))
-    text, ref_id = build_message(inp, log)
+    retail = None
+    try:                                       # ราคาขายปลีก : การ์ดรอบ 21:30 เขียน RetailFcLog ก่อนขั้นนี้ ; อ่านไม่ได้ = ข้อความไม่มีส่วนนี้
+        retail = retail_frame(sheets_get(tok, SHEET_ID, f"{TABS['RETAIL_FC']}!A1:AF5000"))
+    except Exception as e:                     # noqa: BLE001
+        print(f"[LINE] อ่าน RetailFcLog ไม่สำเร็จ: {e}")
+    text, ref_id = build_message(inp, log, retail=retail)
     print(text)
     now = pd.Timestamp(datetime.now(ZoneInfo(TZ_NAME)).replace(tzinfo=None))
     if not dry and not in_send_window(now, pd.Timestamp(inp["asof"])):

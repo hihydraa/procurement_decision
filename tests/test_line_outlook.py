@@ -439,3 +439,31 @@ class ProfileModelTest(unittest.TestCase):
             main.write_outlook_files({"DIESEL": d}, "v", snap_path=snap, pub_path=os.path.join(tmp, "o.json"))
             rows = json.load(open(snap, encoding="utf-8"))
         self.assertEqual([(r["hours"], r["tier"], r["p_rise10"]) for r in rows], [(16, "UP", 0.7), (20, "UNCLEAR", 0.3)])
+
+
+class NightlyRetailTest(unittest.TestCase):
+    """ข้อความประจำคืนมีส่วนราคาขายปลีกพร้อมเหตุผล (อ่าน RetailFcLog จากชีทแบบ UNFORMATTED_VALUE)"""
+
+    def test_retail_frame_serial_dates_and_reason(self):
+        from datetime import datetime
+        from common import EXCEL_EPOCH
+        ser = lambda s: (datetime.strptime(s, "%Y-%m-%d %H:%M") - EXCEL_EPOCH).total_seconds() / 86400
+        head = ["card_id", "asof", "round", "fuel", "target_day", "retail_base", "p_down", "p_flat", "p_up", "call", "size_text", "model", "sig_reason"]
+        values = [head,
+                  ["2026-11-13 21:30 B7", ser("2026-11-12 21:40"), "21:30", "B7", ser("2026-11-13 00:00"), 40.79, 0.05, 0.6, 0.35, "ขึ้น", "", "SIG",
+                   "ผู้ค้าประกาศปรับขึ้น 3 ราย / ลง 0 ราย · MOPS ปิดล่าสุด +2.20 USD/bbl"],
+                  ["2026-11-13 21:30 G95", ser("2026-11-12 21:40"), "21:30", "G95", ser("2026-11-13 00:00"), 39.34, 0.1, 0.8, 0.1, "นิ่ง", "", "OLD", ""]]
+        r = L.retail_frame(values)
+        self.assertEqual(list(r["target_day"]), ["2026-11-13", "2026-11-13"])
+        text, _ = L.build_message(_inp(), _log(), retail=r)                     # ข้อความประจำคืน (ไม่ใช่ on_demand)
+        self.assertIn("ราคาขายปลีก", text)
+        self.assertIn("• เหตุผล: ผู้ค้าประกาศปรับขึ้น 3 ราย", text)
+        self.assertEqual(text.count("• เหตุผล:"), 1)                             # แถว OLD ไม่มีเหตุผลจากโมเดลสัญญาณ
+        self.assertTrue(L.retail_frame([]).empty)
+
+    def test_signal_reason(self):
+        import retail_forecast as RF
+        self.assertEqual(RF.signal_reason({"up_n": 2, "dn_n": 0, "close_last": 1.02, "fund_next": -0.46}),
+                         "ผู้ค้าประกาศปรับขึ้น 2 ราย / ลง 0 ราย · MOPS ปิดล่าสุด +1.02 USD/bbl · กองทุนมีผลพรุ่งนี้ -0.46 บาท/ลิตร")
+        self.assertEqual(RF.signal_reason({"up_n": 0, "dn_n": 0, "close_last": 0.2, "fund_next": 0.0}), "คืนนี้ไม่มีประกาศปรับราคา และ MOPS ขยับน้อย")
+        self.assertIn("MOPS", RF.signal_reason({"close_last": float("nan"), "up_n": None}) + "MOPS")

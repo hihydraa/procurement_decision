@@ -271,7 +271,22 @@ def signal_forecast(model: dict, tables, fuel: str, target_day: pd.Timestamp, ep
         k = 0.98 / (pu + pd_)
         pu, pd_ = pu * k, pd_ * k
     p = {"ลง": pd_, "นิ่ง": 1.0 - pu - pd_, "ขึ้น": pu}
-    return {"p_down": pd_, "p_flat": p["นิ่ง"], "p_up": pu, "call": decide(p), "down_model": "fund" if fund is not None else "base"}
+    return {"p_down": pd_, "p_flat": p["นิ่ง"], "p_up": pu, "call": decide(p), "down_model": "fund" if fund is not None else "base",
+            "reason": signal_reason(signal_features(tables, fuel, eve))}
+
+
+def signal_reason(f: dict) -> str:
+    """เหตุผลสั้นจากตัวแปรที่โมเดลสัญญาณใช้จริง (ข้อความในกลุ่มไลน์คืนนั้น) — บอกข้อมูล ไม่ได้บอกน้ำหนักของโมเดล"""
+    num = lambda k: (None if f.get(k) is None or (isinstance(f.get(k), float) and np.isnan(f.get(k))) else float(f.get(k)))
+    up, dn, close, fund = num("up_n") or 0, num("dn_n") or 0, num("close_last"), num("fund_next")
+    out = []
+    if up or dn:
+        out.append(f"ผู้ค้าประกาศปรับขึ้น {int(up)} ราย / ลง {int(dn)} ราย")
+    if close is not None and abs(close) >= 0.5:
+        out.append(f"MOPS ปิดล่าสุด {close:+.2f} USD/bbl")
+    if fund:
+        out.append(f"กองทุนมีผลพรุ่งนี้ {fund:+.2f} บาท/ลิตร")
+    return " · ".join(out) if out else "คืนนี้ไม่มีประกาศปรับราคา และ MOPS ขยับน้อย"
 
 
 def main(argv):
