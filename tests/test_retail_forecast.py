@@ -185,7 +185,7 @@ class SignalShadowTest(unittest.TestCase):
         self.assertEqual(fc.RETAIL_OUT_LAST, "R")                                             # ช่วงผลจริงคงตำแหน่งเดิม
         i = fc.RETAIL_COLUMNS.index("sig_p_down")
         self.assertEqual(fc.RETAIL_COLUMNS[i:i + 5], list(fc.SIG_KEYS))
-        self.assertEqual(fc.RETAIL_COLUMNS[i + 5:], ["model", "old_p_down", "old_p_flat", "old_p_up", "old_call"])     # ต่อท้ายเท่านั้น ไม่ขยับคอลัมน์เดิม
+        self.assertEqual(fc.RETAIL_COLUMNS[i + 5:], ["model", "old_p_down", "old_p_flat", "old_p_up", "old_call", "sig_reason"])     # ต่อท้ายเท่านั้น ไม่ขยับคอลัมน์เดิม
 
     def test_promote_signal_makes_signal_model_primary(self):
         import pandas as pd

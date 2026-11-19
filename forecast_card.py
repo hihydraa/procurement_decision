@@ -348,7 +348,8 @@ def summary_lines(rows: list) -> list:
 RETAIL_COLUMNS = ["card_id", "asof", "round", "fuel", "target_day", "retail_base", "p_down", "p_flat", "p_up", "call", "size_text", "size_med",
                   "n_hist", "dow_scale", "outcome_dretail", "outcome_cls", "right", "filled_at",
                   "sig_p_down", "sig_p_flat", "sig_p_up", "sig_call", "sig_note",       # sig_* = ผลของโมเดลสัญญาณ Jobber
-                  "model", "old_p_down", "old_p_flat", "old_p_up", "old_call"]          # model = SIG/OLD (คำทายหลักมาจากวิธีใด) ; old_* = วิธีเดิม เก็บไว้เทียบเมื่อ model = SIG
+                  "model", "old_p_down", "old_p_flat", "old_p_up", "old_call",
+                  "sig_reason"]                                                         # เหตุผลสั้นจากสัญญาณคืนนั้น (แสดงในข้อความไลน์)          # model = SIG/OLD (คำทายหลักมาจากวิธีใด) ; old_* = วิธีเดิม เก็บไว้เทียบเมื่อ model = SIG
 R_OUT_FROM, R_OUT_TO = RETAIL_COLUMNS.index("outcome_dretail"), RETAIL_COLUMNS.index("filled_at")
 RETAIL_OUT_LAST = col_letter(R_OUT_TO)          # คอลัมน์สุดท้ายของช่วงผลจริง (R) — คงตำแหน่งเดิม คอลัมน์ sig_* ต่อท้าย
 RETAIL_LAST = col_letter(len(RETAIL_COLUMNS) - 1)
@@ -422,6 +423,7 @@ def signal_shadow(rows: list, rnd: str, now: pd.Timestamp, tables=None, model=No
             note = f"โหลดโมเดล/ฟีดไม่สำเร็จ: {e}"[:120]
     for r in rows:
         r.update({k: "" for k in SIG_KEYS})
+        r["sig_reason"] = ""
         if note:
             r["sig_note"] = note
             continue
@@ -435,6 +437,7 @@ def signal_shadow(rows: list, rnd: str, now: pd.Timestamp, tables=None, model=No
             f, r["sig_note"] = None, f"คำนวณไม่สำเร็จ: {e}"[:120]
         if f:
             r.update({"sig_p_down": round(f["p_down"], 3), "sig_p_flat": round(f["p_flat"], 3), "sig_p_up": round(f["p_up"], 3), "sig_call": f["call"],
+                      "sig_reason": f.get("reason", ""),
                       "sig_note": f"โมเดลสัญญาณ n={model[r['fuel']]['n']} ถึง {model[r['fuel']]['to']}" + (" +กองทุน" if f.get("down_model") == "fund" else "")})
         elif not r["sig_note"]:
             r["sig_note"] = "ไม่มีโมเดลของชนิดนี้ หรือฟีดสัญญาณไม่สด"
