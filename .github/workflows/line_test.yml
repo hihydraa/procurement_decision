@@ -1,0 +1,26 @@
+name: Test LINE fund alert (manual)
+
+# ส่งข้อความทดสอบจากประกาศกองทุนล่าสุดเข้าไลน์ส่วนตัวของเจ้าของ (Secret LINE_TEST_USER_ID) — ไม่ได้พยากรณ์ใหม่ ไม่เขียนชีท
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Send test alert
+        env:
+          SA_EMAIL: ${{ secrets.SA_EMAIL }}
+          SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_TEST_USER_ID: ${{ secrets.LINE_TEST_USER_ID }}
+        run: python line_outlook.py --test
