@@ -107,7 +107,7 @@ def jobber_bubble(inp: dict, bad: dict, on_demand: bool):
             rows += [bar("ขึ้น", h["p_up"], C["up"]), bar("ลง", h["p_down"], C["down"])]
         if tone == "flat":
             ups, downs = L._reasons(h["reasons"], L.UP_MARK, 1), L._reasons(h["reasons"], L.DOWN_MARK, 1)
-            why = [f"ชี้ขึ้น: {ups[0]}"] * bool(ups) + [f"ชี้ลง: {downs[0]}"] * bool(downs)
+            why = [f"ชี้ขึ้น: {u}" for u in ups] + [f"ชี้ลง: {d}" for d in downs]     # ฝั่งใดไม่มีเหตุผล = ข้าม (เดิม ups[0] ล้มเมื่อว่าง)
         else:
             why = L._reasons(h["reasons"], L.UP_MARK if tone == "up" else L.DOWN_MARK, 2)
         rows += [txt("• " + w, "xxs", C["sub"], margin="sm") for w in why]

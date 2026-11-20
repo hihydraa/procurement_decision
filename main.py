@@ -1653,7 +1653,8 @@ def main():
             if flex:
                 pub["line_flex"] = flex
         except Exception as e:
-            print(f"[LINE] สร้างการ์ด Flex ไม่สำเร็จ: {e}")
+            import traceback
+            print(f"[LINE] สร้างการ์ด Flex ไม่สำเร็จ: {e!r}\n" + "".join(traceback.format_exc(limit=-3)))
         write_text("outlook.json", json.dumps(pub, ensure_ascii=False, indent=1))
     except Exception as e:
         print(f"[LINE] เขียนข้อมูลเข้าไม่สำเร็จ: {e}")

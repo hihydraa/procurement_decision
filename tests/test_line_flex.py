@@ -54,6 +54,17 @@ class FlexTest(unittest.TestCase):
         self.assertLessEqual(len(flex["altText"]), 400)
         self.assertLess(len(json.dumps(flex, ensure_ascii=False).encode()), F.MAX_BYTES)
 
+    def test_unclear_with_one_sided_reasons(self):
+        """15:30 20/11/2026 : ไม่ชัดเจนแต่มีเหตุผลฝั่งเดียว → เดิม IndexError ทำให้ไม่มีการ์ด (Worker ตอบเป็นข้อความแทน)"""
+        inp = T._inp(asof="2026-11-20 15:47", ref="2026-11-20 15:30")
+        for f in inp["fuels"].values():
+            f["h24"].update(tier="UNCLEAR", reasons=["MOPS 3 ครั้งล่าสุดรวม -6.99 USD/bbl → " + L.DOWN_MARK])
+        inp["fuels"]["G95"]["h24"]["reasons"] = []
+        flex = F.build_flex(inp, T._log(), self._retail())
+        allt = "\n".join(texts(flex))
+        self.assertIn("ชี้ลง: MOPS 3 ครั้งล่าสุดรวม -6.99 USD/bbl", allt)
+        self.assertNotIn("ชี้ขึ้น", allt)
+
     def test_spec_rules(self):
         flex = F.build_flex(T._inp(), T._log(), self._retail())
         for n in walk(flex, []):
