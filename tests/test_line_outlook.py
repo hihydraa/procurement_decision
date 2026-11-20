@@ -267,7 +267,8 @@ class SendTest(unittest.TestCase):
         self.assertEqual(self._run({})["post"], 0)                                                            # ไม่มี Secret
         self.assertEqual(self._run({**ok, "LINE_TEST_USER_ID": "C" + UID[1:]})["post"], 0)                    # รหัสกลุ่ม
         self.assertEqual(self._run(ok, argv=("--dry",))["post"], 0)
-        self.assertEqual(self._run(ok, now="2026-11-13 04:30")["post"], 0)                                    # นอกช่วงเวลา
+        self.assertEqual(self._run(ok, now="2026-11-13 04:30")["post"], 0)                                    # หลังเที่ยงคืน (คนละวัน)
+        self.assertEqual(self._run(ok, now="2026-11-12 19:50")["post"], 1)                                    # ประกาศก่อน 20:30 ส่งได้ทันที
         self.assertEqual(self._run(ok, sent_rows=[L.LOG_COLUMNS, ["fund-195-20261113", "x", "sent"]])["post"], 0)  # ส่งแล้ว
 
 

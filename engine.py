@@ -432,12 +432,14 @@ OUTLOOK_SIZE = {"UP_STRONG": "มักขยับตั้งแต่ 40 ส�
                 "DOWN": "มักขยับราว 10–40 สต./ลิตร", "DOWN_STRONG": "มักขยับตั้งแต่ 40 สต./ลิตรขึ้นไป"}
 
 
-def outlook_source(asof: pd.Timestamp):
+def outlook_source(asof: pd.Timestamp, fund_due: bool = False):
     """เลือกรอบที่แม่นกว่าสำหรับเวลานี้ : (เวลาอ้างอิง, รหัสรอบ "E"=20:30 / "P"=15:30)
-    หลัง 20:30 → 20:30 วันนี้ ; 15:30–20:30 → 15:30 วันนี้ (ข้อมูลวันนี้แม่นกว่าข้อมูลเมื่อคืนบนเป้าหมายเดียวกัน) ; ก่อน 15:30 → 20:30 เมื่อคืน"""
+    หลัง 20:30 → 20:30 วันนี้ ; 15:30–20:30 → 15:30 วันนี้ (ข้อมูลวันนี้แม่นกว่าข้อมูลเมื่อคืนบนเป้าหมายเดียวกัน) ; ก่อน 15:30 → 20:30 เมื่อคืน
+    fund_due (ประกาศกองทุนของพรุ่งนี้ออกแล้ว ; เจ้าของระบบ 20/11/2026) → รอบคืนนี้ (20:30 วันนี้) ทันที โดยใช้ข้อมูลเท่าที่มี ณ เวลารัน
+       (ประกาศกลุ่มต้องบุญสั่งรันทันทีไม่ว่ากี่โมง ; ย้อนหลังทายที่ 19:00–19:30 แม่นน้อยกว่า 20:30 เล็กน้อย ดู exp_two_rounds.py)"""
     day = asof.normalize()
     e_ref, p_ref = day + pd.Timedelta(hours=M.OUTLOOK_REF_HOUR), day + pd.Timedelta(hours=M.OUTLOOK_REF_PM)
-    if asof >= e_ref:
+    if asof >= e_ref or fund_due:
         return e_ref, "E"
     if asof >= p_ref:
         return p_ref, "P"
@@ -461,7 +463,7 @@ def _outlook_evidence(summary, key, tier):
 def decide_outlook(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params, summary=None) -> dict:
     """แนวโน้มราคาตลาดข้างหน้า 24/48 ชม. จากรอบ 20:30 — ไม่ระบุเวลาออกรถ ให้แต่ละสาขาจัดสรรเอง"""
     fuel = FUEL_KEY[fuel_key]
-    ref, code = outlook_source(asof)
+    ref, code = outlook_source(asof, S.fund_notice_due(tables, asof))
     tag = "P_" if code == "P" else ""
     out = {"fuel": fuel, "asof": asof, "ref": ref, "source": code, "stale": (asof - ref) > pd.Timedelta(hours=12), "horizons": [], "note": None}
     cfg = (params or {}).get("outlook")

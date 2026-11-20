@@ -124,6 +124,14 @@ def build_features(asof: pd.Timestamp, t: Tables, fuel: str, fund_asof: pd.Times
     return f
 
 
+def fund_notice_due(t: "Tables", asof: pd.Timestamp) -> bool:
+    """มีประกาศกองทุนที่มีผลพรุ่งนี้และโพสต์แล้ว ณ asof หรือไม่ (ตัวเริ่มรอบพยากรณ์คืนนี้ก่อน 20:30 ดู engine.outlook_source)"""
+    if t.fund.empty:
+        return False
+    w = t.fund[(t.fund.ts <= asof) & (t.fund.ts >= asof.normalize())]
+    return bool((w["effective_date"] == asof.normalize() + pd.Timedelta(days=1)).any())
+
+
 def _posted_ts(p: pd.DataFrame) -> pd.Series:
     """เวลาที่ราคาถูก "โพสต์" : msg_date+msg_time (ข้อมูลย้อนหลัง) → posted (ฟีดในชีท) → ถ้าไม่มีทั้งคู่ใช้เวลามีผล (ประมาณ : ราคาที่ประกาศล่วงหน้าจะถูกมองว่ายังไม่รู้)"""
     ts = pd.Series(pd.NaT, index=p.index, dtype="datetime64[ns]")
