@@ -30,7 +30,7 @@ import requests
 import engine as E
 import model as M
 import retail_forecast as RF
-from common import SHEET_ID, TABS, TZ_NAME, ensure_tab, get_token, sheets_append, sheets_get, sheets_update, to_ts
+from common import OILBOT_SHEET_ID, SHEET_ID, TABS, TZ_NAME, ensure_tab, get_token, sheets_append, sheets_get, sheets_update, to_ts
 
 INPUT_FILE = "line_outlook_input.json"
 LOG_TAB = TABS.get("LINE_TEST_LOG", "LineTestLog")
@@ -121,6 +121,28 @@ def fund_alert(inp: dict) -> tuple:
         lines.append("กองทุน: " + " · ".join(chg))
     lines += ["ผลพยากรณ์อัปเดตแล้ว: " + " / ".join(calls), "พิมพ์ forecast เพื่อดูรายละเอียด"]
     return "\n".join(lines), f"fund-{f['issue']}-{eff:%Y%m%d}"
+
+
+def latest_fund(values: list) -> dict | None:
+    """ประกาศล่าสุดจากแท็บ FundNotice ของ OIL BOT (อ่านแบบ UNFORMATTED) → รูปแบบเดียวกับ fund_notice ; ใช้กับโหมดทดสอบ"""
+    df = log_frame(values)
+    if df.empty or "issue_no" not in df.columns:
+        return None
+    r = df.iloc[-1]
+    num = lambda k: None if pd.isna(pd.to_numeric(r.get(k), errors="coerce")) else float(pd.to_numeric(r.get(k), errors="coerce"))
+    eff = pd.to_datetime(to_ts(r.get("effective_date")), errors="coerce")
+    if pd.isna(eff):
+        return None
+    return {"issue": str(r.get("issue_no") or "").split(".")[0], "effective": eff.strftime("%Y-%m-%d"), "late": False,
+            "diesel_old": num("diesel_old"), "diesel_new": num("diesel_new"), "benzene_old": num("benzene_old"), "benzene_new": num("benzene_new")}
+
+
+def test_alert(fund: dict, now: pd.Timestamp) -> str:
+    """ข้อความทดสอบการส่ง (ไม่ได้พยากรณ์ใหม่) : ใช้ประกาศล่าสุดให้เห็นรูปแบบจริง"""
+    text, _ = fund_alert({"fund": fund, "fuels": {}})
+    body = [ln for ln in text.split("\n") if not ln.startswith("ผลพยากรณ์อัปเดตแล้ว")]
+    return "\n".join([f"🧪 ทดสอบการแจ้งเตือน ({now:%d/%m %H:%M}) — ไม่ใช่ประกาศใหม่"] + body[:-1]
+                     + ["ของจริงจะมีบรรทัดผลพยากรณ์ดีเซล / แก๊สโซฮอล์ 95 ด้วย", "ได้รับข้อความนี้ = ตั้งค่าส่งไลน์ถูกต้อง · พิมพ์ forecast เพื่อดูการ์ด"])
 
 
 def line_flex_tier(tier: str) -> str:
@@ -522,6 +544,8 @@ def already_sent(rows: list, ref_id: str) -> bool:
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     dry = "--dry" in argv
+    if "--test" in argv:
+        return main_test(dry)
     if not os.path.exists(INPUT_FILE):
         print(f"[LINE] ไม่มี {INPUT_FILE} (main.py ยังไม่ได้รัน) — ไม่ส่ง")
         return 0
@@ -564,6 +588,31 @@ def main(argv=None) -> int:
     sheets_append(tok, SHEET_ID, f"{LOG_TAB}!A1:D1", [[ref_id, datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y-%m-%d %H:%M"), status, text]])
     print(f"[LINE] {status}")
     return 0
+
+
+def main_test(dry: bool = False) -> int:
+    """python line_outlook.py --test : ส่งข้อความทดสอบจากประกาศกองทุนล่าสุดเข้าไลน์ส่วนตัว (workflow line_test.yml สั่งด้วยมือ)"""
+    tok = get_token()
+    fund = latest_fund(sheets_get(tok, OILBOT_SHEET_ID, "FundNotice!A1:K5000"))
+    if not fund:
+        print("[LINE] ไม่พบประกาศกองทุนในแท็บ FundNotice — ไม่ส่ง")
+        return 1
+    now = pd.Timestamp(datetime.now(ZoneInfo(TZ_NAME)).replace(tzinfo=None))
+    text = test_alert(fund, now)
+    print(text)
+    token, uid = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", ""), os.environ.get("LINE_TEST_USER_ID", "").strip()
+    if dry:
+        print("[LINE] --dry : ไม่ส่ง")
+        return 0
+    if not token or not uid:
+        print("[LINE] ยังไม่ได้ตั้ง Secret LINE_CHANNEL_ACCESS_TOKEN / LINE_TEST_USER_ID")
+        return 1
+    if not valid_user_id(uid):
+        print("[LINE] LINE_TEST_USER_ID ไม่ใช่รหัสผู้ใช้ส่วนตัว (ต้องขึ้นต้นด้วย U ตามด้วย 32 ตัวอักษร)")
+        return 1
+    status = push(text, token, uid)
+    print(f"[LINE] {status}")
+    return 0 if status == "sent" else 1
 
 
 if __name__ == "__main__":
