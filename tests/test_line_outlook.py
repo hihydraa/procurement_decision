@@ -525,3 +525,19 @@ class FundAlertTest(unittest.TestCase):
         self.assertTrue(late["fund_late"])
         early = S.build_features(ref, t, "B7", fund_asof=pd.Timestamp("2026-11-19 20:50"))           # ยังไม่ออก ณ เวลารัน
         self.assertEqual(early["fund_next"], 0.0)
+
+
+class TestAlertModeTest(unittest.TestCase):
+    def test_latest_fund_and_text(self):
+        head = ["msg_date", "msg_time", "issue_no", "effective_date", "diesel_old", "diesel_new", "diesel_sign", "benzene_old", "benzene_new", "benzene_sign", "message_id"]
+        values = [head, ["2026-11-18", "19:45", 194, "2026-11-19", -2.06, -1.28, "SUBSIDY", 3.45, 3.3, "LEVY", "x"],
+                  [46345, 0.795833, 195, 46346, -1.28, -0.87, "SUBSIDY", 3.3, 3.37, "LEVY", "y"]]   # UNFORMATTED : วันที่เป็นเลขลำดับวัน
+        f = L.latest_fund(values)
+        self.assertEqual((f["issue"], f["effective"]), ("195", "2026-11-20"))
+        text = L.test_alert(f, pd.Timestamp("2026-11-20 11:50"))
+        lines = text.split("\n")
+        self.assertTrue(lines[0].startswith("🧪 ทดสอบการแจ้งเตือน (20/11 11:50)"))
+        self.assertIn("📢 กองทุนฉบับที่ 195 (มีผล 20/11)", lines)
+        self.assertIn("กองทุน: ดีเซล +0.41 (ดันราคาขึ้น) · เบนซิน +0.07 (ดันราคาขึ้น)", lines)
+        self.assertNotIn("ผลพยากรณ์อัปเดตแล้ว", text)
+        self.assertIsNone(L.latest_fund([]))
