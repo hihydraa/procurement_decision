@@ -116,10 +116,10 @@ SIGNAL_CLIPS = {"up_n": (0, 4), "dn_n": (0, 4), "close_last": (-8.0, 8.0), "fund
 SIGNAL_HOUR = 20.5          # สัญญาณของคืนก่อนวันเป้าหมาย ตัดที่ 20:30
 
 
-def signal_features(tables, fuel: str, day: pd.Timestamp) -> dict:
-    """สัญญาณ ณ 20:30 ของวัน day (วันก่อนวันเป้าหมาย) — ใช้เฉพาะข้อความที่โพสต์ก่อนเวลานั้น"""
+def signal_features(tables, fuel: str, day: pd.Timestamp, fund_asof: pd.Timestamp = None) -> dict:
+    """สัญญาณ ณ 20:30 ของวัน day (วันก่อนวันเป้าหมาย) — ใช้เฉพาะข้อความที่โพสต์ก่อนเวลานั้น ; fund_asof = นับประกาศกองทุนที่ออกถึงเวลานี้ (ดู signals.build_features)"""
     import signals as S
-    f = S.build_features(pd.Timestamp(day).normalize() + pd.Timedelta(hours=SIGNAL_HOUR), tables, fuel)
+    f = S.build_features(pd.Timestamp(day).normalize() + pd.Timedelta(hours=SIGNAL_HOUR), tables, fuel, fund_asof)
     return {k: f.get(k) for k in SIGNAL_FEATURES}
 
 
@@ -254,7 +254,7 @@ def signals_fresh(tables, asof: pd.Timestamp) -> bool:
     return bool(newest) and (asof - max(newest)) <= pd.Timedelta(hours=SIGNAL_MAX_AGE_H)
 
 
-def signal_forecast(model: dict, tables, fuel: str, target_day: pd.Timestamp, eppo: pd.DataFrame = None) -> dict | None:
+def signal_forecast(model: dict, tables, fuel: str, target_day: pd.Timestamp, eppo: pd.DataFrame = None, fund_asof: pd.Timestamp = None) -> dict | None:
     """ความน่าจะเป็นของปลีกวันเป้าหมายจากสัญญาณคืนก่อน (คำทายหลักตั้งแต่ 16/11/2026 ดู forecast_card.promote_signal) ; None ถ้าไม่มีโมเดล/ฟีดไม่สด"""
     import model as M
     m = (model or {}).get(fuel)
@@ -262,7 +262,10 @@ def signal_forecast(model: dict, tables, fuel: str, target_day: pd.Timestamp, ep
     asof = eve + pd.Timedelta(hours=SIGNAL_HOUR)
     if not m or not signals_fresh(tables, asof):
         return None
-    x = signal_vector(signal_features(tables, fuel, eve))
+    if fund_asof is not None and not (fund_asof > asof and pd.Timestamp(fund_asof).normalize() == eve):
+        fund_asof = None                                   # ใช้เฉพาะคืนก่อนวันเป้าหมาย หลัง 20:30
+    feats = signal_features(tables, fuel, eve, fund_asof)
+    x = signal_vector(feats)
     pu, pd_ = float(M.predict_proba(m["up"], x)[0]), float(M.predict_proba(m["down"], x)[0])
     fund = fund_level(eppo, fuel, eve) if m.get("down_fund") else None          # โมเดลฝั่งลงที่มีระดับกองทุน (ถ้ามีโมเดลและมีค่ากองทุนที่สดพอ)
     if fund is not None:
@@ -272,7 +275,7 @@ def signal_forecast(model: dict, tables, fuel: str, target_day: pd.Timestamp, ep
         pu, pd_ = pu * k, pd_ * k
     p = {"ลง": pd_, "นิ่ง": 1.0 - pu - pd_, "ขึ้น": pu}
     return {"p_down": pd_, "p_flat": p["นิ่ง"], "p_up": pu, "call": decide(p), "down_model": "fund" if fund is not None else "base",
-            "reason": signal_reason(signal_features(tables, fuel, eve))}
+            "reason": signal_reason(feats)}
 
 
 def signal_reason(f: dict) -> str:

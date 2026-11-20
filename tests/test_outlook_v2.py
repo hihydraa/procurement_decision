@@ -213,3 +213,55 @@ class RetrainV2Test(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LateFundNoticeTest(unittest.TestCase):
+    """รอบ 20:30 ที่รันหลังประกาศกองทุนช้า (หลัง 20:30) ต้องนับประกาศนั้น ; รอบที่บันทึกย้อนหลัง (asof = ref) ไม่นับ"""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(ROOT, "model_params.json"), encoding="utf-8") as fh:
+            cls.params = json.load(fh)
+
+    def _tables(self):
+        fund = pd.DataFrame([{"msg_date": "2026-11-19", "msg_time": "21:03", "issue_no": 195, "effective_date": "2026-11-20",
+                              "diesel_old": -1.28, "diesel_new": -0.87, "benzene_old": 3.30, "benzene_new": 3.37}])
+        return S.Tables(fund=fund).set_prices(_feed())
+
+    def _run(self, asof):
+        with mock.patch("engine.feed_status", return_value={"alive": True, "newest": None}):
+            return E.decide_outlook("DIESEL", pd.Timestamp(asof), self._tables(), self.params)
+
+    def test_late_notice(self):
+        late, before = self._run("2026-11-19 21:10"), self._run("2026-11-19 20:45")
+        self.assertTrue(late["fund_late"])
+        self.assertFalse(before["fund_late"])
+        self.assertAlmostEqual(late["features"]["fund_next"], 0.41)
+        self.assertEqual(before["features"]["fund_next"], 0.0)
+        self.assertGreater(late["horizons"][0]["p"]["r10"], before["horizons"][0]["p"]["r10"])   # กองทุนลดชดเชย = ดันขึ้น
+        self.assertFalse(self._run("2026-11-19 20:30")["fund_late"])                               # บันทึกย้อนหลัง asof = ref
+
+
+class FundTriggeredEveningTest(unittest.TestCase):
+    """ประกาศกองทุนของพรุ่งนี้ออกแล้ว (ก่อน 20:30) → รอบคืนนี้ (อ้างอิง 20:30) ทันที ; ไม่มีประกาศ → รอบ 15:30 ตามเดิม"""
+
+    def test_outlook_source(self):
+        t = pd.Timestamp("2026-11-19 19:45")
+        self.assertEqual(E.outlook_source(t), (pd.Timestamp("2026-11-19 15:30"), "P"))
+        self.assertEqual(E.outlook_source(t, fund_due=True), (pd.Timestamp("2026-11-19 20:30"), "E"))
+        self.assertEqual(E.outlook_source(pd.Timestamp("2026-11-19 21:00"), fund_due=True), (pd.Timestamp("2026-11-19 20:30"), "E"))
+
+    def test_fund_notice_due(self):
+        fund = pd.DataFrame([{"msg_date": "2026-11-19", "msg_time": "19:42", "issue_no": 195, "effective_date": "2026-11-20",
+                              "diesel_old": -1.28, "diesel_new": -0.87, "benzene_old": 3.30, "benzene_new": 3.37}])
+        t = S.Tables(fund=fund)
+        self.assertTrue(S.fund_notice_due(t, pd.Timestamp("2026-11-19 19:45")))
+        self.assertFalse(S.fund_notice_due(t, pd.Timestamp("2026-11-19 19:30")))       # ยังไม่ออก
+        self.assertFalse(S.fund_notice_due(t, pd.Timestamp("2026-11-20 19:45")))       # ของเมื่อวาน
+        self.assertFalse(S.fund_notice_due(S.Tables(), pd.Timestamp("2026-11-19 19:45")))
+        with open(os.path.join(ROOT, "model_params.json"), encoding="utf-8") as fh:
+            params = json.load(fh)
+        with mock.patch("engine.feed_status", return_value={"alive": True, "newest": None}):
+            d = E.decide_outlook("DIESEL", pd.Timestamp("2026-11-19 19:45"), t.set_prices(_feed()), params)
+        self.assertEqual((d["ref"], d["source"]), (pd.Timestamp("2026-11-19 20:30"), "E"))
+        self.assertAlmostEqual(d["features"]["fund_next"], 0.41)

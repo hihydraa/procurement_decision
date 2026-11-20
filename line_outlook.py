@@ -12,6 +12,9 @@
 ความปลอดภัย : ปลายทางมาจาก Secret LINE_TEST_USER_ID เท่านั้น และต้องเป็นรหัสผู้ใช้ (ขึ้นต้น U) — รหัสกลุ่ม/ห้อง (C/R) ถูกปฏิเสธ
               ไม่มี Secret = ไม่ส่ง (ไม่ถือเป็นข้อผิดพลาด) ; ส่งครั้งเดียวต่อจุดอ้างอิง (บันทึกในแท็บ LineTestLog)
 
+การส่งเข้าไลน์ส่วนตัว (ตั้งแต่ 20/11/2026) : ส่งเฉพาะ "แจ้งเตือนประกาศกองทุน" สั้น ๆ (fund_alert) ครั้งเดียวต่อฉบับ เมื่อคำทายรอบคืนนี้นับประกาศนั้นแล้ว (วันเดียวกับข้อมูล ไม่จำกัดเวลา)
+          แทนข้อความเต็มประจำคืน — เจ้าของพิมพ์ forecast เพื่อดูการ์ด Flex เอง ; ข้อความเต็มยังพิมพ์ไว้ใน log ของ workflow
+
 ขั้นตอน : main.py เขียน line_outlook_input.json → log_outlook.py เติมผลจริง → python line_outlook.py [--dry]
 """
 import json
@@ -43,7 +46,7 @@ FOOTER = "[ทดสอบ] ยังไม่ผ่านเกณฑ์ผล�
 
 
 # ---------- ข้อมูลเข้าจาก main.py ----------
-def make_input(outlook: dict, asof, headsup: pd.DataFrame = None) -> dict:
+def make_input(outlook: dict, asof, headsup: pd.DataFrame = None, fund: pd.DataFrame = None) -> dict:
     """ย่อผลของ engine.decide_outlook ให้เหลือเฉพาะที่ข้อความใช้ (ช่วง 24 ชม.) — เขียนเป็นไฟล์ให้ขั้นส่งอ่าน"""
     fuels = {}
     for d in outlook.values():
@@ -59,12 +62,69 @@ def make_input(outlook: dict, asof, headsup: pd.DataFrame = None) -> dict:
     out = {"asof": pd.Timestamp(asof).strftime("%Y-%m-%d %H:%M"), "fuels": fuels}
     if headsup is not None:
         out["notices"] = notices(headsup, asof)
+    if fund is not None:
+        out["fund"] = fund_notice(fund, outlook, asof)
     return out
 
 
-def write_input(outlook: dict, asof, path: str = INPUT_FILE, headsup: pd.DataFrame = None) -> None:
+def write_input(outlook: dict, asof, path: str = INPUT_FILE, headsup: pd.DataFrame = None, fund: pd.DataFrame = None) -> None:
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump(make_input(outlook, asof, headsup), fh, ensure_ascii=False, indent=1)
+        json.dump(make_input(outlook, asof, headsup, fund), fh, ensure_ascii=False, indent=1)
+
+
+# ---------- แจ้งเตือนเมื่อมีประกาศกองทุน (เจ้าของระบบ 20/11/2026) ----------
+# flow : ประกาศ กบน. เข้ากลุ่มต้องบุญ → Worker บันทึก FundNotice และสั่งรันแดชบอร์ดทันที (ไม่ว่ากี่โมง ; ครั้งเดียวต่อฉบับ)
+#        → พยากรณ์รอบคืนนี้ (อ้างอิง 20:30) ที่นับประกาศนั้นแล้ว (ก่อน 20:30 ใช้ข้อมูลเท่าที่มี ณ เวลารัน ดู engine.outlook_source)
+#        → ส่งข้อความสั้นเข้าแชทส่วนตัวของเจ้าของ (ครั้งเดียวต่อฉบับ) → เจ้าของพิมพ์ forecast เอง
+def fund_notice(fund: pd.DataFrame, outlook: dict, asof) -> dict | None:
+    """ประกาศกองทุนที่มีผลวันถัดจากจุดอ้างอิง 20:30 และโพสต์ก่อนเวลารัน (คำทายรอบนี้นับแล้ว) ; ไม่มี/ไม่ใช่รอบ 20:30 = None"""
+    asof = pd.Timestamp(asof)
+    refs = [pd.Timestamp(d["ref"]) for d in (outlook or {}).values() if d.get("horizons")]
+    if fund is None or fund.empty or not refs or "ts" not in fund.columns:
+        return None
+    ref = max(refs)
+    if ref.strftime("%H:%M") != "20:30" or asof.normalize() != ref.normalize():
+        return None
+    eff = pd.to_datetime(fund["effective_date"], errors="coerce")
+    w = fund[(eff == ref.normalize() + pd.Timedelta(days=1)) & (fund["ts"] <= asof)]
+    if w.empty:
+        return None
+    r = w.iloc[-1]
+    num = lambda k: None if pd.isna(pd.to_numeric(r.get(k), errors="coerce")) else float(pd.to_numeric(r.get(k), errors="coerce"))
+    return {"issue": str(r.get("issue_no") or "").split(".")[0], "posted": pd.Timestamp(r["ts"]).strftime("%Y-%m-%d %H:%M"),
+            "effective": (ref.normalize() + pd.Timedelta(days=1)).strftime("%Y-%m-%d"), "late": bool(pd.Timestamp(r["ts"]) > ref),
+            "diesel_old": num("diesel_old"), "diesel_new": num("diesel_new"), "benzene_old": num("benzene_old"), "benzene_new": num("benzene_new")}
+
+
+def _fund_change(name: str, old, new) -> str:
+    if old is None or new is None:
+        return ""
+    d = new - old
+    effect = "ดันราคาขึ้น" if d > 0.004 else "ดันราคาลง" if d < -0.004 else "ไม่เปลี่ยน"
+    return f"{name} {d:+.2f} ({effect})"
+
+
+def fund_alert(inp: dict) -> tuple:
+    """(ข้อความสั้น, ref_id สำหรับกันส่งซ้ำ) หรือ (None, None) ถ้ารอบนี้ไม่มีประกาศกองทุนที่คำทายนับแล้ว"""
+    f = inp.get("fund")
+    if not f or not f.get("issue"):
+        return None, None
+    eff = pd.Timestamp(f["effective"])
+    chg = [c for c in (_fund_change("ดีเซล", f.get("diesel_old"), f.get("diesel_new")),
+                       _fund_change("เบนซิน", f.get("benzene_old"), f.get("benzene_new"))) if c]
+    calls = []
+    for fuel, name in FUELS:
+        h = ((inp.get("fuels") or {}).get(fuel) or {}).get("h24")
+        calls.append(f"{name} " + ("ไม่มีคำทาย" if not h else line_flex_tier(h["tier"])))
+    lines = [f"📢 กองทุนฉบับที่ {f['issue']} (มีผล {eff:%d/%m})"]
+    if chg:
+        lines.append("กองทุน: " + " · ".join(chg))
+    lines += ["ผลพยากรณ์อัปเดตแล้ว: " + " / ".join(calls), "พิมพ์ forecast เพื่อดูรายละเอียด"]
+    return "\n".join(lines), f"fund-{f['issue']}-{eff:%Y%m%d}"
+
+
+def line_flex_tier(tier: str) -> str:
+    return {"UP_STRONG": "📈📈 ขึ้นแรง", "UP": "📈 ขึ้น", "DOWN": "📉 ลง", "DOWN_STRONG": "📉📉 ลงแรง"}.get(tier, "❓ ไม่ชัด")
 
 
 # ---------- ประกาศปรับราคาของผู้ค้าส่งที่รู้แล้ววันนี้ (ฟีด Entry_HeadsUp) ----------
@@ -474,11 +534,15 @@ def main(argv=None) -> int:
         retail = retail_frame(sheets_get(tok, SHEET_ID, f"{TABS['RETAIL_FC']}!A1:AF5000"))
     except Exception as e:                     # noqa: BLE001
         print(f"[LINE] อ่าน RetailFcLog ไม่สำเร็จ: {e}")
-    text, ref_id = build_message(inp, log, retail=retail)
+    print(build_message(inp, log, retail=retail)[0])                 # ข้อความเต็มพิมพ์ไว้ใน log (คำสั่ง forecast ใช้ outlook.json)
+    text, ref_id = fund_alert(inp)                                   # ส่งเข้าไลน์ส่วนตัวเฉพาะเมื่อมีประกาศกองทุน (เจ้าของระบบ 20/11/2026)
+    if not text:
+        print("[LINE] รอบนี้ไม่มีประกาศกองทุนที่คำทายนับแล้ว — ไม่ส่งแจ้งเตือน")
+        return 0
     print(text)
     now = pd.Timestamp(datetime.now(ZoneInfo(TZ_NAME)).replace(tzinfo=None))
-    if not dry and not in_send_window(now, pd.Timestamp(inp["asof"])):
-        print(f"[LINE] นอกช่วงเวลาส่ง ({SEND_FROM}–23:59 น. ของวันเดียวกับข้อมูล) — ไม่ส่ง (เช่น รอบที่ GitHub เลื่อนมารันกลางดึก)")
+    if not dry and now.normalize() != pd.Timestamp(inp["asof"]).normalize():
+        print("[LINE] ไม่ใช่วันเดียวกับข้อมูล — ไม่ส่ง (เช่น รอบที่ GitHub เลื่อนมารันหลังเที่ยงคืน)")
         return 0
     token, uid = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", ""), os.environ.get("LINE_TEST_USER_ID", "").strip()
     if dry:

@@ -385,7 +385,7 @@ def ws_signal(fuel: str, target: pd.Timestamp, rnd: str, now: pd.Timestamp, tabl
     if now < pd.Timestamp(target).normalize() - pd.Timedelta(days=1) + pd.Timedelta(hours=RF.SIGNAL_HOUR):
         return None, "ยังไม่ถึงเวลาตัดสัญญาณ 20:30"
     try:
-        f = RF.signal_forecast(model, tables, fuel, target)
+        f = RF.signal_forecast(model, tables, fuel, target, fund_asof=now)
     except Exception as e:                                             # noqa: BLE001 — ต้องไม่ทำให้การ์ดล้ม
         return None, f"คำนวณไม่สำเร็จ: {e}"[:120]
     if not f:
@@ -432,7 +432,7 @@ def signal_shadow(rows: list, rnd: str, now: pd.Timestamp, tables=None, model=No
             r["sig_note"] = "ยังไม่ถึงเวลาตัดสัญญาณ 20:30"
             continue
         try:
-            f = RF.signal_forecast(model, tables, r["fuel"], tgt, eppo_d)
+            f = RF.signal_forecast(model, tables, r["fuel"], tgt, eppo_d, fund_asof=now)
         except Exception as e:                                         # noqa: BLE001
             f, r["sig_note"] = None, f"คำนวณไม่สำเร็จ: {e}"[:120]
         if f:

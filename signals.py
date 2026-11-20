@@ -74,8 +74,9 @@ class Tables:
         return (not snap.empty) and (asof - snap.msg.max()) <= pd.Timedelta(hours=max_age_h)
 
 
-def build_features(asof: pd.Timestamp, t: Tables, fuel: str) -> dict:
-    """ฟีเจอร์ของชนิดน้ำมัน fuel ณ เวลา asof — ใช้เฉพาะแถวที่โพสต์ก่อน/เท่ากับ asof"""
+def build_features(asof: pd.Timestamp, t: Tables, fuel: str, fund_asof: pd.Timestamp = None) -> dict:
+    """ฟีเจอร์ของชนิดน้ำมัน fuel ณ เวลา asof — ใช้เฉพาะแถวที่โพสต์ก่อน/เท่ากับ asof
+    fund_asof (> asof) : นับประกาศกองทุนที่โพสต์ถึงเวลานี้ (ประกาศ ~1 ใน 4 ออกหลัง 20:30) ; ข้อมูลอื่นยังตัดที่ asof ; fund_late = มีประกาศหลัง asof ถูกใช้"""
     day = asof.normalize()
     f = {"asof": asof}
 
@@ -109,16 +110,26 @@ def build_features(asof: pd.Timestamp, t: Tables, fuel: str) -> dict:
             f["close_age_h"] = (asof - w.iloc[-1].ts).total_seconds() / 3600
 
     # 4) กองทุน: ส่วนต่างที่ "ประกาศแล้ว" และมีผลพรุ่งนี้ (ประกาศออก ~20:00) กับระดับล่าสุด
-    f["fund_next"], f["fund_level"] = 0.0, np.nan
+    f["fund_next"], f["fund_level"], f["fund_late"] = 0.0, np.nan, False
+    cut = fund_asof if fund_asof is not None and fund_asof > asof else asof
     if not t.fund.empty:
-        w = t.fund[t.fund.ts <= asof]
+        w = t.fund[t.fund.ts <= cut]
         col = FUND_COL[fuel]
         w = w[w[col + "_new"].map(_num).notna()]
         if len(w):
             f["fund_level"] = _num(w.iloc[-1][col + "_new"])
             nxt = w[w.effective_date == day + pd.Timedelta(days=1)]
             f["fund_next"] = float((nxt[col + "_new"].map(_num) - nxt[col + "_old"].map(_num)).sum())
+            f["fund_late"] = bool(len(nxt)) and bool((nxt.ts > asof).any())
     return f
+
+
+def fund_notice_due(t: "Tables", asof: pd.Timestamp) -> bool:
+    """มีประกาศกองทุนที่มีผลพรุ่งนี้และโพสต์แล้ว ณ asof หรือไม่ (ตัวเริ่มรอบพยากรณ์คืนนี้ก่อน 20:30 ดู engine.outlook_source)"""
+    if t.fund.empty:
+        return False
+    w = t.fund[(t.fund.ts <= asof) & (t.fund.ts >= asof.normalize())]
+    return bool((w["effective_date"] == asof.normalize() + pd.Timedelta(days=1)).any())
 
 
 def _posted_ts(p: pd.DataFrame) -> pd.Series:
@@ -195,9 +206,9 @@ def price_features(kp: KnownPrices, asof: pd.Timestamp, hz: int) -> dict:
     return out
 
 
-def build_features_v2(asof: pd.Timestamp, t: "Tables", fuel: str, hz: int) -> dict:
+def build_features_v2(asof: pd.Timestamp, t: "Tables", fuel: str, hz: int, fund_asof: pd.Timestamp = None) -> dict:
     """ฟีเจอร์ชุด v2 ของโมเดลแนวโน้ม = ชุดเดิม + ราคาที่รู้ ณ asof + ผลรวม MOPS 5/10 ครั้ง + วันในสัปดาห์ ; ต้องมี t.known(fuel)"""
-    f = build_features(asof, t, fuel)
+    f = build_features(asof, t, fuel, fund_asof)
     f.update(price_features(t.known(fuel), asof, hz))
     f["close_5"], f["close_10"] = np.nan, np.nan
     if not t.mops_close.empty:
