@@ -213,3 +213,30 @@ class RetrainV2Test(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LateFundNoticeTest(unittest.TestCase):
+    """รอบ 20:30 ที่รันหลังประกาศกองทุนช้า (หลัง 20:30) ต้องนับประกาศนั้น ; รอบที่บันทึกย้อนหลัง (asof = ref) ไม่นับ"""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(ROOT, "model_params.json"), encoding="utf-8") as fh:
+            cls.params = json.load(fh)
+
+    def _tables(self):
+        fund = pd.DataFrame([{"msg_date": "2026-11-19", "msg_time": "21:03", "issue_no": 195, "effective_date": "2026-11-20",
+                              "diesel_old": -1.28, "diesel_new": -0.87, "benzene_old": 3.30, "benzene_new": 3.37}])
+        return S.Tables(fund=fund).set_prices(_feed())
+
+    def _run(self, asof):
+        with mock.patch("engine.feed_status", return_value={"alive": True, "newest": None}):
+            return E.decide_outlook("DIESEL", pd.Timestamp(asof), self._tables(), self.params)
+
+    def test_late_notice(self):
+        late, before = self._run("2026-11-19 21:10"), self._run("2026-11-19 20:45")
+        self.assertTrue(late["fund_late"])
+        self.assertFalse(before["fund_late"])
+        self.assertAlmostEqual(late["features"]["fund_next"], 0.41)
+        self.assertEqual(before["features"]["fund_next"], 0.0)
+        self.assertGreater(late["horizons"][0]["p"]["r10"], before["horizons"][0]["p"]["r10"])   # กองทุนลดชดเชย = ดันขึ้น
+        self.assertFalse(self._run("2026-11-19 20:30")["fund_late"])                               # บันทึกย้อนหลัง asof = ref

@@ -938,7 +938,7 @@ def write_outlook_files(outlook: dict, version: str = "", snap_path: str = "outl
             snap.append({"asof": d["asof"].strftime("%Y-%m-%d %H:%M"), "ref": d["ref"].strftime("%Y-%m-%d %H:%M"), "fuel": d["fuel"],
                          "hours": h["hours"], "tier": h["tier"], "p_rise10": clean(h["p"]["r10"]), "p_fall10": clean(h["p"]["f10"]),
                          "p_rise40": clean(h["p"]["r40"]), "p_fall40": clean(h["p"]["f40"]), "grade": h["grade"], "model_version": version,
-                         **_old_cols(h, clean)})
+                         **_old_cols(h, clean), "fund_late": int(bool(d.get("fund_late")))})
         for pf in d.get("profile") or []:              # ช่วงเวลาของวันพรุ่งนี้ : บันทึกลง OutlookLog (hours 16/20) เพื่อวัดผลจริง ไม่ขึ้นหน้าเว็บ
             snap.append({"asof": d["asof"].strftime("%Y-%m-%d %H:%M"), "ref": d["ref"].strftime("%Y-%m-%d %H:%M"), "fuel": d["fuel"],
                          "hours": pf["hours"], "tier": pf["call"] or "UNCLEAR", "p_rise10": clean(pf["p_up"]), "p_fall10": clean(pf["p_down"]),
@@ -1642,7 +1642,7 @@ def main():
         retail_raw = pd.DataFrame()
     try:                                                   # ข้อมูลเข้าของข้อความไลน์ส่วนตัว (ช่วงทดสอบ ดู line_outlook.py) — ล้มเหลวต้องไม่กระทบหน้าเว็บ
         import line_outlook
-        line_outlook.write_input(outlook, asof, headsup=tables.headsup)
+        line_outlook.write_input(outlook, asof, headsup=tables.headsup, fund=tables.fund)
         # ข้อความสำหรับตอบเมื่อพิมพ์ "forecast" ในแชทส่วนตัว (Worker อ่านจาก outlook.json ช่อง line_text) — มีพยากรณ์ราคาขายปลีกต่อท้าย
         pub = json.loads(open("outlook.json", encoding="utf-8").read())
         pub["line_text"] = line_outlook.build_message(line_outlook.make_input(outlook, asof, tables.headsup), outlook_log, on_demand=True,

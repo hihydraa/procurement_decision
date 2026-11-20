@@ -215,7 +215,7 @@ class LagLedgerTest(unittest.TestCase):
         row = log_outlook.new_rows([], self._snap("2026-11-03 21:00"))[0]
         self.assertEqual(list(row), log_outlook.COLUMNS)
         self.assertEqual(log_outlook.COLUMNS[16:18], ["lag_h", "backfilled"])          # คอลัมน์เดิมไม่ขยับ (แถวเก่าในชีทยังอ่านถูก)
-        self.assertEqual(log_outlook.COLUMNS[-3:], ["old_tier", "old_p_rise10", "old_p_fall10"])
+        self.assertEqual(log_outlook.COLUMNS[18:], ["old_tier", "old_p_rise10", "old_p_fall10", "fund_late"])
         self.assertEqual(log_outlook.LAST_COL, chr(ord("A") + len(log_outlook.COLUMNS) - 1))
 
     def test_on_time_and_late_counted_separately(self):

@@ -473,9 +473,12 @@ def decide_outlook(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params, 
         newest = st["newest"].strftime("%d/%m %H:%M") if st["newest"] is not None else "ไม่เคยมีข้อมูล"
         out["note"] = f"ฟีดสัญญาณจากไลน์ไม่อัปเดต (ล่าสุด {newest}) — ยังไม่ให้แนวโน้ม"
         return out
-    f = S.build_features(ref, tables, fuel)
+    # รอบ 20:30 ที่รันจริงหลังจุดอ้างอิงในคืนเดียวกัน : นับประกาศกองทุนที่ออกจนถึงเวลารัน (ประกาศช้ากว่า 20:30 ราว 1 ใน 4) ข้อมูลอื่นตัดที่ 20:30
+    fund_asof = asof if code == "E" and asof > ref and asof.normalize() == ref.normalize() else None
+    f = S.build_features(ref, tables, fuel, fund_asof)
     x = M.vectorize(f)
     out["features"] = f
+    out["fund_late"] = bool(f.get("fund_late"))
     for hz in cfg["horizons"]:
         key = f"{fuel}_{tag}H{hz}"
         mm = cfg["models"].get(key)
@@ -484,7 +487,7 @@ def decide_outlook(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params, 
         fx, xx, fset = f, x, "v1"
         if (cfg.get("feature_set") or {}).get(key) == "v2":
             if tables.has_prices(fuel, ref):
-                fx = S.build_features_v2(ref, tables, fuel, hz)
+                fx = S.build_features_v2(ref, tables, fuel, hz, fund_asof)
                 xx, fset = M.vectorize_v2(fx), "v2"
             elif (cfg.get("models_v1") or {}).get(key):          # ฟีดราคาไม่พร้อม → ใช้โมเดลชุดเดิมของ key นี้
                 mm = cfg["models_v1"][key]
@@ -518,11 +521,11 @@ def decide_outlook(fuel_key: str, asof: pd.Timestamp, tables: S.Tables, params, 
             "size": OUTLOOK_SIZE.get(tier), "until": until, "p": p, "grade": (ev or {}).get("grade", "ต่ำ"), "evidence": ev,
             "base_up": ((summary or {}).get("outlook_results", {}).get(key) or {}).get("base_up10"),
             "base_down": ((summary or {}).get("outlook_results", {}).get(key) or {}).get("base_down10")})
-    out["profile"] = decide_profile(fuel, ref, code, tables, cfg, summary)
+    out["profile"] = decide_profile(fuel, ref, code, tables, cfg, summary, fund_asof)
     return out
 
 
-def decide_profile(fuel: str, ref: pd.Timestamp, code: str, tables: S.Tables, cfg: dict, summary=None) -> list:
+def decide_profile(fuel: str, ref: pd.Timestamp, code: str, tables: S.Tables, cfg: dict, summary=None, fund_asof: pd.Timestamp = None) -> list:
     """ราคาของช่วงเวลาในวันพรุ่งนี้ (12:30 / 16:30) เทียบราคา ณ 20:30 คืนนี้ — เฉพาะรอบ 20:30 และเมื่อฟีดราคาสด (ชุดฟีเจอร์ v2)
     คืน [{hours, at, call 'UP'/'DOWN'/None, p_up, p_down, ok, n, right, wrong}] ; ok = ทิศนั้นผ่านเกณฑ์ walk-forward (ไม่ผ่าน = ห้ามใช้บอกผู้อ่าน)"""
     models = (cfg or {}).get("profile") or {}
@@ -535,7 +538,7 @@ def decide_profile(fuel: str, ref: pd.Timestamp, code: str, tables: S.Tables, cf
         mm = models.get(key)
         if not mm:
             continue
-        x = M.vectorize_v2(S.build_features_v2(ref, tables, fuel, hz))
+        x = M.vectorize_v2(S.build_features_v2(ref, tables, fuel, hz, fund_asof))
         pu, pd_ = float(M.predict_proba(mm["r10"], x)[0]), float(M.predict_proba(mm["f10"], x)[0])
         call = "UP" if (pu >= M.OUTLOOK_MIN_P and pu > pd_) else "DOWN" if (pd_ >= M.OUTLOOK_MIN_P and pd_ > pu) else None
         st = (res.get(key) or {}).get({"UP": "up", "DOWN": "down"}.get(call, ""), {}) if call else {}

@@ -227,14 +227,17 @@ class SendTest(unittest.TestCase):
         with mock.patch("line_outlook.requests.post", side_effect=L.requests.ConnectionError("x")):
             self.assertEqual(L.push("hi", "tok", UID), "failed:ConnectionError")
 
-    def _run(self, env, now="2026-11-12 21:36", sent_rows=None, argv=()):
+    FUND = {"issue": "195", "posted": "2026-11-12 19:42", "effective": "2026-11-13", "late": False,
+            "diesel_old": -1.28, "diesel_new": -0.87, "benzene_old": 3.30, "benzene_new": 3.37}
+
+    def _run(self, env, now="2026-11-12 21:36", sent_rows=None, argv=(), fund=FUND):
         import json
         import tempfile
         calls = {"append": [], "post": 0}
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "in.json")
             with open(path, "w", encoding="utf-8") as fh:
-                json.dump(_inp(), fh, ensure_ascii=False)
+                json.dump({**_inp(), **({"fund": fund} if fund else {})}, fh, ensure_ascii=False)
             def post(*a, **k):
                 calls["post"] += 1
                 return mock.Mock(status_code=200)
@@ -256,13 +259,16 @@ class SendTest(unittest.TestCase):
         ok = {"LINE_CHANNEL_ACCESS_TOKEN": "tok", "LINE_TEST_USER_ID": UID}
         c = self._run(ok)
         self.assertEqual(c["post"], 1)
-        self.assertEqual(c["append"][0][0][0], "2026-11-12 20:30")
+        self.assertEqual(c["append"][0][0][0], "fund-195-20261113")                                           # ครั้งเดียวต่อฉบับ
         self.assertEqual(c["append"][0][0][2], "sent")
+        self.assertIn("กองทุนฉบับที่ 195 (มีผล 13/11)", c["append"][0][0][3])
+        self.assertIn("พิมพ์ forecast", c["append"][0][0][3])
+        self.assertEqual(self._run(ok, fund=None)["post"], 0)                                                 # ไม่มีประกาศกองทุน = ไม่ส่ง
         self.assertEqual(self._run({})["post"], 0)                                                            # ไม่มี Secret
         self.assertEqual(self._run({**ok, "LINE_TEST_USER_ID": "C" + UID[1:]})["post"], 0)                    # รหัสกลุ่ม
         self.assertEqual(self._run(ok, argv=("--dry",))["post"], 0)
         self.assertEqual(self._run(ok, now="2026-11-13 04:30")["post"], 0)                                    # นอกช่วงเวลา
-        self.assertEqual(self._run(ok, sent_rows=[L.LOG_COLUMNS, ["2026-11-12 20:30", "x", "sent"]])["post"], 0)  # ส่งแล้ว
+        self.assertEqual(self._run(ok, sent_rows=[L.LOG_COLUMNS, ["fund-195-20261113", "x", "sent"]])["post"], 0)  # ส่งแล้ว
 
 
 if __name__ == "__main__":
@@ -467,3 +473,54 @@ class NightlyRetailTest(unittest.TestCase):
                          "ผู้ค้าประกาศปรับขึ้น 2 ราย / ลง 0 ราย · MOPS ปิดล่าสุด +1.02 USD/bbl · กองทุนมีผลพรุ่งนี้ -0.46 บาท/ลิตร")
         self.assertEqual(RF.signal_reason({"up_n": 0, "dn_n": 0, "close_last": 0.2, "fund_next": 0.0}), "คืนนี้ไม่มีประกาศปรับราคา และ MOPS ขยับน้อย")
         self.assertIn("MOPS", RF.signal_reason({"close_last": float("nan"), "up_n": None}) + "MOPS")
+
+
+class FundAlertTest(unittest.TestCase):
+    """แจ้งเตือนประกาศกองทุน (flow เจ้าของระบบ 20/11/2026) + การนับประกาศที่ออกหลัง 20:30"""
+
+    def fund_table(self, posted="2026-11-19 19:42", eff="2026-11-20", issue=195):
+        import signals as S
+        d, t = posted.split(" ")
+        df = pd.DataFrame([{"msg_date": d, "msg_time": t, "issue_no": issue, "effective_date": eff,
+                            "diesel_old": -1.28, "diesel_new": -0.87, "benzene_old": 3.30, "benzene_new": 3.37}])
+        return S.Tables(fund=df).fund
+
+    def outlook(self, ref="2026-11-19 20:30"):
+        return {"DIESEL": {"ref": pd.Timestamp(ref), "horizons": [{"hours": 24}], "fuel": "B7"}}
+
+    def test_notice_used_by_tonight_forecast(self):
+        f = L.fund_notice(self.fund_table(), self.outlook(), "2026-11-19 20:47")
+        self.assertEqual((f["issue"], f["effective"], f["late"]), ("195", "2026-11-20", False))
+        self.assertAlmostEqual(f["diesel_new"] - f["diesel_old"], 0.41)
+        late = L.fund_notice(self.fund_table("2026-11-19 21:03"), self.outlook(), "2026-11-19 21:10")
+        self.assertTrue(late["late"])
+
+    def test_no_alert_cases(self):
+        self.assertIsNone(L.fund_notice(self.fund_table("2026-11-19 21:03"), self.outlook(), "2026-11-19 20:47"))   # ยังไม่ออก ณ เวลารัน
+        self.assertIsNone(L.fund_notice(self.fund_table(eff="2026-11-21"), self.outlook(), "2026-11-19 20:47"))     # ไม่ใช่ของพรุ่งนี้
+        self.assertIsNone(L.fund_notice(self.fund_table(), self.outlook("2026-11-19 15:30"), "2026-11-19 16:00"))  # รอบบ่าย
+        self.assertIsNone(L.fund_notice(pd.DataFrame(), self.outlook(), "2026-11-19 20:47"))
+        self.assertEqual(L.fund_alert({"fuels": {}}), (None, None))
+
+    def test_alert_text(self):
+        inp = {"fuels": {"B7": {"h24": {"tier": "DOWN"}}, "G95": {"h24": {"tier": "UNCLEAR"}}},
+               "fund": L.fund_notice(self.fund_table(), self.outlook(), "2026-11-19 20:47")}
+        text, ref_id = L.fund_alert(inp)
+        self.assertEqual(ref_id, "fund-195-20261120")
+        self.assertEqual(text.split("\n"), ["📢 กองทุนฉบับที่ 195 (มีผล 20/11)",
+                                            "กองทุน: ดีเซล +0.41 (ดันราคาขึ้น) · เบนซิน +0.07 (ดันราคาขึ้น)",
+                                            "ผลพยากรณ์อัปเดตแล้ว: ดีเซล 📉 ลง / แก๊สโซฮอล์ 95 ❓ ไม่ชัด",
+                                            "พิมพ์ forecast เพื่อดูรายละเอียด"])
+
+    def test_late_notice_counted_only_after_ref(self):
+        import signals as S
+        t = S.Tables(fund=pd.DataFrame([{"msg_date": "2026-11-19", "msg_time": "21:03", "issue_no": 195, "effective_date": "2026-11-20",
+                                          "diesel_old": -1.28, "diesel_new": -0.87, "benzene_old": 3.30, "benzene_new": 3.37}]))
+        ref = pd.Timestamp("2026-11-19 20:30")
+        base = S.build_features(ref, t, "B7")
+        self.assertEqual((base["fund_next"], base["fund_late"]), (0.0, False))                         # แบบเดิม : ไม่เห็น
+        late = S.build_features(ref, t, "B7", fund_asof=pd.Timestamp("2026-11-19 21:10"))
+        self.assertAlmostEqual(late["fund_next"], 0.41)
+        self.assertTrue(late["fund_late"])
+        early = S.build_features(ref, t, "B7", fund_asof=pd.Timestamp("2026-11-19 20:50"))           # ยังไม่ออก ณ เวลารัน
+        self.assertEqual(early["fund_next"], 0.0)
