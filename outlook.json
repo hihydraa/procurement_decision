@@ -1,29 +1,29 @@
 {
- "generated": "2026-11-23 15:47",
- "text": "พยากรณ์แนวโน้มราคาน้ำมัน\nประเมินจากข้อมูล 15:30 น. วันที่ 23/11\n\nG95\n24 ชม.: 📈 ขึ้น (มักขยับราว 10–40 สต./ลิตร) 🔴 ความเชื่อมั่น: ต่ำ\n   ย้อนหลัง 36 ครั้งที่ระบบบอกแบบนี้: ถูกทิศ 58% ผิดทิศ 22% ขยับเฉลี่ย 0.30 บาท/ลิตร\n48 ชม.: ❓ ยังไม่ชัดเจน\n\nB7\n24 ชม.: ❓ ยังไม่ชัดเจน\n   ย้อนหลังพบสถานการณ์แบบนี้ 73% ของวัน (ไม่ทายทิศทาง)\n48 ชม.: ❓ ยังไม่ชัดเจน\n\n⚠️ ใช้ประกอบการตัดสินใจ แต่ละสาขาจัดสรรเองตามระยะทาง — ยังอยู่ระหว่างทดสอบความแม่นจริง",
+ "generated": "2026-11-23 22:25",
+ "text": "พยากรณ์แนวโน้มราคาน้ำมัน\nประเมินจากข้อมูล 20:30 น. วันที่ 23/11\n\nG95\n24 ชม.: ❓ ยังไม่ชัดเจน\n   ย้อนหลังพบสถานการณ์แบบนี้ 58% ของวัน (ไม่ทายทิศทาง)\n48 ชม.: 📈 ขึ้นแรง (มักขยับตั้งแต่ 40 สต./ลิตรขึ้นไป) 🔴 ความเชื่อมั่น: ต่ำ\n\nB7\n24 ชม.: ❓ ยังไม่ชัดเจน (ทดลอง)\n   ย้อนหลังพบสถานการณ์แบบนี้ 50% ของวัน (ไม่ทายทิศทาง)\n48 ชม.: 📈 ขึ้น (มักขยับราว 10–40 สต./ลิตร) 🔴 ความเชื่อมั่น: ต่ำ\n\n⚠️ ใช้ประกอบการตัดสินใจ แต่ละสาขาจัดสรรเองตามระยะทาง — ยังอยู่ระหว่างทดสอบความแม่นจริง",
  "fuels": {
   "G95": {
-   "ref": "2026-11-23 15:30",
+   "ref": "2026-11-23 20:30",
    "note": null,
    "horizons": [
     {
      "hours": 24,
-     "tier": "UP",
-     "label": "ขึ้น",
-     "grade": "ต่ำ",
-     "until": "2026-11-24 15:30"
-    },
-    {
-     "hours": 48,
      "tier": "UNCLEAR",
      "label": "ยังไม่ชัดเจน",
      "grade": "ต่ำ",
-     "until": "2026-11-25 15:30"
+     "until": "2026-11-24 20:30"
+    },
+    {
+     "hours": 48,
+     "tier": "UP_STRONG",
+     "label": "ขึ้นแรง",
+     "grade": "ต่ำ",
+     "until": "2026-11-25 20:30"
     }
    ]
   },
   "B7": {
-   "ref": "2026-11-23 15:30",
+   "ref": "2026-11-23 20:30",
    "note": null,
    "horizons": [
     {
@@ -31,24 +31,159 @@
      "tier": "UNCLEAR",
      "label": "ยังไม่ชัดเจน",
      "grade": "ต่ำ",
-     "until": "2026-11-24 15:30"
+     "until": "2026-11-24 20:30"
     },
     {
      "hours": 48,
-     "tier": "UNCLEAR",
-     "label": "ยังไม่ชัดเจน",
+     "tier": "UP",
+     "label": "ขึ้น",
      "grade": "ต่ำ",
-     "until": "2026-11-25 15:30"
+     "until": "2026-11-25 20:30"
     }
    ]
   }
  },
- "line_text": "🛢 พยากรณ์ราคาน้ำมัน\n━━━━━━━━━━━━━━\n① ราคาส่ง (Jobber) · 24 ชม.ข้างหน้า\nราคาต่ำสุดที่ผู้ค้าส่งประกาศหน้าคลัง จะขึ้นหรือลง\n━━━━━━━━━━━━━━\nข้อมูล 15:30 น. 23/11 · ใช้ได้ถึง 15:30 น. 24/11\n(รอบบ่าย: มีผลจริงเพียงไม่กี่วัน เชื่อถือได้น้อยกว่ารอบ 20:30)\n\nดีเซล: ❓ ไม่มีสัญญาณชัด\n⬆ ขึ้น ▰▰▰▱▱▱▱▱▱▱ 29%\n⬇ ลง  ▰▰▰▱▱▱▱▱▱▱ 32%\nแก๊สโซฮอล์ 95: 📈 ขึ้น (คาดขยับ 10–40 สต./ลิตร)\n⬆ ขึ้น ▰▰▰▰▰▰▱▱▱▱ 57%\n⬇ ลง  ▰▱▱▱▱▱▱▱▱▱ 11%\nความเชื่อมั่น: ต่ำ\n• Trend Mops แก๊สโซฮอล์ 95 ระหว่างวัน +1.88 USD/bbl\n• 2 ราย ประกาศ 'มีปรับขึ้น' วันนี้\nย้อนหลังเมื่อระบบบอกแบบนี้ (36 ครั้ง): ถูก 58% ผิดทิศ 22%\n\nสัญญาณคืนนี้\n• ชี้ขึ้น: 2 ราย ประกาศ 'มีปรับขึ้น' วันนี้\n• ชี้ลง: Trend Mops ดีเซล ระหว่างวัน -0.04 USD/bbl\n\nผลงานที่ผ่านมา (ราคาส่ง Jobber)\nผลของคำทายคืน 21/11\nดีเซล: ไม่ได้ทาย → จริง -0.05\nแก๊สโซฮอล์ 95: ไม่ได้ทาย → จริง -0.05\n\nสถิติผลจริงตั้งแต่ 23/10 (25/40 วัน)\nฟันธง 28 ครั้ง · ถูก 20 · ผิดทิศ 2 · ราคานิ่ง 6\nถูก ▰▰▰▰▰▰▰▱▱▱ 20/28\n\n━━━━━━━━━━━━━━\n② ราคาขายปลีก (หน้าปั๊ม) · รอพยากรณ์ของวันถัดไป\nราคาหน้าปั๊มจะปรับหรือไม่ [ทดลอง ยังไม่ผ่านการทดสอบเดินหน้า]\n━━━━━━━━━━━━━━\nดีเซล: ยังไม่มีพยากรณ์ของวันถัดไป (ออกหลัง 21:30 น. คืนจันทร์–พฤหัสบดี) ; ล่าสุดเป็นของวันที่ 20/11\nแก๊สโซฮอล์ 95: ยังไม่มีพยากรณ์ของวันถัดไป (ออกหลัง 21:30 น. คืนจันทร์–พฤหัสบดี) ; ล่าสุดเป็นของวันที่ 20/11\nผลจริงสะสม (ราคาปลีก): ดีเซล รู้ผล 5 วัน ฟันธง 5 ถูก 4 · แก๊สโซฮอล์ 95 รู้ผล 5 วัน ฟันธง 5 ถูก 3\n\n[ทดสอบ] ยังไม่ผ่านเกณฑ์ผลจริง 40 วัน ไม่ใช่คำสั่งซื้อ",
+ "line_text": "🛢 พยากรณ์ราคาน้ำมัน\n🧭 รถที่อยู่คลัง: โหลดคืน 23/11 หรือรอบ่าย 24/11 [ทดลอง ยังไม่มีผลจริง]\nดีเซล: ⏳ รอโหลดบ่ายวันที่ 24/11 (หลัง 16:00 น.)\n   • ราคา 16:30 น. วันที่ 24/11 มักต่ำกว่าคืน 23/11 (ย้อนหลังถูก 69% จาก 186 ครั้ง)\n   ⚠ คืน 23/11 ราคาจะขึ้น +1.06 เวลา 00:00 น. ตามประกาศ — คำแนะนำนี้มองราคาสุทธิถึงบ่ายวันที่ 24/11 จึงให้เลี่ยงโหลดช่วงเช้าหลังราคาขึ้น\nแก๊สโซฮอล์ 95: 🛒 โหลดก่อน 00:00 น. คืน 23/11 ก่อนราคาขึ้น +1.07\n   • ราคามักขึ้นภายในเที่ยงวันที่ 24/11 (ย้อนหลังถูก 68% จาก 192 ครั้ง)\n(เทียบกับราคา ณ 20:30 น. 23/11 · สำหรับรถที่ถึงคลังแล้ว ไม่รวมโควต้าและเวลาตัดรับออเดอร์ของคลัง)\n\n━━━━━━━━━━━━━━\n① ราคาส่ง (Jobber) · 24 ชม.ข้างหน้า\nราคาต่ำสุดที่ผู้ค้าส่งประกาศหน้าคลัง จะขึ้นหรือลง\n━━━━━━━━━━━━━━\nข้อมูล 20:30 น. 23/11 · ใช้ได้ถึง 20:30 น. 24/11\n\nดีเซล: ❓ ไม่มีสัญญาณชัด\n⬆ ขึ้น ▰▰▰▱▱▱▱▱▱▱ 34%\n⬇ ลง  ▰▰▰▰▰▱▱▱▱▱ 47%\nแก๊สโซฮอล์ 95: ❓ ไม่มีสัญญาณชัด\n⬆ ขึ้น ▰▰▰▱▱▱▱▱▱▱ 28%\n⬇ ลง  ▰▰▰▰▱▱▱▱▱▱ 39%\nราคาอาจขยับได้ทั้งสองทาง\n\nสัญญาณคืนนี้\n• ชี้ขึ้น: 4 ราย ประกาศ 'มีปรับขึ้น' วันนี้\n• ชี้ลง: MOPS ปิดล่าสุด -1.92 USD/bbl, วันจันทร์ (รูปแบบการปรับราคาตามวันในสัปดาห์)\n\nผลงานที่ผ่านมา (ราคาส่ง Jobber)\nผลของคำทายคืน 22/11\nดีเซล: ไม่ได้ทาย → จริง +0.07\nแก๊สโซฮอล์ 95: ไม่ได้ทาย → จริง +0.08\n\nสถิติผลจริงตั้งแต่ 23/10 (26/40 วัน)\nฟันธง 28 ครั้ง · ถูก 20 · ผิดทิศ 2 · ราคานิ่ง 6\nถูก ▰▰▰▰▰▰▰▱▱▱ 20/28\n\n━━━━━━━━━━━━━━\n② ราคาขายปลีก (หน้าปั๊ม) · พรุ่งนี้ (24/11)\nราคาหน้าปั๊มจะปรับหรือไม่ [ทดลอง ยังไม่ผ่านการทดสอบเดินหน้า]\n━━━━━━━━━━━━━━\nดีเซล (วันที่ 24/11): ➖ น่าจะไม่ปรับ\n⬇ ลง      ▰▱▱▱▱▱▱▱▱▱ 4%\n➖ ไม่ปรับ ▰▰▰▰▰▰▰▰▰▱ 94%\n⬆ ขึ้น     ▰▱▱▱▱▱▱▱▱▱ 1%\n• เหตุผล: ผู้ค้าประกาศปรับขึ้น 4 ราย / ลง 2 ราย · MOPS ปิดล่าสุด -1.92 USD/bbl · กองทุนมีผลพรุ่งนี้ +0.08 บาท/ลิตร\n• ปลีกล่าสุดใน EPPO 39.99\n\nแก๊สโซฮอล์ 95 (วันที่ 24/11): ➖ น่าจะไม่ปรับ\n⬇ ลง      ▰▱▱▱▱▱▱▱▱▱ 14%\n➖ ไม่ปรับ ▰▰▰▰▰▰▰▰▱▱ 77%\n⬆ ขึ้น     ▰▱▱▱▱▱▱▱▱▱ 10%\n• เหตุผล: ผู้ค้าประกาศปรับขึ้น 4 ราย / ลง 2 ราย · MOPS ปิดล่าสุด -0.61 USD/bbl · กองทุนมีผลพรุ่งนี้ +0.29 บาท/ลิตร\n• ปลีกล่าสุดใน EPPO 38.14\n\nผลจริงสะสม (ราคาปลีก): ดีเซล รู้ผล 5 วัน ฟันธง 5 ถูก 4 · แก๊สโซฮอล์ 95 รู้ผล 5 วัน ฟันธง 5 ถูก 3\n\n[ทดสอบ] ยังไม่ผ่านเกณฑ์ผลจริง 40 วัน ไม่ใช่คำสั่งซื้อ",
  "line_flex": {
-  "altText": "พยากรณ์ราคาน้ำมัน: ดีเซล ไม่ชัด · แก๊สโซฮอล์ 95 ขึ้น 10–40 สต.",
+  "altText": "พยากรณ์ราคาน้ำมัน: ดีเซล ไม่ชัด · แก๊สโซฮอล์ 95 ไม่ชัด",
   "contents": {
    "type": "carousel",
    "contents": [
+    {
+     "type": "bubble",
+     "size": "mega",
+     "header": {
+      "type": "box",
+      "layout": "vertical",
+      "backgroundColor": "#343A40",
+      "paddingAll": "14px",
+      "contents": [
+       {
+        "type": "text",
+        "text": "🧭 ควรโหลดเมื่อไร",
+        "size": "md",
+        "color": "#FFFFFF",
+        "wrap": true,
+        "weight": "bold"
+       },
+       {
+        "type": "text",
+        "text": "รถที่อยู่คลัง · คืน 23/11 หรือบ่าย 24/11",
+        "size": "xxs",
+        "color": "#E7E7F0",
+        "wrap": true
+       }
+      ]
+     },
+     "body": {
+      "type": "box",
+      "layout": "vertical",
+      "paddingAll": "12px",
+      "backgroundColor": "#FFFFFF",
+      "contents": [
+       {
+        "type": "box",
+        "layout": "vertical",
+        "backgroundColor": "#EBFBEE",
+        "cornerRadius": "10px",
+        "paddingAll": "12px",
+        "margin": "none",
+        "contents": [
+         {
+          "type": "text",
+          "text": "ดีเซล",
+          "size": "sm",
+          "color": "#6C757D",
+          "wrap": true,
+          "weight": "bold"
+         },
+         {
+          "type": "text",
+          "text": "⏳ รอโหลดบ่ายวันที่ 24/11 (หลัง 16:00 น.)",
+          "size": "lg",
+          "color": "#2B8A3E",
+          "wrap": true,
+          "weight": "bold"
+         },
+         {
+          "type": "text",
+          "text": "ราคา 16:30 น. วันที่ 24/11 มักต่ำกว่าคืน 23/11 (ย้อนหลังถูก 69% จาก 186 ครั้ง)",
+          "size": "xxs",
+          "color": "#6C757D",
+          "wrap": true,
+          "margin": "sm"
+         },
+         {
+          "type": "text",
+          "text": "⚠ คืน 23/11 ราคาจะขึ้น +1.06 เวลา 00:00 น. ตามประกาศ — คำแนะนำนี้มองราคาสุทธิถึงบ่ายวันที่ 24/11 จึงให้เลี่ยงโหลดช่วงเช้าหลังราคาขึ้น",
+          "size": "xxs",
+          "color": "#6C757D",
+          "wrap": true,
+          "margin": "sm"
+         }
+        ]
+       },
+       {
+        "type": "box",
+        "layout": "vertical",
+        "backgroundColor": "#FFF4E6",
+        "cornerRadius": "10px",
+        "paddingAll": "12px",
+        "margin": "md",
+        "contents": [
+         {
+          "type": "text",
+          "text": "แก๊สโซฮอล์ 95",
+          "size": "sm",
+          "color": "#6C757D",
+          "wrap": true,
+          "weight": "bold"
+         },
+         {
+          "type": "text",
+          "text": "🛒 โหลดก่อน 00:00 น. คืน 23/11 ก่อนราคาขึ้น +1.07",
+          "size": "lg",
+          "color": "#E8590C",
+          "wrap": true,
+          "weight": "bold"
+         },
+         {
+          "type": "text",
+          "text": "ราคามักขึ้นภายในเที่ยงวันที่ 24/11 (ย้อนหลังถูก 68% จาก 192 ครั้ง)",
+          "size": "xxs",
+          "color": "#6C757D",
+          "wrap": true,
+          "margin": "sm"
+         }
+        ]
+       },
+       {
+        "type": "text",
+        "text": "เทียบกับราคา ณ 20:30 น. 23/11 · ไม่รวมโควตาและเวลาตัดรับออเดอร์ของคลัง",
+        "size": "xxs",
+        "color": "#6C757D",
+        "wrap": true,
+        "margin": "md"
+       }
+      ]
+     },
+     "footer": {
+      "type": "box",
+      "layout": "vertical",
+      "paddingAll": "10px",
+      "backgroundColor": "#FFFFFF",
+      "contents": [
+       {
+        "type": "text",
+        "text": "[ทดลอง] ใช้ประกอบการตัดสินใจ ไม่ใช่คำสั่งซื้อ",
+        "size": "xxs",
+        "color": "#6C757D",
+        "wrap": true,
+        "align": "center"
+       }
+      ]
+     }
+    },
     {
      "type": "bubble",
      "size": "mega",
@@ -68,7 +203,7 @@
        },
        {
         "type": "text",
-        "text": "ข้อมูล 15:30 น. 23/11 · ใช้ได้ถึง 15:30 น. 24/11",
+        "text": "ข้อมูล 20:30 น. 23/11 · ใช้ได้ถึง 20:30 น. 24/11",
         "size": "xxs",
         "color": "#E7E7F0",
         "wrap": true
@@ -147,7 +282,7 @@
              {
               "type": "box",
               "layout": "vertical",
-              "width": "29%",
+              "width": "34%",
               "height": "8px",
               "cornerRadius": "4px",
               "backgroundColor": "#E8590C",
@@ -161,7 +296,7 @@
            },
            {
             "type": "text",
-            "text": "29%",
+            "text": "34%",
             "size": "xs",
             "color": "#212529",
             "wrap": false,
@@ -197,7 +332,7 @@
              {
               "type": "box",
               "layout": "vertical",
-              "width": "32%",
+              "width": "47%",
               "height": "8px",
               "cornerRadius": "4px",
               "backgroundColor": "#2B8A3E",
@@ -211,7 +346,7 @@
            },
            {
             "type": "text",
-            "text": "32%",
+            "text": "47%",
             "size": "xs",
             "color": "#212529",
             "wrap": false,
@@ -223,7 +358,7 @@
          },
          {
           "type": "text",
-          "text": "• ชี้ขึ้น: 2 ราย ประกาศ 'มีปรับขึ้น' วันนี้",
+          "text": "• ชี้ขึ้น: 4 ราย ประกาศ 'มีปรับขึ้น' วันนี้",
           "size": "xxs",
           "color": "#6C757D",
           "wrap": true,
@@ -231,7 +366,7 @@
          },
          {
           "type": "text",
-          "text": "• ชี้ลง: Trend Mops ดีเซล ระหว่างวัน -0.04 USD/bbl",
+          "text": "• ชี้ลง: MOPS ปิดล่าสุด -1.92 USD/bbl",
           "size": "xxs",
           "color": "#6C757D",
           "wrap": true,
@@ -242,7 +377,7 @@
        {
         "type": "box",
         "layout": "vertical",
-        "backgroundColor": "#FFF4E6",
+        "backgroundColor": "#F1F3F5",
         "cornerRadius": "10px",
         "paddingAll": "12px",
         "margin": "md",
@@ -262,9 +397,9 @@
            },
            {
             "type": "text",
-            "text": "📈 ขึ้น 10–40 สต.",
+            "text": "❓ ไม่ชัด",
             "size": "sm",
-            "color": "#E8590C",
+            "color": "#868E96",
             "wrap": true,
             "weight": "bold",
             "align": "end",
@@ -274,7 +409,7 @@
          },
          {
           "type": "text",
-          "text": "ความเชื่อมั่น: ต่ำ",
+          "text": "ราคาอาจขยับได้ทั้งสองทาง",
           "size": "xxs",
           "color": "#6C757D",
           "wrap": true
@@ -305,7 +440,7 @@
              {
               "type": "box",
               "layout": "vertical",
-              "width": "57%",
+              "width": "28%",
               "height": "8px",
               "cornerRadius": "4px",
               "backgroundColor": "#E8590C",
@@ -319,7 +454,7 @@
            },
            {
             "type": "text",
-            "text": "57%",
+            "text": "28%",
             "size": "xs",
             "color": "#212529",
             "wrap": false,
@@ -355,7 +490,7 @@
              {
               "type": "box",
               "layout": "vertical",
-              "width": "11%",
+              "width": "39%",
               "height": "8px",
               "cornerRadius": "4px",
               "backgroundColor": "#2B8A3E",
@@ -369,7 +504,7 @@
            },
            {
             "type": "text",
-            "text": "11%",
+            "text": "39%",
             "size": "xs",
             "color": "#212529",
             "wrap": false,
@@ -381,7 +516,7 @@
          },
          {
           "type": "text",
-          "text": "• Trend Mops แก๊สโซฮอล์ 95 ระหว่างวัน +1.88 USD/bbl",
+          "text": "• ชี้ขึ้น: 4 ราย ประกาศ 'มีปรับขึ้น' วันนี้",
           "size": "xxs",
           "color": "#6C757D",
           "wrap": true,
@@ -389,29 +524,13 @@
          },
          {
           "type": "text",
-          "text": "• 2 ราย ประกาศ 'มีปรับขึ้น' วันนี้",
+          "text": "• ชี้ลง: วันจันทร์ (รูปแบบการปรับราคาตามวันในสัปดาห์)",
           "size": "xxs",
           "color": "#6C757D",
-          "wrap": true,
-          "margin": "sm"
-         },
-         {
-          "type": "text",
-          "text": "ย้อนหลังระบบบอกแบบนี้ 36 ครั้ง: ถูก 58% · ผิดทิศ 22%",
-          "size": "xxs",
-          "color": "#212529",
           "wrap": true,
           "margin": "sm"
          }
         ]
-       },
-       {
-        "type": "text",
-        "text": "รอบบ่าย: มีผลจริงเพียงไม่กี่วัน เชื่อถือได้น้อยกว่ารอบ 20:30",
-        "size": "xxs",
-        "color": "#E8590C",
-        "wrap": true,
-        "margin": "md"
        }
       ]
      },
@@ -451,7 +570,7 @@
        },
        {
         "type": "text",
-        "text": "พยากรณ์ของรอพยากรณ์ของวันถัดไป",
+        "text": "พยากรณ์ของพรุ่งนี้ (24/11)",
         "size": "xxs",
         "color": "#E7E7F0",
         "wrap": true
@@ -478,7 +597,7 @@
           "contents": [
            {
             "type": "text",
-            "text": "ดีเซล",
+            "text": "ดีเซล (24/11)",
             "size": "sm",
             "color": "#6C757D",
             "wrap": true,
@@ -487,7 +606,7 @@
            },
            {
             "type": "text",
-            "text": "ยังไม่มีพยากรณ์",
+            "text": "➖ น่าจะไม่ปรับ",
             "size": "sm",
             "color": "#868E96",
             "wrap": true,
@@ -498,8 +617,166 @@
           ]
          },
          {
+          "type": "box",
+          "layout": "horizontal",
+          "spacing": "sm",
+          "margin": "sm",
+          "alignItems": "center",
+          "contents": [
+           {
+            "type": "text",
+            "text": "ลง",
+            "size": "xs",
+            "color": "#6C757D",
+            "wrap": false,
+            "flex": 2
+           },
+           {
+            "type": "box",
+            "layout": "vertical",
+            "flex": 6,
+            "height": "8px",
+            "cornerRadius": "4px",
+            "backgroundColor": "#E9ECEF",
+            "contents": [
+             {
+              "type": "box",
+              "layout": "vertical",
+              "width": "4%",
+              "height": "8px",
+              "cornerRadius": "4px",
+              "backgroundColor": "#2B8A3E",
+              "contents": [
+               {
+                "type": "filler"
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "type": "text",
+            "text": "4%",
+            "size": "xs",
+            "color": "#212529",
+            "wrap": false,
+            "weight": "bold",
+            "align": "end",
+            "flex": 2
+           }
+          ]
+         },
+         {
+          "type": "box",
+          "layout": "horizontal",
+          "spacing": "sm",
+          "margin": "sm",
+          "alignItems": "center",
+          "contents": [
+           {
+            "type": "text",
+            "text": "ไม่ปรับ",
+            "size": "xs",
+            "color": "#6C757D",
+            "wrap": false,
+            "flex": 2
+           },
+           {
+            "type": "box",
+            "layout": "vertical",
+            "flex": 6,
+            "height": "8px",
+            "cornerRadius": "4px",
+            "backgroundColor": "#E9ECEF",
+            "contents": [
+             {
+              "type": "box",
+              "layout": "vertical",
+              "width": "94%",
+              "height": "8px",
+              "cornerRadius": "4px",
+              "backgroundColor": "#868E96",
+              "contents": [
+               {
+                "type": "filler"
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "type": "text",
+            "text": "94%",
+            "size": "xs",
+            "color": "#212529",
+            "wrap": false,
+            "weight": "bold",
+            "align": "end",
+            "flex": 2
+           }
+          ]
+         },
+         {
+          "type": "box",
+          "layout": "horizontal",
+          "spacing": "sm",
+          "margin": "sm",
+          "alignItems": "center",
+          "contents": [
+           {
+            "type": "text",
+            "text": "ขึ้น",
+            "size": "xs",
+            "color": "#6C757D",
+            "wrap": false,
+            "flex": 2
+           },
+           {
+            "type": "box",
+            "layout": "vertical",
+            "flex": 6,
+            "height": "8px",
+            "cornerRadius": "4px",
+            "backgroundColor": "#E9ECEF",
+            "contents": [
+             {
+              "type": "box",
+              "layout": "vertical",
+              "width": "1%",
+              "height": "8px",
+              "cornerRadius": "4px",
+              "backgroundColor": "#E8590C",
+              "contents": [
+               {
+                "type": "filler"
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "type": "text",
+            "text": "1%",
+            "size": "xs",
+            "color": "#212529",
+            "wrap": false,
+            "weight": "bold",
+            "align": "end",
+            "flex": 2
+           }
+          ]
+         },
+         {
           "type": "text",
-          "text": "ยังไม่มีพยากรณ์ของวันถัดไป (ออกหลัง 21:30 น. คืนจันทร์–พฤหัสบดี)",
+          "text": "• เหตุผล: ผู้ค้าประกาศปรับขึ้น 4 ราย / ลง 2 ราย · MOPS ปิดล่าสุด -1.92 USD/bbl · กองทุนมีผลพรุ่งนี้ +0.08 บาท/ลิตร",
+          "size": "xxs",
+          "color": "#6C757D",
+          "wrap": true,
+          "margin": "sm"
+         },
+         {
+          "type": "text",
+          "text": "• ปลีกล่าสุด 39.99",
           "size": "xxs",
           "color": "#6C757D",
           "wrap": true
@@ -520,7 +797,7 @@
           "contents": [
            {
             "type": "text",
-            "text": "แก๊สโซฮอล์ 95",
+            "text": "แก๊สโซฮอล์ 95 (24/11)",
             "size": "sm",
             "color": "#6C757D",
             "wrap": true,
@@ -529,7 +806,7 @@
            },
            {
             "type": "text",
-            "text": "ยังไม่มีพยากรณ์",
+            "text": "➖ น่าจะไม่ปรับ",
             "size": "sm",
             "color": "#868E96",
             "wrap": true,
@@ -540,8 +817,166 @@
           ]
          },
          {
+          "type": "box",
+          "layout": "horizontal",
+          "spacing": "sm",
+          "margin": "sm",
+          "alignItems": "center",
+          "contents": [
+           {
+            "type": "text",
+            "text": "ลง",
+            "size": "xs",
+            "color": "#6C757D",
+            "wrap": false,
+            "flex": 2
+           },
+           {
+            "type": "box",
+            "layout": "vertical",
+            "flex": 6,
+            "height": "8px",
+            "cornerRadius": "4px",
+            "backgroundColor": "#E9ECEF",
+            "contents": [
+             {
+              "type": "box",
+              "layout": "vertical",
+              "width": "14%",
+              "height": "8px",
+              "cornerRadius": "4px",
+              "backgroundColor": "#2B8A3E",
+              "contents": [
+               {
+                "type": "filler"
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "type": "text",
+            "text": "14%",
+            "size": "xs",
+            "color": "#212529",
+            "wrap": false,
+            "weight": "bold",
+            "align": "end",
+            "flex": 2
+           }
+          ]
+         },
+         {
+          "type": "box",
+          "layout": "horizontal",
+          "spacing": "sm",
+          "margin": "sm",
+          "alignItems": "center",
+          "contents": [
+           {
+            "type": "text",
+            "text": "ไม่ปรับ",
+            "size": "xs",
+            "color": "#6C757D",
+            "wrap": false,
+            "flex": 2
+           },
+           {
+            "type": "box",
+            "layout": "vertical",
+            "flex": 6,
+            "height": "8px",
+            "cornerRadius": "4px",
+            "backgroundColor": "#E9ECEF",
+            "contents": [
+             {
+              "type": "box",
+              "layout": "vertical",
+              "width": "77%",
+              "height": "8px",
+              "cornerRadius": "4px",
+              "backgroundColor": "#868E96",
+              "contents": [
+               {
+                "type": "filler"
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "type": "text",
+            "text": "77%",
+            "size": "xs",
+            "color": "#212529",
+            "wrap": false,
+            "weight": "bold",
+            "align": "end",
+            "flex": 2
+           }
+          ]
+         },
+         {
+          "type": "box",
+          "layout": "horizontal",
+          "spacing": "sm",
+          "margin": "sm",
+          "alignItems": "center",
+          "contents": [
+           {
+            "type": "text",
+            "text": "ขึ้น",
+            "size": "xs",
+            "color": "#6C757D",
+            "wrap": false,
+            "flex": 2
+           },
+           {
+            "type": "box",
+            "layout": "vertical",
+            "flex": 6,
+            "height": "8px",
+            "cornerRadius": "4px",
+            "backgroundColor": "#E9ECEF",
+            "contents": [
+             {
+              "type": "box",
+              "layout": "vertical",
+              "width": "10%",
+              "height": "8px",
+              "cornerRadius": "4px",
+              "backgroundColor": "#E8590C",
+              "contents": [
+               {
+                "type": "filler"
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "type": "text",
+            "text": "10%",
+            "size": "xs",
+            "color": "#212529",
+            "wrap": false,
+            "weight": "bold",
+            "align": "end",
+            "flex": 2
+           }
+          ]
+         },
+         {
           "type": "text",
-          "text": "ยังไม่มีพยากรณ์ของวันถัดไป (ออกหลัง 21:30 น. คืนจันทร์–พฤหัสบดี)",
+          "text": "• เหตุผล: ผู้ค้าประกาศปรับขึ้น 4 ราย / ลง 2 ราย · MOPS ปิดล่าสุด -0.61 USD/bbl · กองทุนมีผลพรุ่งนี้ +0.29 บาท/ลิตร",
+          "size": "xxs",
+          "color": "#6C757D",
+          "wrap": true,
+          "margin": "sm"
+         },
+         {
+          "type": "text",
+          "text": "• ปลีกล่าสุด 38.14",
           "size": "xxs",
           "color": "#6C757D",
           "wrap": true
@@ -601,7 +1036,7 @@
       "contents": [
        {
         "type": "text",
-        "text": "คำทายคืน 21/11",
+        "text": "คำทายคืน 22/11",
         "size": "xs",
         "color": "#6C757D",
         "wrap": true,
@@ -630,7 +1065,7 @@
          },
          {
           "type": "text",
-          "text": "-0.05",
+          "text": "+0.07",
           "size": "sm",
           "color": "#212529",
           "wrap": true,
@@ -672,7 +1107,7 @@
          },
          {
           "type": "text",
-          "text": "-0.05",
+          "text": "+0.08",
           "size": "sm",
           "color": "#212529",
           "wrap": true,
@@ -697,7 +1132,7 @@
        },
        {
         "type": "text",
-        "text": "ผลจริงสะสมตั้งแต่ 23/10 (25/40 วัน)",
+        "text": "ผลจริงสะสมตั้งแต่ 23/10 (26/40 วัน)",
         "size": "xs",
         "color": "#6C757D",
         "wrap": true,
