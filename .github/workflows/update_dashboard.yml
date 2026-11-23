@@ -21,6 +21,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
 
     steps:
       - name: Checkout code
@@ -41,6 +42,7 @@ jobs:
           SA_EMAIL: ${{ secrets.SA_EMAIL }}
           SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
         run: python ingest.py
+        timeout-minutes: 15
         # ไม่ให้การดึงข้อมูลล้มเหลว (เว็บแหล่งข้อมูลล่ม, รูปแบบเปลี่ยน ฯลฯ) ไปบล็อกการอัปเดต
         # dashboard จากข้อมูลที่มีอยู่แล้ว — แต่ step นี้จะยังโชว์ว่าล้มเหลวใน Actions UI ให้เห็น
         continue-on-error: true
@@ -51,6 +53,7 @@ jobs:
           SA_PRIVATE_KEY: ${{ secrets.SA_PRIVATE_KEY }}
           OILPRICEAPI_KEY: ${{ secrets.OILPRICEAPI_KEY }}
         run: python fetch_wti.py
+        timeout-minutes: 5
         continue-on-error: true
 
       - name: Generate daily news summary (DeepSeek API) into the sheet
@@ -60,6 +63,7 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL }}
         run: python news.py
+        timeout-minutes: 5
         continue-on-error: true
 
       - name: Build dashboard

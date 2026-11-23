@@ -6,6 +6,20 @@ from datetime import datetime, timedelta
 import jwt
 import requests
 
+
+class _http:
+    """requests ที่มีเวลาหมดเสมอ : ไม่มี timeout = การเชื่อมต่อที่ค้างทำให้ workflow ค้างจนหมดเวลา (23/11/2026 รอบ 20:45 ค้าง 45 นาที)"""
+    TIMEOUT = 60
+
+    @staticmethod
+    def _call(method, *a, **kw):
+        kw.setdefault("timeout", _http.TIMEOUT)
+        return getattr(requests, method)(*a, **kw)        # อ้างถึงตอนเรียก : เทสต์ที่ mock common.requests.get ยังใช้ได้
+
+    get = staticmethod(lambda *a, **kw: _http._call("get", *a, **kw))
+    post = staticmethod(lambda *a, **kw: _http._call("post", *a, **kw))
+    put = staticmethod(lambda *a, **kw: _http._call("put", *a, **kw))
+
 SHEET_ID = "1JNrYTJtmgpOGjdfhIdJKz15i8Jxp-u8r1UFAXuQRs8s"
 OILBOT_SHEET_ID = "1rxd2vQJWZ0pfE1gpFGRJb3Bie0ubdEdQZg241sr6A4U"
 
@@ -60,7 +74,7 @@ def get_token(scope=SHEETS_SCOPE):
         "iat": now, "exp": now + 3600,
     }
     assertion = jwt.encode(token_payload, private_key, algorithm="RS256")
-    resp = requests.post("https://oauth2.googleapis.com/token", data={
+    resp = _http.post("https://oauth2.googleapis.com/token", data={
         "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer", "assertion": assertion,
     })
     resp.raise_for_status()
@@ -68,7 +82,7 @@ def get_token(scope=SHEETS_SCOPE):
 
 
 def sheets_get(tok, spreadsheet_id, rng):
-    r = requests.get(
+    r = _http.get(
         f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{requests.utils.quote(rng)}",
         params={"valueRenderOption": "UNFORMATTED_VALUE"},
         headers={"Authorization": f"Bearer {tok}"},
@@ -80,7 +94,7 @@ def sheets_get(tok, spreadsheet_id, rng):
 def sheets_append(tok, spreadsheet_id, rng, rows):
     if not rows:
         return
-    r = requests.post(
+    r = _http.post(
         f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{requests.utils.quote(rng)}:append",
         params={"valueInputOption": "USER_ENTERED", "insertDataOption": "INSERT_ROWS"},
         headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
@@ -92,7 +106,7 @@ def sheets_append(tok, spreadsheet_id, rng, rows):
 
 def sheets_update(tok, spreadsheet_id, rng, rows):
     """เขียนทับช่วงที่ระบุตรงๆ (ไม่ใช่เพิ่มแถวใหม่) — ใช้แก้แถวที่เขียนไว้แล้วแต่ค่าไม่ครบ"""
-    r = requests.put(
+    r = _http.put(
         f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{requests.utils.quote(rng)}",
         params={"valueInputOption": "USER_ENTERED"},
         headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
@@ -115,13 +129,13 @@ def excel_serial_to_date(v):
 
 def set_number_format(tok, spreadsheet_id, title, col_from, col_to, pattern="0.000"):
     """ตั้งรูปแบบตัวเลขให้คอลัมน์ (เลขคอลัมน์เริ่ม 0 ; col_to ไม่รวม) ตั้งแต่แถว 2 ลงไป — กันชีทแสดงทศนิยมเป็นวันเวลา (เช่น 0.348 → 1899-12-30 8:21)"""
-    meta = requests.get(f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}",
+    meta = _http.get(f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}",
                         params={"fields": "sheets.properties(sheetId,title)"}, headers={"Authorization": f"Bearer {tok}"})
     meta.raise_for_status()
     sid = next((sh["properties"]["sheetId"] for sh in meta.json().get("sheets", []) if sh["properties"]["title"] == title), None)
     if sid is None:
         return False
-    r = requests.post(f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate",
+    r = _http.post(f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate",
                       headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
                       json={"requests": [{"repeatCell": {
                           "range": {"sheetId": sid, "startRowIndex": 1, "startColumnIndex": col_from, "endColumnIndex": col_to},
@@ -154,13 +168,13 @@ def fmt_date_us(d):
 
 def ensure_tab(tok, spreadsheet_id, title):
     """สร้างแท็บถ้ายังไม่มี (idempotent)"""
-    meta = requests.get(
+    meta = _http.get(
         f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}",
         params={"fields": "sheets.properties.title"}, headers={"Authorization": f"Bearer {tok}"})
     meta.raise_for_status()
     if any(sh["properties"]["title"] == title for sh in meta.json().get("sheets", [])):
         return False
-    r = requests.post(
+    r = _http.post(
         f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate",
         headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
         json={"requests": [{"addSheet": {"properties": {"title": title}}}]})
@@ -169,7 +183,7 @@ def ensure_tab(tok, spreadsheet_id, title):
 
 
 def sheets_clear(tok, spreadsheet_id, rng):
-    r = requests.post(
+    r = _http.post(
         f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{requests.utils.quote(rng)}:clear",
         headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}, json={})
     r.raise_for_status()
