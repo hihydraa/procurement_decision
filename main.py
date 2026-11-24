@@ -742,7 +742,7 @@ def _dispatch_card(label_th, d):
 
 def build_alert_readiness(log: pd.DataFrame, summary, lead: int) -> str:
     """ความพร้อมแจ้งเตือนต่อชนิด/ช่วง (เกณฑ์ใน engine.alert_status) — แสดงเฉพาะสถานะ ไม่มีการส่งข้อความใด ๆ"""
-    names = {"D15": "บ่าย 15:30", "D20": "ค่ำ 20:30"}
+    names = {"D12": "บ่าย 12:00", "D15": "บ่าย 15:30", "D20": "ค่ำ 20:30"}
     items = []
     for fk in FUEL_CONFIG:
         fuel = engine.FUEL_KEY[fk]
@@ -755,28 +755,33 @@ def build_alert_readiness(log: pd.DataFrame, summary, lead: int) -> str:
             f"ต้องมีผลจริง ≥ {engine.ALERT_MIN_DAYS} วันและผ่านเกณฑ์ความแม่นยำก่อน)<ul>{''.join(items)}</ul></div>")
 
 
+DISPATCH_LIVE_WINDOWS = ("D12", "D15", "D20", "D06")
+DISPATCH_WINDOW_LABEL = {"D06": "เช้า 06:00–12:00", "D12": "บ่าย 12:00–15:30", "D15": "บ่าย 15:30–20:30", "D20": "ค่ำ 20:30 ขึ้นไป"}
+
+
 def build_dispatch_live(log: pd.DataFrame, lead: int, summary=None) -> str:
     """ผลทดสอบเดินหน้าของแผนส่งรถ (นับจากวันที่เริ่มบันทึก) — ยังไม่ครบ MIN_DISPATCH_LIVE วันจะบอกว่ากำลังสะสม ไม่สรุปว่าแม่น"""
     names = {"URGENT": "เร่งส่ง", "GRADUAL": "ทยอยส่ง", "NORMAL": "ส่งปกติ", "WAIT": "ชะลอ"}
     rows, any_data = [], False
     for fk in FUEL_CONFIG:
         fuel = engine.FUEL_KEY[fk]
-        st = engine.dispatch_live_stats(log, fuel, lead)
-        if not st:
-            rows.append(f"<tr><td>{html_escape(FUEL_CONFIG[fk]['label_th'])}</td><td colspan='4'>ยังไม่มีบันทึก</td></tr>")
-            continue
-        any_data = True
-        if st["n"] < engine.MIN_DISPATCH_LIVE:
-            rows.append(f"<tr><td>{html_escape(FUEL_CONFIG[fk]['label_th'])}</td><td colspan='4'>กำลังสะสมผล: มีผลลัพธ์แล้ว {st['n']} วัน "
-                        f"(รอผลอีก {st['pending']}) ต้องครบ {engine.MIN_DISPATCH_LIVE} วันก่อนสรุป</td></tr>")
-            continue
-        acts = " ".join(f"{names[c]} {a['n']} ครั้ง (แพงขึ้นจริง {a['rise_rate']:.0%}/ถูกลงจริง {a['fall_rate']:.0%})"
-                        for c, a in st["by_action"].items() if c in names)
-        rows.append(f"<tr><td>{html_escape(FUEL_CONFIG[fk]['label_th'])}</td><td>{st['n']} วัน</td><td>{html_escape(acts)}</td>"
-                    f"<td>{st['avg_gain_per_day']:+.3f}</td><td>{st['total_gain']:+.1f}</td></tr>")
+        # แยกตามช่วงที่ออกคำแนะนำ (เจ้าของระบบ 24/11/2026) : หน้างานตัดสินใจช่วง 10:00–20:00 จึงต้องเห็นผลช่วงบ่ายแยกจากช่วงค่ำ
+        for win in DISPATCH_LIVE_WINDOWS:
+            label = f"{FUEL_CONFIG[fk]['label_th']} · {DISPATCH_WINDOW_LABEL[win]}"
+            st = engine.dispatch_live_stats(log, fuel, lead, win)
+            if not st:
+                rows.append(f"<tr><td>{html_escape(label)}</td><td colspan='4'>ยังไม่มีบันทึก</td></tr>")
+                continue
+            any_data = True
+            acts = " ".join(f"{names[c]} {a['n']} ครั้ง (แพงขึ้นจริง {a['rise_rate']:.0%}/ถูกลงจริง {a['fall_rate']:.0%})"
+                            for c, a in st["by_action"].items() if c in names)
+            gain = (f"<td>{st['avg_gain_per_day']:+.3f}</td><td>{st['total_gain']:+.1f}</td>" if st["avg_gain_per_day"] is not None
+                    else "<td>-</td><td>-</td>")
+            wait = f" · กำลังสะสมผล (ต้องครบ {engine.MIN_DISPATCH_LIVE} วันก่อนสรุป)" if st["n"] < engine.MIN_DISPATCH_LIVE else ""
+            rows.append(f"<tr><td>{html_escape(label)}</td><td>{st['n']} วัน{html_escape(wait)}</td><td>{html_escape(acts)}</td>{gain}</tr>")
     note = "" if any_data else "<div class='muted'>เริ่มบันทึกคำแนะนำจริงแล้ว ผลลัพธ์แรกจะออกหลังเวลาถึง+24 ชม. ของคำแนะนำแรก</div>"
     return f"""<div class='dispatch-live'><h3>ผลทดสอบจริง (เริ่มนับตั้งแต่เริ่มบันทึก, ระยะเดินทาง {lead} ชม.)</h3>{note}
-      <div style='overflow-x:auto'><table class='acc-table'><thead><tr><th>ชนิด</th><th>จำนวนวันที่มีผล</th><th>คำแนะนำ → ผลจริง</th>
+      <div style='overflow-x:auto'><table class='acc-table'><thead><tr><th>ชนิด · ช่วงที่ออกคำแนะนำ</th><th>จำนวนวันที่มีผล</th><th>คำแนะนำ → ผลจริง</th>
       <th>กำไรเฉลี่ย บาท/ลิตร/วัน</th><th>กำไรรวม บาท/ลิตร</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div>
       <div class='muted'>กำไร = ถ้าเร่งส่งแล้วราคาที่เวลาถึงถูกกว่าถ้ารอ 1 วัน หรือชะลอแล้วราคาถูกลง ; ส่งปกติ = 0 (เทียบกับทำตามแผนเดิมทุกวัน)</div>
       {build_alert_readiness(log, summary, lead)}</div>"""
@@ -1642,14 +1647,15 @@ def main():
         retail_raw = pd.DataFrame()
     try:                                                   # ข้อมูลเข้าของข้อความไลน์ส่วนตัว (ช่วงทดสอบ ดู line_outlook.py) — ล้มเหลวต้องไม่กระทบหน้าเว็บ
         import line_outlook
-        line_outlook.write_input(outlook, asof, headsup=tables.headsup, fund=tables.fund)
+        disp_inp = line_outlook.dispatch_input(by_lead.get(default_lead), dispatch_log, default_lead) if by_lead else {}
+        line_outlook.write_input(outlook, asof, headsup=tables.headsup, fund=tables.fund, dispatch=disp_inp)
         # ข้อความสำหรับตอบเมื่อพิมพ์ "forecast" ในแชทส่วนตัว (Worker อ่านจาก outlook.json ช่อง line_text) — มีพยากรณ์ราคาขายปลีกต่อท้าย
         pub = json.loads(open("outlook.json", encoding="utf-8").read())
-        pub["line_text"] = line_outlook.build_message(line_outlook.make_input(outlook, asof, tables.headsup), outlook_log, on_demand=True,
+        pub["line_text"] = line_outlook.build_message(line_outlook.make_input(outlook, asof, tables.headsup, dispatch=disp_inp), outlook_log, on_demand=True,
                                                       retail=PS.prep_retail(retail_raw))[0]
         try:                                               # การ์ด Flex ของคำสั่ง forecast (ล้มเหลว = Worker ใช้ line_text แทน)
             import line_flex
-            flex = line_flex.build_flex(line_outlook.make_input(outlook, asof, tables.headsup), outlook_log, PS.prep_retail(retail_raw), on_demand=True)
+            flex = line_flex.build_flex(line_outlook.make_input(outlook, asof, tables.headsup, dispatch=disp_inp), outlook_log, PS.prep_retail(retail_raw), on_demand=True)
             if flex:
                 pub["line_flex"] = flex
         except Exception as e:

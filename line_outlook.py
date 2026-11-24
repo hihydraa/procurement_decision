@@ -46,7 +46,7 @@ FOOTER = "[ทดสอบ] ยังไม่ผ่านเกณฑ์ผล�
 
 
 # ---------- ข้อมูลเข้าจาก main.py ----------
-def make_input(outlook: dict, asof, headsup: pd.DataFrame = None, fund: pd.DataFrame = None) -> dict:
+def make_input(outlook: dict, asof, headsup: pd.DataFrame = None, fund: pd.DataFrame = None, dispatch: dict = None) -> dict:
     """ย่อผลของ engine.decide_outlook ให้เหลือเฉพาะที่ข้อความใช้ (ช่วง 24 ชม.) — เขียนเป็นไฟล์ให้ขั้นส่งอ่าน"""
     fuels = {}
     for d in outlook.values():
@@ -64,12 +64,102 @@ def make_input(outlook: dict, asof, headsup: pd.DataFrame = None, fund: pd.DataF
         out["notices"] = notices(headsup, asof)
     if fund is not None:
         out["fund"] = fund_notice(fund, outlook, asof)
+    if dispatch is not None:
+        out["dispatch"] = dispatch
     return out
 
 
-def write_input(outlook: dict, asof, path: str = INPUT_FILE, headsup: pd.DataFrame = None, fund: pd.DataFrame = None) -> None:
+def write_input(outlook: dict, asof, path: str = INPUT_FILE, headsup: pd.DataFrame = None, fund: pd.DataFrame = None,
+                dispatch: dict = None) -> None:
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump(make_input(outlook, asof, headsup, fund), fh, ensure_ascii=False, indent=1)
+        json.dump(make_input(outlook, asof, headsup, fund, dispatch), fh, ensure_ascii=False, indent=1)
+
+
+# ---------- แผนส่งรถช่วงบ่าย (engine.decide_dispatch) : ตรงกับเวลาที่หน้างานตัดสินใจจริง (ดูราคา/PO 10:00–18:00 , สั่งคนขับ 15:00–20:00) ----------
+DISPATCH_PM_WINDOWS = ("D12", "D15")          # 12:00–15:30 และ 15:30–20:30 ; หลัง 20:30 ใช้การ์ด "ควรโหลดเมื่อไร" แทน
+DISPATCH_WINDOW_NAME = {"D06": "เช้า", "D12": "12:00–15:30", "D15": "15:30–20:30", "D20": "หลัง 20:30"}
+DISPATCH_VERDICT = {"URGENT": "⚡ เร่งส่งรถ", "GRADUAL": "↗ ทยอยส่ง", "NORMAL": "➖ ส่งตามแผน", "WAIT": "⏸ ชะลอได้"}
+DISPATCH_ALERT_WINDOW = "D15"                 # แจ้งเตือนเข้าไลน์ส่วนตัวราว 15:45 (Worker สั่งรันแดชบอร์ด 15:45) ครั้งเดียวต่อวัน
+DISPATCH_ALERT_UNTIL = "19:00"                # หลังจากนี้รถส่วนใหญ่ออกแล้ว ไม่ส่ง (รอบที่ GitHub เลื่อนมาช้า)
+
+
+def dispatch_input(decisions: dict, log: pd.DataFrame, lead: int) -> dict:
+    """ย่อผล engine.decide_dispatch (ระยะเดินทาง lead) + ผลจริงของช่วงเดียวกันจาก DispatchLog → {fuel: {...}} ; ไม่มีคำแนะนำ = ไม่ใส่"""
+    out = {}
+    for d in (decisions or {}).values():
+        if not d or d.get("action_code") in (None, "NO_DATA") or not d.get("window"):
+            continue
+        st = E.dispatch_live_stats(log, d["fuel"], lead, d["window"])
+        live = None
+        if st:
+            act = lambda c, k: {"n": st["by_action"][c]["n"], "rate": st["by_action"][c][k]} if c in st["by_action"] else None
+            live = {"n": st["n"], "gain": st["avg_gain_per_day"], "urgent": act("URGENT", "rise_rate"), "wait": act("WAIT", "fall_rate")}
+        q = d.get("quality") or {}
+        out[d["fuel"]] = {"window": d["window"], "lead": int(d.get("lead") or lead), "asof": pd.Timestamp(d["asof"]).strftime("%Y-%m-%d %H:%M"),
+                          "arrive": pd.Timestamp(d["arrive"]).strftime("%Y-%m-%d %H:%M"), "action_code": d["action_code"],
+                          "raw_action_code": d.get("raw_action_code"), "grade": q.get("grade"), "p_rise": d.get("p_rise"), "p_fall": d.get("p_fall"),
+                          "base_rise": d.get("base_rise"), "base_fall": d.get("base_fall"), "live": live}
+    return out
+
+
+def dispatch_view(x: dict) -> dict:
+    """ข้อความของคำแนะนำส่งรถ 1 ชนิด : {verdict, tone, why, arrive, live} — ใช้ทั้งข้อความตัวอักษร การ์ด Flex และแจ้งเตือน"""
+    code, pr, pf = x["action_code"], x.get("p_rise"), x.get("p_fall")
+    pct = lambda v: "-" if v is None else f"{v:.0%}"
+    base = f" (ปกติ {pct(x['base_rise'])})" if x.get("base_rise") is not None else ""
+    why = {"URGENT": f"ถ้ารอ 1 วัน โอกาสราคา ณ เวลาถึงคลังแพงขึ้น {pct(pr)}{base}",
+           "GRADUAL": f"ถ้ารอ 1 วัน โอกาสแพงขึ้น {pct(pr)}{base} — ทยอยออกราวครึ่งหนึ่งของแผน",
+           "WAIT": f"ถ้ารอ 1 วัน โอกาสถูกลง {pct(pf)} · แพงขึ้น {pct(pr)}",
+           "NORMAL": "ช่วงนี้โมเดลยังไม่แม่นพอจะแนะนำให้เร่งหรือชะลอ" if x.get("grade") == "อ่อน" else "ไม่มีสัญญาณให้เร่งหรือชะลอ"}[code]
+    asof, arrive = pd.Timestamp(x["asof"]), pd.Timestamp(x["arrive"])
+    day = "" if arrive.normalize() == asof.normalize() else f" ({arrive:%d/%m})"
+    lv = x.get("live")
+    if not lv:
+        live = "ผลจริงช่วงนี้: ยังไม่มี"
+    else:
+        parts = [f"ผลจริงช่วง {DISPATCH_WINDOW_NAME.get(x['window'], x['window'])}: {lv['n']} วัน"]
+        if lv.get("gain") is not None:
+            parts.append(f"ได้เปรียบเฉลี่ย {lv['gain']:+.2f} บาท/ลิตร/วัน")
+        a = lv.get({"URGENT": "urgent", "WAIT": "wait"}.get(code, ""))
+        if a:
+            parts.append(f"{'เร่งส่ง' if code == 'URGENT' else 'ชะลอ'} {a['n']} ครั้ง ราคา{'ขึ้น' if code == 'URGENT' else 'ลง'}จริง {a['rate']:.0%}")
+        live = " · ".join(parts)
+    return {"verdict": DISPATCH_VERDICT[code], "tone": {"URGENT": "up", "GRADUAL": "up", "WAIT": "down"}.get(code, "flat"), "why": why,
+            "arrive": f"ออก {asof:%H:%M} ถึงคลังราว {arrive:%H:%M}{day} (เดินทาง {x['lead']} ชม.)", "live": live}
+
+
+def dispatch_pm(inp: dict) -> list:
+    """[(fuel, name, x)] ของคำแนะนำส่งรถช่วงบ่ายที่ออก ณ ข้อมูลนี้"""
+    dp = inp.get("dispatch") or {}
+    return [(fuel, name, dp[fuel]) for fuel, name in FUELS if fuel in dp and dp[fuel].get("window") in DISPATCH_PM_WINDOWS]
+
+
+def dispatch_lines(inp: dict) -> list:
+    rows = dispatch_pm(inp)
+    if not rows:
+        return []
+    out = [f"🚚 ส่งรถตอนนี้ดีไหม [ทดลอง] · ประเมิน {pd.Timestamp(rows[0][2]['asof']):%H:%M} น."]
+    for _, name, x in rows:
+        v = dispatch_view(x)
+        out += [f"{name}: {v['verdict']}", f"   • {v['why']}", f"   • {v['arrive']}", f"   • {v['live']}"]
+    return out + ["(ราคาที่ได้จริง = ราคา ณ เวลารถถึงคลัง เทียบกับออกรถช้าไป 1 วัน)", ""]
+
+
+def dispatch_alert(inp: dict, now: pd.Timestamp) -> tuple:
+    """(ข้อความสั้น, ref_id) เมื่อช่วง 15:30–20:30 ของวันนี้มีชนิดที่แนะนำเร่งส่ง/ชะลอ ; ไม่มี = (None, None) — ส่งครั้งเดียวต่อวัน"""
+    rows = [(fuel, name, x) for fuel, name, x in dispatch_pm(inp)
+            if x["window"] == DISPATCH_ALERT_WINDOW and x["action_code"] in ("URGENT", "WAIT")]
+    if not rows:
+        return None, None
+    asof = pd.Timestamp(rows[0][2]["asof"])
+    if now.normalize() != asof.normalize() or now.strftime("%H:%M") >= DISPATCH_ALERT_UNTIL:
+        return None, None
+    lines = [f"🚚 ส่งรถตอนนี้ดีไหม (ข้อมูล {asof:%H:%M} น. · ทดลอง)"]
+    for _, name, x in rows:
+        v = dispatch_view(x)
+        lines += [f"{name}: {v['verdict']} — {v['why']}", f"   {v['live']}"]
+    lines.append("พิมพ์ forecast เพื่อดูรายละเอียด")
+    return "\n".join(lines), f"dispatch-{asof:%Y%m%d}-{DISPATCH_ALERT_WINDOW}"
 
 
 # ---------- แจ้งเตือนเมื่อมีประกาศกองทุน (เจ้าของระบบ 20/11/2026) ----------
@@ -382,6 +472,32 @@ def live_summary(log: pd.DataFrame) -> list:
             + ([f"ถูก {bar(right / calls)} {right}/{calls}"] if calls else []))
 
 
+def outlook_counts(log: pd.DataFrame, ref_hhmm: str) -> dict | None:
+    """สรุปผลจริงของแนวโน้ม 24 ชม. รอบ ref_hhmm รวมสองชนิด : {days, calls, right, wrong, flat, first} ; ไม่มีผล = None"""
+    calls = right = wrong = flat = days = 0
+    first = None
+    for fuel, _ in FUELS:
+        d = E._outlook_scored(log, fuel, 24, ref_hhmm)
+        if d is None:
+            continue
+        days = max(days, len(d))
+        t0 = pd.to_datetime(d["ref"], errors="coerce").min()
+        first = t0 if first is None else min(first, t0)
+        c = d[d["tier"] != "UNCLEAR"]
+        mv = c["outcome_delta"] * c["tier"].map(lambda t: 1.0 if str(t).startswith("UP") else -1.0)
+        calls, right, wrong = calls + len(c), right + int((mv >= M.OUTLOOK_SMALL).sum()), wrong + int((mv <= -M.OUTLOOK_SMALL).sum())
+        flat += int((mv.abs() < M.OUTLOOK_SMALL).sum())
+    return None if first is None else {"days": days, "calls": calls, "right": right, "wrong": wrong, "flat": flat, "first": first}
+
+
+def pm_summary(log: pd.DataFrame) -> list:
+    """ผลจริงรอบ 15:30 แยกจากรอบ 20:30 (คนละโมเดล) — รอบนี้ตรงกับเวลาตัดสินใจของหน้างาน"""
+    c = outlook_counts(log, "15:30")
+    if not c:
+        return ["รอบ 15:30: ยังไม่มีผลจริง"]
+    return [f"รอบ 15:30 ({c['days']}/{READY_DAYS} วัน): ฟันธง {c['calls']} · ถูก {c['right']} · ผิดทิศ {c['wrong']} · ราคานิ่ง {c['flat']}"]
+
+
 # ---------- ราคาขายปลีก (ทดลอง) : เฉพาะข้อความตอบเมื่อพิมพ์ถาม ----------
 RETAIL_CALL = {"ลง": "📉 น่าจะปรับลง", "ขึ้น": "📈 น่าจะปรับขึ้น", "นิ่ง": "➖ น่าจะไม่ปรับ"}
 RETAIL_NONE = "ยังไม่มีพยากรณ์ของวันถัดไป (ออกหลัง 21:30 น. คืนจันทร์–พฤหัสบดี)"
@@ -452,7 +568,8 @@ def build_message(inp: dict, log: pd.DataFrame, on_demand: bool = False, retail:
     bad = {fuel: usable(fuels.get(fuel), asof, on_demand) for fuel, _ in FUELS}
     ok = [(fuel, name) for fuel, name in FUELS if not bad[fuel]]
     ref_id = f"{asof:%Y-%m-%d} 20:30"
-    lines = ["🛢 พยากรณ์ราคาน้ำมัน"] + advice_lines(inp, ok) + section(("① " if retail is not None else "") + "ราคาส่ง (Jobber) · 24 ชม.ข้างหน้า", "ราคาต่ำสุดที่ผู้ค้าส่งประกาศหน้าคลัง จะขึ้นหรือลง")
+    adv = advice_lines(inp, ok)
+    lines = ["🛢 พยากรณ์ราคาน้ำมัน"] + (adv or (dispatch_lines(inp) if on_demand else [])) + section(("① " if retail is not None else "") + "ราคาส่ง (Jobber) · 24 ชม.ข้างหน้า", "ราคาต่ำสุดที่ผู้ค้าส่งประกาศหน้าคลัง จะขึ้นหรือลง")
     if ok:
         ref = pd.Timestamp(fuels[ok[0][0]]["ref"])
         lines += [f"ข้อมูล {ref:%H:%M} น. {ref:%d/%m} · ใช้ได้ถึง {ref:%H:%M} น. {ref + pd.Timedelta(days=1):%d/%m}"]
@@ -480,7 +597,7 @@ def build_message(inp: dict, log: pd.DataFrame, on_demand: bool = False, retail:
         if ups or downs:
             lines += ["", "สัญญาณคืนนี้"] + ([f"• ชี้ขึ้น: {', '.join(ups[:2])}"] if ups else []) + ([f"• ชี้ลง: {', '.join(downs[:2])}"] if downs else [])
         lines.append("")
-    lines += ["ผลงานที่ผ่านมา (ราคาส่ง Jobber)"] + last_results(log) + [""] + live_summary(log) + [""]
+    lines += ["ผลงานที่ผ่านมา (ราคาส่ง Jobber)"] + last_results(log) + [""] + live_summary(log) + pm_summary(log) + [""]
     if retail is not None:
         lines += retail_lines(retail, asof) + [""]
     lines += [FOOTER]
@@ -559,15 +676,24 @@ def main(argv=None) -> int:
     except Exception as e:                     # noqa: BLE001
         print(f"[LINE] อ่าน RetailFcLog ไม่สำเร็จ: {e}")
     print(build_message(inp, log, retail=retail)[0])                 # ข้อความเต็มพิมพ์ไว้ใน log (คำสั่ง forecast ใช้ outlook.json)
-    text, ref_id = fund_alert(inp)                                   # ส่งเข้าไลน์ส่วนตัวเฉพาะเมื่อมีประกาศกองทุน (เจ้าของระบบ 20/11/2026)
-    if not text:
-        print("[LINE] รอบนี้ไม่มีประกาศกองทุนที่คำทายนับแล้ว — ไม่ส่งแจ้งเตือน")
-        return 0
-    print(text)
     now = pd.Timestamp(datetime.now(ZoneInfo(TZ_NAME)).replace(tzinfo=None))
-    if not dry and now.normalize() != pd.Timestamp(inp["asof"]).normalize():
-        print("[LINE] ไม่ใช่วันเดียวกับข้อมูล — ไม่ส่ง (เช่น รอบที่ GitHub เลื่อนมารันหลังเที่ยงคืน)")
+    alerts = []
+    text, ref_id = fund_alert(inp)                                   # ประกาศกองทุน (เจ้าของระบบ 20/11/2026)
+    if not text:
+        print("[LINE] รอบนี้ไม่มีประกาศกองทุนที่คำทายนับแล้ว")
+    elif not dry and now.normalize() != pd.Timestamp(inp["asof"]).normalize():
+        print("[LINE] ประกาศกองทุน: ไม่ใช่วันเดียวกับข้อมูล — ไม่ส่ง (เช่น รอบที่ GitHub เลื่อนมารันหลังเที่ยงคืน)")
+    else:
+        alerts.append((text, ref_id))
+    text, ref_id = dispatch_alert(inp, now)                          # แผนส่งรถช่วงบ่าย : เร่งส่ง/ชะลอ (เจ้าของระบบ 24/11/2026)
+    if text:
+        alerts.append((text, ref_id))
+    else:
+        print("[LINE] แผนส่งรถช่วง 15:30–19:00: ไม่มีคำแนะนำเร่งส่ง/ชะลอ (หรือนอกเวลา)")
+    if not alerts:
         return 0
+    for text, _ in alerts:
+        print(text)
     token, uid = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", ""), os.environ.get("LINE_TEST_USER_ID", "").strip()
     if dry:
         print("[LINE] --dry : ไม่ส่ง")
@@ -581,12 +707,13 @@ def main(argv=None) -> int:
     if ensure_tab(tok, SHEET_ID, LOG_TAB):
         sheets_update(tok, SHEET_ID, f"{LOG_TAB}!A1", [LOG_COLUMNS])
     sent_rows = sheets_get(tok, SHEET_ID, f"{LOG_TAB}!A1:C5000")
-    if already_sent(sent_rows, ref_id):
-        print(f"[LINE] ส่งของ {ref_id} ไปแล้ว — ไม่ส่งซ้ำ")
-        return 0
-    status = push(text, token, uid)
-    sheets_append(tok, SHEET_ID, f"{LOG_TAB}!A1:D1", [[ref_id, datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y-%m-%d %H:%M"), status, text]])
-    print(f"[LINE] {status}")
+    for text, ref_id in alerts:
+        if already_sent(sent_rows, ref_id):
+            print(f"[LINE] ส่งของ {ref_id} ไปแล้ว — ไม่ส่งซ้ำ")
+            continue
+        status = push(text, token, uid)
+        sheets_append(tok, SHEET_ID, f"{LOG_TAB}!A1:D1", [[ref_id, datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y-%m-%d %H:%M"), status, text]])
+        print(f"[LINE] {ref_id}: {status}")
     return 0
 
 
