@@ -1,6 +1,7 @@
 """
 การ์ด Flex ของไลน์ (carousel 4 ใบ) สร้างจากข้อมูลชุดเดียวกับข้อความตัวอักษรใน line_outlook.py — ตัวเลขทุกตัวมาจากข้อมูลจริง ไม่มีการสร้างภาพ
-  ใบ 1 🧭 ควรโหลดเมื่อไร (เฉพาะคำทายรอบ 20:30)   ใบ 2 🏭 ราคาหน้าคลัง Jobber 24 ชม.
+  ใบ 1 🧭 ควรโหลดเมื่อไร (เฉพาะคำทายรอบ 20:30) — ช่วง 12:00–20:30 ใช้ 🚚 ส่งรถตอนนี้ดีไหม (แผนส่งรถช่วงบ่าย) แทน
+  ใบ 2 🏭 ราคาหน้าคลัง Jobber 24 ชม.
   ใบ 3 ⛽ ราคาขายปลีก (ทดลอง)                      ใบ 4 📊 ผลงานที่ผ่านมา
 สีหัวการ์ดแยกหมวด (หน้าคลัง = น้ำเงิน , ขายปลีก = ม่วง) ; สีในกล่องบอกทิศเหมือนกันทุกหมวด (ส้ม = ขึ้น/รีบ , เขียว = ลง/รอ , เทา = ไม่ชัด)
 ใช้ใน main.py : outlook.json ช่อง line_flex = {"altText", "contents"} ให้ Worker ตอบคำสั่ง forecast (ข้อความตัวอักษร line_text เป็นทางสำรอง)
@@ -15,7 +16,7 @@ import model as M
 
 C = {"up": "#E8590C", "down": "#2B8A3E", "flat": "#868E96", "ink": "#212529", "sub": "#6C757D", "track": "#E9ECEF",
      "bg_up": "#FFF4E6", "bg_down": "#EBFBEE", "bg_flat": "#F1F3F5"}
-THEME = {"advice": ("#343A40", "#FFFFFF"), "jobber": ("#1864AB", "#F1F7FD"), "retail": ("#6741D9", "#F6F3FF"), "perf": ("#495057", "#FFFFFF")}
+THEME = {"advice": ("#343A40", "#FFFFFF"), "dispatch": ("#343A40", "#FFFFFF"), "jobber": ("#1864AB", "#F1F7FD"), "retail": ("#6741D9", "#F6F3FF"), "perf": ("#495057", "#FFFFFF")}
 TIER_SHORT = {"UP_STRONG": "📈📈 ขึ้นแรง ≥40 สต.", "UP": "📈 ขึ้น 10–40 สต.", "DOWN": "📉 ลง 10–40 สต.", "DOWN_STRONG": "📉📉 ลงแรง ≥40 สต.", "UNCLEAR": "❓ ไม่ชัด"}
 RETAIL_TONE = {"ขึ้น": "up", "ลง": "down", "นิ่ง": "flat"}
 MAX_BYTES = 45_000          # เพดานของ LINE ต่อ carousel คือ 50 KB : เกินนี้ไม่ส่งการ์ด (Worker ใช้ข้อความตัวอักษรแทน)
@@ -88,6 +89,23 @@ def advice_bubble(inp: dict, ok: list):
         body.append(txt(f"ออกเมื่อ 20:30 น. {ref:%d/%m} — ช่วงโหลดก่อนราคาขึ้นของคืนนั้นผ่านไปแล้ว", "xxs", C["up"], margin="sm"))
     day = ref + pd.Timedelta(days=1)
     return bubble("advice", "🧭 ควรโหลดเมื่อไร", f"รถที่อยู่คลัง · คืน {ref:%d/%m} หรือบ่าย {day:%d/%m}", body)
+
+
+def dispatch_bubble(inp: dict):
+    """แผนส่งรถช่วงบ่าย (engine.decide_dispatch) — ช่วงที่หน้างานตัดสินใจออกรถจริง ; ใช้ข้อความชุดเดียวกับ line_outlook.dispatch_view"""
+    rows = L.dispatch_pm(inp)
+    if not rows:
+        return None
+    body = []
+    for i, (_, name, x) in enumerate(rows):
+        v = L.dispatch_view(x)
+        body.append(tone_box(v["tone"], [title_row(name, v["verdict"], v["tone"]), txt(v["why"], "xxs", C["sub"], margin="sm"),
+                                         txt(v["arrive"], "xxs", C["sub"]), txt(v["live"], "xxs", C["ink"], margin="sm")],
+                             "none" if i == 0 else "md"))
+    body.append(txt("ราคาที่ได้จริง = ราคา ณ เวลารถถึงคลัง เทียบกับออกรถช้าไป 1 วัน · ไม่รวมโควตาและเวลาตัดรับออเดอร์ของคลัง",
+                    "xxs", C["sub"], margin="md"))
+    asof = pd.Timestamp(rows[0][2]["asof"])
+    return bubble("dispatch", "🚚 ส่งรถตอนนี้ดีไหม", f"ประเมิน {asof:%H:%M} น. {asof:%d/%m} · ระยะเดินทาง {rows[0][2]['lead']} ชม.", body)
 
 
 def jobber_bubble(inp: dict, bad: dict, on_demand: bool):
@@ -194,13 +212,14 @@ def perf_bubble(log: pd.DataFrame):
     stat = lambda v, label, col: {"type": "box", "layout": "vertical", "contents": [txt(v, "xxl", col, bold=True, align="center"),
                                                                                      txt(label, "xxs", C["sub"], align="center")]}
     body += [{"type": "separator", "margin": "lg"},
-             txt(f"ผลจริงสะสมตั้งแต่ {first:%d/%m} ({days}/{L.READY_DAYS} วัน)", "xs", C["sub"], bold=True, margin="lg"),
+             txt(f"รอบ 20:30 · ผลจริงสะสมตั้งแต่ {first:%d/%m} ({days}/{L.READY_DAYS} วัน)", "xs", C["sub"], bold=True, margin="lg"),
              {"type": "box", "layout": "horizontal", "margin": "md", "contents": [
                  stat(str(calls), "ฟันธง", C["ink"]), stat(str(right), "ถูก", C["down"]), stat(str(wrong), "ผิดทิศ", C["up"]), stat(str(flat), "ราคานิ่ง", C["flat"])]}]
     if calls:
         body.append(bar("ถูก", right / calls, C["down"]))
+    body += [{"type": "separator", "margin": "lg"}, txt(L.pm_summary(log)[0], "xs", C["sub"], bold=True, margin="lg")]
     body.append(txt(f"เกณฑ์ก่อนใช้จริง: ผลจริงครบ {L.READY_DAYS} วัน", "xxs", C["sub"], margin="md"))
-    return bubble("perf", "📊 ผลงานที่ผ่านมา", "ราคาหน้าคลัง Jobber · รอบ 20:30 · 24 ชม.", body)
+    return bubble("perf", "📊 ผลงานที่ผ่านมา", "ราคาหน้าคลัง Jobber · 24 ชม. · ตัวเลขหลัก = รอบ 20:30", body)
 
 
 # ---------- รวม ----------
@@ -217,6 +236,7 @@ def build_flex(inp: dict, log: pd.DataFrame, retail: pd.DataFrame = None, on_dem
     asof = pd.Timestamp(inp["asof"])
     bad = {fuel: L.usable((inp.get("fuels") or {}).get(fuel), asof, on_demand) for fuel, _ in L.FUELS}
     ok = [(fuel, name) for fuel, name in L.FUELS if not bad[fuel]]
-    bubbles = [b for b in (advice_bubble(inp, ok), jobber_bubble(inp, bad, on_demand), retail_bubble(retail, asof), perf_bubble(log)) if b]
+    first = advice_bubble(inp, ok) or dispatch_bubble(inp)
+    bubbles = [b for b in (first, jobber_bubble(inp, bad, on_demand), retail_bubble(retail, asof), perf_bubble(log)) if b]
     out = {"altText": alt_text(inp, bad), "contents": {"type": "carousel", "contents": bubbles}}
     return out if len(json.dumps(out, ensure_ascii=False).encode("utf-8")) <= MAX_BYTES else None
