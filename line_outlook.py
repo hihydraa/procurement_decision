@@ -309,6 +309,14 @@ def _reasons(reasons: list, mark: str, k: int) -> list:
     return [_strip(r) for r in reasons if mark in r][:k]
 
 
+def early_note(inp: dict, ref: pd.Timestamp) -> str:
+    """คำทายรอบ 20:30 ที่ออกก่อน 20:30 (ประกาศกองทุนออกแล้ว) : บอกว่าใช้ข้อมูลถึงเวลาไหน และจะอัปเดตเมื่อไร ; ไม่ใช่กรณีนี้ = ''"""
+    asof = pd.Timestamp(inp["asof"])
+    if asof >= ref or asof.normalize() != ref.normalize():
+        return ""
+    return f"ออกล่วงหน้าเพราะประกาศกองทุนออกแล้ว · ใช้ข้อมูลถึง {asof:%H:%M} น. · อัปเดตอีกครั้งหลัง 20:30 น."
+
+
 def usable(f: dict, asof: pd.Timestamp, on_demand: bool = False) -> str:
     """'' ถ้าใช้ส่งได้ ; ไม่งั้นคืนเหตุผล — ข้อความประจำคืน : ต้องเป็นคำทายจากข้อมูล 20:30 ของวันนี้ ไม่ค้าง และมีผลช่วง 24 ชม.
     on_demand (ตอบเมื่อพิมพ์ถาม) : ใช้คำทายล่าสุดที่ยังไม่หมดอายุ 24 ชม. ได้ (เช่น ของเมื่อคืน หรือรอบบ่าย 15:30)"""
@@ -318,7 +326,8 @@ def usable(f: dict, asof: pd.Timestamp, on_demand: bool = False) -> str:
     if f.get("h24") is None:
         return f.get("note") or "ระบบยังไม่ให้แนวโน้ม (ข้อมูลไม่พร้อม)"
     if on_demand:
-        return "" if pd.Timedelta(0) <= asof - ref < pd.Timedelta(hours=24) else f"คำทายล่าสุด ({ref:%d/%m %H:%M}) หมดอายุแล้ว"
+        early = asof < ref and asof.normalize() == ref.normalize()   # ประกาศกองทุนออกก่อน 20:30 → ทายรอบคืนนี้ล่วงหน้า (engine.outlook_source)
+        return "" if early or pd.Timedelta(0) <= asof - ref < pd.Timedelta(hours=24) else f"คำทายล่าสุด ({ref:%d/%m %H:%M}) หมดอายุแล้ว"
     if ref.strftime("%H:%M") != "20:30" or ref.normalize() != asof.normalize() or f.get("stale"):
         return f"ยังไม่มีข้อมูลรอบ 20:30 ของวันนี้ (ล่าสุด {ref:%d/%m %H:%M})"
     return ""
@@ -575,6 +584,8 @@ def build_message(inp: dict, log: pd.DataFrame, on_demand: bool = False, retail:
         lines += [f"ข้อมูล {ref:%H:%M} น. {ref:%d/%m} · ใช้ได้ถึง {ref:%H:%M} น. {ref + pd.Timedelta(days=1):%d/%m}"]
         if ref.strftime("%H:%M") != "20:30":
             lines.append("(รอบบ่าย: มีผลจริงเพียงไม่กี่วัน เชื่อถือได้น้อยกว่ารอบ 20:30)")
+        if early_note(inp, ref):
+            lines.append(f"({early_note(inp, ref)})")
         lines.append("")
     else:
         lines += [("ตอนนี้" if on_demand else f"คืนนี้ ({asof:%d/%m})") + " ไม่มีคำทาย", ""]

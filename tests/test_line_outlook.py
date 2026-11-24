@@ -541,3 +541,38 @@ class TestAlertModeTest(unittest.TestCase):
         self.assertIn("กองทุน: ดีเซล +0.41 (ดันราคาขึ้น) · เบนซิน +0.07 (ดันราคาขึ้น)", lines)
         self.assertNotIn("ผลพยากรณ์อัปเดตแล้ว", text)
         self.assertIsNone(L.latest_fund([]))
+
+
+def _texts(node, out=None):
+    out = [] if out is None else out
+    if isinstance(node, dict):
+        if node.get("type") == "text":
+            out.append(node)
+        for v in node.values():
+            _texts(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            _texts(v, out)
+    return out
+
+
+class EarlyFundRoundTest(unittest.TestCase):
+    """24/11/2026 : ประกาศกองทุน 19:20 → คำทายรอบคืนนี้ (อ้างอิง 20:30) ออก 19:22 แต่คำสั่ง forecast ขึ้นว่า "หมดอายุแล้ว" """
+    def test_on_demand_shows_early_round(self):
+        inp = _inp(asof="2026-11-24 19:22", ref="2026-11-24 20:30")
+        self.assertEqual(L.usable(inp["fuels"]["B7"], pd.Timestamp("2026-11-24 19:22"), on_demand=True), "")
+        text = L.build_message(inp, _log(), on_demand=True)[0]
+        self.assertIn("ดีเซล: 📈 ขึ้น", text)
+        self.assertIn("(ออกล่วงหน้าเพราะประกาศกองทุนออกแล้ว · ใช้ข้อมูลถึง 19:22 น. · อัปเดตอีกครั้งหลัง 20:30 น.)", text)
+        self.assertNotIn("หมดอายุ", text)
+        # วันก่อนหน้า / หลัง 20:30 ไม่มีหมายเหตุ ; คำทายของวันพรุ่งนี้ (ไม่ควรเกิด) ไม่ถือว่าใช้ได้
+        self.assertEqual(L.early_note(_inp(), pd.Timestamp("2026-11-12 20:30")), "")
+        self.assertNotEqual(L.usable(inp["fuels"]["B7"], pd.Timestamp("2026-11-23 19:22"), on_demand=True), "")
+
+    def test_flex_shows_early_round(self):
+        import line_flex as F
+        flex = F.build_flex(_inp(asof="2026-11-24 19:22", ref="2026-11-24 20:30"), _log(), None)
+        car = flex["contents"]["contents"]
+        self.assertEqual(car[0]["header"]["contents"][0]["text"], "🧭 ควรโหลดเมื่อไร")
+        texts = [n["text"] for n in _texts(flex)]
+        self.assertIn("ออกล่วงหน้าเพราะประกาศกองทุนออกแล้ว · ใช้ข้อมูลถึง 19:22 น. · อัปเดตอีกครั้งหลัง 20:30 น.", texts)

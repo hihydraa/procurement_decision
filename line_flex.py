@@ -136,6 +136,8 @@ def jobber_bubble(inp: dict, bad: dict, on_demand: bool):
            else ("ตอนนี้" if on_demand else f"คืนนี้ ({pd.Timestamp(inp['asof']):%d/%m})") + " ไม่มีคำทาย")
     if ref is not None and ref.strftime("%H:%M") != "20:30":
         body.append(txt("รอบบ่าย: มีผลจริงเพียงไม่กี่วัน เชื่อถือได้น้อยกว่ารอบ 20:30", "xxs", C["up"], margin="md"))
+    if ref is not None and L.early_note(inp, ref):
+        body.append(txt(L.early_note(inp, ref), "xxs", C["up"], margin="md"))
     return bubble("jobber", "🏭 ราคาหน้าคลัง (Jobber) · 24 ชม.", sub, body)
 
 
