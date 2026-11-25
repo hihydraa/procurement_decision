@@ -1648,14 +1648,18 @@ def main():
     try:                                                   # ข้อมูลเข้าของข้อความไลน์ส่วนตัว (ช่วงทดสอบ ดู line_outlook.py) — ล้มเหลวต้องไม่กระทบหน้าเว็บ
         import line_outlook
         disp_inp = line_outlook.dispatch_input(by_lead.get(default_lead), dispatch_log, default_lead) if by_lead else {}
-        line_outlook.write_input(outlook, asof, headsup=tables.headsup, fund=tables.fund, dispatch=disp_inp)
+        prices_now = {}
+        for fuel in ("B7", "G95"):                         # ราคาล่าสุดต่อ (ผู้ค้า|คลัง) ณ asof : ใช้ประมาณราคาต่ำสุดตลาดหลังการปรับที่ประกาศ
+            kp = tables.known(fuel)
+            prices_now[fuel] = kp.latest(kp.snapshot(asof), asof).to_dict() if not kp.empty else {}
+        line_outlook.write_input(outlook, asof, headsup=tables.headsup, fund=tables.fund, dispatch=disp_inp, prices_now=prices_now)
         # ข้อความสำหรับตอบเมื่อพิมพ์ "forecast" ในแชทส่วนตัว (Worker อ่านจาก outlook.json ช่อง line_text) — มีพยากรณ์ราคาขายปลีกต่อท้าย
         pub = json.loads(open("outlook.json", encoding="utf-8").read())
-        pub["line_text"] = line_outlook.build_message(line_outlook.make_input(outlook, asof, tables.headsup, dispatch=disp_inp), outlook_log, on_demand=True,
+        pub["line_text"] = line_outlook.build_message(line_outlook.make_input(outlook, asof, tables.headsup, dispatch=disp_inp, prices_now=prices_now), outlook_log, on_demand=True,
                                                       retail=PS.prep_retail(retail_raw))[0]
         try:                                               # การ์ด Flex ของคำสั่ง forecast (ล้มเหลว = Worker ใช้ line_text แทน)
             import line_flex
-            flex = line_flex.build_flex(line_outlook.make_input(outlook, asof, tables.headsup, dispatch=disp_inp), outlook_log, PS.prep_retail(retail_raw), on_demand=True)
+            flex = line_flex.build_flex(line_outlook.make_input(outlook, asof, tables.headsup, dispatch=disp_inp, prices_now=prices_now), outlook_log, PS.prep_retail(retail_raw), on_demand=True)
             if flex:
                 pub["line_flex"] = flex
         except Exception as e:

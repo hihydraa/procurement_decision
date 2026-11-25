@@ -46,7 +46,8 @@ FOOTER = "[ทดสอบ] ยังไม่ผ่านเกณฑ์ผล�
 
 
 # ---------- ข้อมูลเข้าจาก main.py ----------
-def make_input(outlook: dict, asof, headsup: pd.DataFrame = None, fund: pd.DataFrame = None, dispatch: dict = None) -> dict:
+def make_input(outlook: dict, asof, headsup: pd.DataFrame = None, fund: pd.DataFrame = None, dispatch: dict = None,
+               prices_now: dict = None) -> dict:
     """ย่อผลของ engine.decide_outlook ให้เหลือเฉพาะที่ข้อความใช้ (ช่วง 24 ชม.) — เขียนเป็นไฟล์ให้ขั้นส่งอ่าน"""
     fuels = {}
     for d in outlook.values():
@@ -66,13 +67,15 @@ def make_input(outlook: dict, asof, headsup: pd.DataFrame = None, fund: pd.DataF
         out["fund"] = fund_notice(fund, outlook, asof)
     if dispatch is not None:
         out["dispatch"] = dispatch
+    if prices_now is not None:                       # {fuel: {"ผู้ค้า|คลัง": ราคา ณ asof}} ใช้ประมาณราคาต่ำสุดตลาดหลังการปรับที่ประกาศ
+        out["prices_now"] = {f: {str(k): float(v) for k, v in (s or {}).items()} for f, s in prices_now.items()}
     return out
 
 
 def write_input(outlook: dict, asof, path: str = INPUT_FILE, headsup: pd.DataFrame = None, fund: pd.DataFrame = None,
-                dispatch: dict = None) -> None:
+                dispatch: dict = None, prices_now: dict = None) -> None:
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump(make_input(outlook, asof, headsup, fund, dispatch), fh, ensure_ascii=False, indent=1)
+        json.dump(make_input(outlook, asof, headsup, fund, dispatch, prices_now), fh, ensure_ascii=False, indent=1)
 
 
 # ---------- แผนส่งรถช่วงบ่าย (engine.decide_dispatch) : ตรงกับเวลาที่หน้างานตัดสินใจจริง (ดูราคา/PO 10:00–18:00 , สั่งคนขับ 15:00–20:00) ----------
@@ -298,6 +301,103 @@ def pending_rise(inp: dict, fuel: str) -> dict | None:
     amts = [parse_rates(n["rates"]).get(grp) for n in hits if parse_rates(n["rates"]).get(grp) is not None]
     whens = sorted((n["stated"] for n in hits if n["stated"]), key=lambda t: (t < "12:00", t))      # 23:30 มาก่อน 00:00 ของวันถัดไป
     return {"amt": max(amts) if amts else None, "when": whens[0] if whens else ""}
+
+
+# ---------- การปรับราคาที่ผู้ค้าประกาศแล้วสำหรับคืนนี้ (แน่นอน) แยกจากคำทาย 24 ชม. (เจ้าของระบบ 25/11/2026) ----------
+# ชื่อผู้ค้าในตารางราคา (ชื่อมาตรฐาน) → รหัสในประกาศล่วงหน้า (HeadsUp) ; BSRC ต้องตรวจก่อน "บางจาก" เพราะชื่อมี "บางจาก (BSRC)"
+PROVIDER_CODES = (("BSRC", ("BSRC", "เอสโซ่", "ESSO")), ("IRPC", ("ไออาร์", "IRPC")), ("SFL", ("สตาร์", "ดาว", "SFL")),
+                  ("PTT", ("ปตท", "PTT")), ("BC", ("บางจาก", "BCP", "BC")), ("SHELL", ("เชลล์", "SHELL")))
+
+
+TONIGHT_FROM_HOUR = 15         # ผู้ค้าประกาศการปรับของคืนนั้นช่วง ~15:00–21:00
+
+
+def provider_code(name: str) -> str:
+    n = str(name or "").upper()
+    return next((code for code, keys in PROVIDER_CODES if any(k.upper() in n for k in keys)), "")
+
+
+def tonight_change(inp: dict, fuel: str) -> dict | None:
+    """การปรับที่ประกาศแล้วและยังไม่มีผล ณ asof ของชนิดนี้ :
+    {dir: UP/DOWN/MIX, lo, hi (เรทต่ำสุด/สูงสุดที่ระบุ), first, last (เวลามีผล), n (จำนวนเจ้า), n_norate, now, after, after_note}
+    now/after = ราคาต่ำสุดตลาดตอนนี้ / หลังปรับ (≈ ราคาปัจจุบันของแต่ละผู้ค้า|คลัง + เรทที่ผู้ค้านั้นประกาศ) ; ไม่มีประกาศ = None"""
+    grp = FUEL_GROUP[fuel]
+    if pd.Timestamp(inp["asof"]).hour < TONIGHT_FROM_HOUR:      # ช่วงเช้า–บ่าย ประกาศมักเป็นการปรับระหว่างวัน ไม่ใช่ "คืนนี้"
+        return None
+    hits = [n for n in (inp.get("notices") or []) if n["pending"] and (n["scope"] in ("ALL", grp) or grp in parse_rates(n["rates"]))]
+    if not hits:
+        return None
+    rate = {}
+    for n in hits:
+        r = parse_rates(n["rates"]).get(grp)
+        if r is not None:
+            r = abs(r) if n["dir"] == "UP" else -abs(r)
+        rate.setdefault(n["provider"], []).append(r)
+    known = [x for v in rate.values() for x in v if x is not None]
+    whens = sorted((n["stated"] for n in hits if n["stated"]), key=lambda t: (t < "12:00", t))
+    dirs = {n["dir"] for n in hits}
+    out = {"dir": dirs.pop() if len(dirs) == 1 else "MIX", "lo": min(known) if known else None, "hi": max(known) if known else None,
+           "first": whens[0] if whens else "", "last": whens[-1] if whens else "", "n": len({n["provider"] for n in hits}),
+           "n_norate": sum(1 for v in rate.values() if all(x is None for x in v)), "now": None, "after": None, "after_note": ""}
+    prices = (inp.get("prices_now") or {}).get(fuel) or {}
+    if prices:
+        code_rate = {}
+        for prov, v in rate.items():
+            c = provider_code(prov)
+            if not c:                                 # ประกาศที่ไม่รู้ชื่อผู้ค้า : นับในช่วงเรท แต่จับคู่กับราคาไม่ได้
+                continue
+            vals = [x for x in v if x is not None]
+            code_rate[c] = max(vals, key=abs) if vals else None
+        now = min(prices.values())
+        after, unknown = [], set()
+        for key, p in prices.items():
+            c = provider_code(key.split("|")[0])
+            if not c:
+                after.append(p)
+            elif c in code_rate and code_rate[c] is None:
+                unknown.add(c)
+                after.append(p)                      # ยังไม่แจ้งเรท : ใช้ราคาเดิม (ขอบล่าง)
+            else:
+                after.append(p + (code_rate.get(c) or 0.0))
+        out["now"], out["after"] = round(now, 2), round(min(after), 2)
+        notes = []
+        if unknown:
+            notes.append(f"ไม่รวมเรทของ {', '.join(sorted(unknown))} ที่ยังไม่แจ้ง")
+        if any(c not in {provider_code(k.split('|')[0]) for k in prices} for c in code_rate if c):
+            notes.append("บางเจ้าที่ประกาศไม่มีราคาในระบบ")
+        out["after_note"] = " · ".join(notes)
+    return out
+
+
+TONIGHT_ARROW = {"UP": "⬆ ขึ้น", "DOWN": "⬇ ลง", "MIX": "↕ ขึ้นและลง"}
+
+
+def tonight_view(name: str, c: dict) -> list:
+    """['ดีเซล ⬆ ขึ้น +0.43 ถึง +2.00 · 23:30–00:00 น. (4 เจ้า)', '≈ ราคาต่ำสุดตลาดหลังปรับ ...']"""
+    if c["lo"] is None:
+        size = "ยังไม่แจ้งเรท"
+    elif abs(c["hi"] - c["lo"]) < 0.005:
+        size = f"{c['hi']:+.2f}"
+    else:
+        size = f"{c['lo']:+.2f} ถึง {c['hi']:+.2f}"
+    when = c["first"] if c["first"] == c["last"] else f"{c['first']}–{c['last']}"
+    head = f"{name} {TONIGHT_ARROW[c['dir']]} {size}" + (f" · {when} น." if when else "") + f" ({c['n']} เจ้า)"
+    lines = [head]
+    if c["now"] is not None and c["after"] is not None:
+        lines.append(f"≈ ราคาต่ำสุดตลาดหลังปรับ {c['now']:.2f} → {c['after']:.2f} ({c['after'] - c['now']:+.2f}) [ประมาณจากเรทที่ประกาศ"
+                     + (f" · {c['after_note']}" if c["after_note"] else "") + "]")
+    return lines
+
+
+def tonight_lines(inp: dict) -> list:
+    rows = [(name, c) for fuel, name in FUELS if (c := tonight_change(inp, fuel))]
+    if not rows:
+        return []
+    out = ["คืนนี้ตามประกาศของผู้ค้า (ยังไม่มีผล)"]
+    for name, c in rows:
+        v = tonight_view(name, c)
+        out += [v[0]] + [f"   {x}" for x in v[1:]]
+    return out + [""]
 
 
 # ---------- ข้อความ ----------
@@ -603,8 +703,12 @@ def build_message(inp: dict, log: pd.DataFrame, on_demand: bool = False, retail:
     ref_id = f"{asof:%Y-%m-%d} 20:30"
     adv = advice_lines(inp, ok)
     lines = ["🛢 พยากรณ์ราคาน้ำมัน"] + (adv or (dispatch_lines(inp) if on_demand else [])) + section(("① " if retail is not None else "") + "ราคาส่ง (Jobber) · 24 ชม.ข้างหน้า", "ราคาต่ำสุดที่ผู้ค้าส่งประกาศหน้าคลัง จะขึ้นหรือลง")
+    tonight = tonight_lines(inp)
+    lines += tonight
     if ok:
         ref = pd.Timestamp(fuels[ok[0][0]]["ref"])
+        if tonight:
+            lines.append(f"พยากรณ์ถึง {ref:%H:%M} น. {ref + pd.Timedelta(days=1):%d/%m} (หลังการปรับข้างบน ผู้ค้าอาจปรับต่อระหว่างวัน)")
         lines += [f"ข้อมูล {ref:%H:%M} น. {ref:%d/%m} · ใช้ได้ถึง {ref:%H:%M} น. {ref + pd.Timedelta(days=1):%d/%m}"]
         if ref.strftime("%H:%M") != "20:30":
             lines.append("(รอบบ่าย: มีผลจริงเพียงไม่กี่วัน เชื่อถือได้น้อยกว่ารอบ 20:30)")

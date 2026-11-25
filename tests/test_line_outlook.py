@@ -601,3 +601,44 @@ class WaitRiskTest(unittest.TestCase):
         self.assertNotIn("ย้อนหลังรอบ่าย", L.advice_line(self._f(), {"amt": None, "when": "23:30"}))  # ไม่รู้เรท
         self.assertNotIn("ย้อนหลังรอบ่าย", L.advice_line(self._f(), None))
         self.assertTrue(L.advice_line(self._f("G95"), {"amt": 2.00, "when": "00:00"}).startswith("⏳"))   # G95 ไม่ใช้กฎนี้
+
+
+class TonightChangeTest(unittest.TestCase):
+    """คืน 25/11/2026 : ผู้ค้าประกาศขึ้นแต่การ์ดแสดงแค่คำทาย 24 ชม. → แยก "คืนนี้ตามประกาศ (แน่นอน)" พร้อมตัวเลข"""
+    def _inp(self):
+        inp = _inp(asof="2026-11-25 20:18", ref="2026-11-25 20:30")
+        rows = [["2026-11-25", "16:31", "IRPC", "UP", "ALL", "23:30", "DIESEL:+1.00 GASOHOL:+1.00"],
+                ["2026-11-25", "16:37", "PTT", "UP", "ALL", "23:30", "DIESEL:+0.43 GASOHOL:+0.54"],
+                ["2026-11-25", "17:07", "SFL", "UP", "ALL", "23:59", "DIESEL:+2.00"],
+                ["2026-11-25", "17:10", "BC", "UP", "ALL", "00:00", ""],
+                ["2026-11-25", "10:05", "IRPC", "DOWN", "ALL", "10:05", ""]]                         # ลดไปแล้วตอนเช้า ไม่นับ
+        h = pd.DataFrame(rows, columns=["msg_date", "msg_time", "provider", "direction", "scope", "stated_time", "rates"])
+        h["ts"] = pd.to_datetime(h.msg_date + " " + h.msg_time)
+        inp["notices"] = L.notices(h, pd.Timestamp("2026-11-25 20:18"))
+        inp["prices_now"] = {"B7": {"ไออาร์|ระยอง": 38.20, "ปตท|สระบุรี-ใหญ่/นอก": 38.30, "สตาร์ฟูเอลส์ (ดาว)|ขอนแก่น": 38.90,
+                                    "บางจาก|บางปะอิน": 38.60, "บางจาก (BSRC)|สระบุรี": 38.70}}
+        return inp
+
+    def test_numbers(self):
+        c = L.tonight_change(self._inp(), "B7")
+        self.assertEqual((c["dir"], c["lo"], c["hi"], c["first"], c["last"], c["n"], c["n_norate"]), ("UP", 0.43, 2.0, "23:30", "00:00", 4, 1))
+        # ต่ำสุดหลังปรับ : ไออาร์ 39.20 , ปตท 38.73 , SFL 40.90 , บางจาก (ไม่แจ้งเรท ใช้ราคาเดิม) 38.60 , BSRC ไม่ได้ประกาศ 38.70 → 38.60
+        self.assertEqual((c["now"], c["after"]), (38.2, 38.6))
+        self.assertIn("ไม่รวมเรทของ BC ที่ยังไม่แจ้ง", c["after_note"])
+        self.assertEqual(L.provider_code("บางจาก (BSRC)"), "BSRC")
+        self.assertEqual(L.provider_code("สตาร์ฟูเอลส์ (ดาว)"), "SFL")
+
+    def test_text_and_flex(self):
+        text = L.build_message(self._inp(), _log(), on_demand=True)[0]
+        self.assertIn("คืนนี้ตามประกาศของผู้ค้า (ยังไม่มีผล)\nดีเซล ⬆ ขึ้น +0.43 ถึง +2.00 · 23:30–00:00 น. (4 เจ้า)", text)
+        self.assertIn("≈ ราคาต่ำสุดตลาดหลังปรับ 38.20 → 38.60 (+0.40) [ประมาณจากเรทที่ประกาศ · ไม่รวมเรทของ BC ที่ยังไม่แจ้ง]", text)
+        self.assertIn("แก๊สโซฮอล์ 95 ⬆ ขึ้น +0.54 ถึง +1.00", text)
+        self.assertIn("พยากรณ์ถึง 20:30 น. 26/11 (หลังการปรับข้างบน", text)
+        import line_flex as F
+        texts = [n["text"] for n in _texts(F.build_flex(self._inp(), _log(), None))]
+        self.assertIn("คืนนี้ตามประกาศของผู้ค้า (ยังไม่มีผล)", texts)
+        self.assertIn("ดีเซล ⬆ ขึ้น +0.43 ถึง +2.00 · 23:30–00:00 น. (4 เจ้า)", texts)
+
+    def test_no_notice(self):
+        self.assertIsNone(L.tonight_change(_inp(), "B7"))
+        self.assertNotIn("คืนนี้ตามประกาศ", L.build_message(_inp(), _log(), on_demand=True)[0])
