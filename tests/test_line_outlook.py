@@ -576,3 +576,28 @@ class EarlyFundRoundTest(unittest.TestCase):
         self.assertEqual(car[0]["header"]["contents"][0]["text"], "🧭 ควรโหลดเมื่อไร")
         texts = [n["text"] for n in _texts(flex)]
         self.assertIn("ออกล่วงหน้าเพราะประกาศกองทุนออกแล้ว · ใช้ข้อมูลถึง 19:22 น. · อัปเดตอีกครั้งหลัง 20:30 น.", texts)
+
+
+class WaitRiskTest(unittest.TestCase):
+    """ดีเซล "รอบ่าย" ในคืนที่ผู้ค้าประกาศขึ้น (exp_headsup_rate.py ; 23/11/2026 ทายลง → จริง +0.39)"""
+    def _f(self, fuel="B7"):
+        return {"ref": "2026-11-25 20:30", "fuel_code": fuel, "h24": {"tier": "UNCLEAR", "grade": "ต่ำ"},
+                "profile": [{"hours": 20, "call": "DOWN", "ok": True, "right": 0.69, "n": 186}]}
+
+    def test_block_when_big_rise(self):
+        text = L.advice_line(self._f(), {"amt": 2.00, "when": "00:00"})
+        self.assertTrue(text.startswith("⚖ ไม่ฟันธง — ผู้ค้าประกาศขึ้นแรงคืน 25/11"))
+        self.assertIn("คืนที่ประกาศขึ้น ≥1.00 ย้อนหลังรอบ่ายแล้วถูกกว่า 58% แพงกว่า 22% (เฉลี่ยประหยัด 0.22 บาท/ลิตร จาก 45 ครั้ง)", text)
+        self.assertIn("ถ้ารับความเสี่ยงไม่ได้ ให้โหลดก่อน 00:00 น. คืน 25/11", text)
+        self.assertNotIn("⏳", text)
+
+    def test_warn_when_moderate_rise(self):
+        text = L.advice_line(self._f(), {"amt": 0.43, "when": "23:30"})
+        self.assertTrue(text.startswith("⏳ รอโหลดบ่ายวันที่ 26/11"))
+        self.assertIn("⚠ คืนที่ประกาศขึ้น ≥0.30 ย้อนหลังรอบ่ายแล้วถูกกว่า 63% แพงกว่า 20% (เฉลี่ยประหยัด 0.24 บาท/ลิตร)", text)
+
+    def test_unchanged_cases(self):
+        self.assertNotIn("ย้อนหลังรอบ่าย", L.advice_line(self._f(), {"amt": 0.20, "when": "23:30"}))   # เรทเล็ก
+        self.assertNotIn("ย้อนหลังรอบ่าย", L.advice_line(self._f(), {"amt": None, "when": "23:30"}))  # ไม่รู้เรท
+        self.assertNotIn("ย้อนหลังรอบ่าย", L.advice_line(self._f(), None))
+        self.assertTrue(L.advice_line(self._f("G95"), {"amt": 2.00, "when": "00:00"}).startswith("⏳"))   # G95 ไม่ใช้กฎนี้
