@@ -633,7 +633,7 @@ class TonightChangeTest(unittest.TestCase):
     def test_text_and_flex(self):
         text = L.build_message(self._inp(), _log(), on_demand=True)[0]
         self.assertIn("คืนนี้ตามประกาศของผู้ค้า (ยังไม่มีผล)\nดีเซล ⬆ ขึ้น +0.43 ถึง +2.00 · 23:30–00:00 น. (4 เจ้า)", text)
-        self.assertIn("≈ ราคาต่ำสุดตลาดหลังปรับ 38.20 → 38.60 (+0.40) [ประมาณจากเรทที่ประกาศ · ไม่รวมเรทของ BC ที่ยังไม่แจ้ง]", text)
+        self.assertIn("≈ ราคาต่ำสุดตลาดหลังปรับ 38.20 → 38.60 (+0.40) [ประมาณจากเรทที่ประกาศ · ย้อนหลังคลาดเฉลี่ย ±0.36 · ไม่รวมเรทของ BC ที่ยังไม่แจ้ง]", text)
         self.assertIn("แก๊สโซฮอล์ 95 ⬆ ขึ้น +0.54 ถึง +1.00", text)
         self.assertIn("พยากรณ์ถึง 20:30 น. 26/11 (หลังการปรับข้างบน", text)
         import line_flex as F
