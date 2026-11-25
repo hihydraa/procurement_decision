@@ -108,10 +108,30 @@ def dispatch_bubble(inp: dict):
     return bubble("dispatch", "🚚 ส่งรถตอนนี้ดีไหม", f"ประเมิน {asof:%H:%M} น. {asof:%d/%m} · ระยะเดินทาง {rows[0][2]['lead']} ชม.", body)
 
 
+def tonight_box(inp: dict):
+    """กล่อง "คืนนี้ตามประกาศ" (แน่นอน) ด้านบนของการ์ดราคาหน้าคลัง ; ไม่มีประกาศ = None"""
+    rows = []
+    for fuel, name in L.FUELS:
+        c = L.tonight_change(inp, fuel)
+        if not c:
+            continue
+        v = L.tonight_view(name, c)
+        tone = "up" if c["dir"] == "UP" else "down" if c["dir"] == "DOWN" else "flat"
+        rows.append(txt(v[0], "sm", C[tone], bold=True, margin="sm"))
+        rows += [txt(x, "xxs", C["sub"]) for x in v[1:]]
+    if not rows:
+        return None
+    return {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF", "cornerRadius": "10px", "paddingAll": "12px",
+            "borderWidth": "1px", "borderColor": C["track"], "contents": [txt("คืนนี้ตามประกาศของผู้ค้า (ยังไม่มีผล)", "xs", C["ink"], bold=True)] + rows}
+
+
 def jobber_bubble(inp: dict, bad: dict, on_demand: bool):
     fuels, body, ref = inp.get("fuels", {}), [], None
+    tb = tonight_box(inp)
+    if tb:
+        body += [tb, txt("พยากรณ์ 24 ชม. (หลังการปรับข้างบน ผู้ค้าอาจปรับต่อระหว่างวัน)", "xs", C["sub"], bold=True, margin="lg")]
     for i, (fuel, name) in enumerate(L.FUELS):
-        margin = "none" if i == 0 else "md"
+        margin = "none" if i == 0 and not tb else "md"
         if bad[fuel]:
             body.append(tone_box("flat", [title_row(name, "ไม่มีคำทาย", "flat"), txt(bad[fuel], "xxs", C["sub"])], margin))
             continue
