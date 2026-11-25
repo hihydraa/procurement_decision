@@ -611,7 +611,8 @@ class TonightChangeTest(unittest.TestCase):
                 ["2026-11-25", "16:37", "PTT", "UP", "ALL", "23:30", "DIESEL:+0.43 GASOHOL:+0.54"],
                 ["2026-11-25", "17:07", "SFL", "UP", "ALL", "23:59", "DIESEL:+2.00"],
                 ["2026-11-25", "17:10", "BC", "UP", "ALL", "00:00", ""],
-                ["2026-11-25", "10:05", "IRPC", "DOWN", "ALL", "10:05", ""]]                         # ลดไปแล้วตอนเช้า ไม่นับ
+                ["2026-11-25", "10:05", "IRPC", "DOWN", "ALL", "10:05", ""],                         # ลดไปแล้วตอนเช้า ไม่นับ
+                ["2026-11-25", "16:32", "", "DOWN", "ALL", "", ""]]                                  # ไม่มีเวลาและเรท ไม่นับ
         h = pd.DataFrame(rows, columns=["msg_date", "msg_time", "provider", "direction", "scope", "stated_time", "rates"])
         h["ts"] = pd.to_datetime(h.msg_date + " " + h.msg_time)
         inp["notices"] = L.notices(h, pd.Timestamp("2026-11-25 20:18"))
@@ -625,6 +626,7 @@ class TonightChangeTest(unittest.TestCase):
         # ต่ำสุดหลังปรับ : ไออาร์ 39.20 , ปตท 38.73 , SFL 40.90 , บางจาก (ไม่แจ้งเรท ใช้ราคาเดิม) 38.60 , BSRC ไม่ได้ประกาศ 38.70 → 38.60
         self.assertEqual((c["now"], c["after"]), (38.2, 38.6))
         self.assertIn("ไม่รวมเรทของ BC ที่ยังไม่แจ้ง", c["after_note"])
+        self.assertEqual(c["after_by"], "ต่ำสุดหลังปรับมาจาก บางจาก บางปะอิน ซึ่งยังไม่แจ้งเรท")
         self.assertEqual(L.provider_code("บางจาก (BSRC)"), "BSRC")
         self.assertEqual(L.provider_code("สตาร์ฟูเอลส์ (ดาว)"), "SFL")
 
