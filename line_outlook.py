@@ -379,6 +379,8 @@ def tonight_change(inp: dict, fuel: str) -> dict | None:
 
 
 TONIGHT_ARROW = {"UP": "⬆ ขึ้น", "DOWN": "⬇ ลง", "MIX": "↕ ขึ้นและลง"}
+# ความคลาดเคลื่อนเฉลี่ยของ "ราคาต่ำสุดหลังปรับ" เทียบราคาจริง 08:30 วันถัดไป (exp_announced_min.py , 7/2024–10/2026 : ดีเซล 121 คืน , G95 115 คืน)
+TONIGHT_MAE = {"ดีเซล": 0.36, "แก๊สโซฮอล์ 95": 0.28}
 
 
 def tonight_view(name: str, c: dict) -> list:
@@ -393,7 +395,8 @@ def tonight_view(name: str, c: dict) -> list:
     head = f"{name} {TONIGHT_ARROW[c['dir']]} {size}" + (f" · {when} น." if when else "") + f" ({c['n']} เจ้า)"
     lines = [head]
     if c["now"] is not None and c["after"] is not None:
-        lines.append(f"≈ ราคาต่ำสุดตลาดหลังปรับ {c['now']:.2f} → {c['after']:.2f} ({c['after'] - c['now']:+.2f}) [ประมาณจากเรทที่ประกาศ"
+        mae = f" · ย้อนหลังคลาดเฉลี่ย ±{TONIGHT_MAE[name]:.2f}" if name in TONIGHT_MAE else ""
+        lines.append(f"≈ ราคาต่ำสุดตลาดหลังปรับ {c['now']:.2f} → {c['after']:.2f} ({c['after'] - c['now']:+.2f}) [ประมาณจากเรทที่ประกาศ{mae}"
                      + (f" · {c['after_note']}" if c["after_note"] else "") + "]")
         if c.get("after_by"):
             lines.append(c["after_by"])
