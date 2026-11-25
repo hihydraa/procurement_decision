@@ -24,6 +24,7 @@ import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 import requests
 
@@ -324,7 +325,9 @@ def tonight_change(inp: dict, fuel: str) -> dict | None:
     grp = FUEL_GROUP[fuel]
     if pd.Timestamp(inp["asof"]).hour < TONIGHT_FROM_HOUR:      # ช่วงเช้า–บ่าย ประกาศมักเป็นการปรับระหว่างวัน ไม่ใช่ "คืนนี้"
         return None
-    hits = [n for n in (inp.get("notices") or []) if n["pending"] and (n["scope"] in ("ALL", grp) or grp in parse_rates(n["rates"]))]
+    # นับเฉพาะประกาศที่บอกเวลามีผลหรือเรท : ข้อความแค่ "มีลง/มีขึ้น" ไม่มีเวลาและไม่มีเรท บอกไม่ได้ว่าเป็นของคืนนี้ (25/11/2026 : "มีลง" 16:32 ทำให้ขึ้นเป็น ขึ้นและลง)
+    hits = [n for n in (inp.get("notices") or []) if n["pending"] and (n["scope"] in ("ALL", grp) or grp in parse_rates(n["rates"]))
+            and (n["stated"] or grp in parse_rates(n["rates"]))]
     if not hits:
         return None
     rate = {}
@@ -338,7 +341,7 @@ def tonight_change(inp: dict, fuel: str) -> dict | None:
     dirs = {n["dir"] for n in hits}
     out = {"dir": dirs.pop() if len(dirs) == 1 else "MIX", "lo": min(known) if known else None, "hi": max(known) if known else None,
            "first": whens[0] if whens else "", "last": whens[-1] if whens else "", "n": len({n["provider"] for n in hits}),
-           "n_norate": sum(1 for v in rate.values() if all(x is None for x in v)), "now": None, "after": None, "after_note": ""}
+           "n_norate": sum(1 for v in rate.values() if all(x is None for x in v)), "now": None, "after": None, "after_note": "", "after_by": ""}
     prices = (inp.get("prices_now") or {}).get(fuel) or {}
     if prices:
         code_rate = {}
@@ -349,17 +352,23 @@ def tonight_change(inp: dict, fuel: str) -> dict | None:
             vals = [x for x in v if x is not None]
             code_rate[c] = max(vals, key=abs) if vals else None
         now = min(prices.values())
-        after, unknown = [], set()
+        after, unknown, state = [], set(), []
         for key, p in prices.items():
             c = provider_code(key.split("|")[0])
-            if not c:
+            if not c or c not in code_rate:
                 after.append(p)
-            elif c in code_rate and code_rate[c] is None:
+                state.append("ไม่ได้ประกาศปรับ")
+            elif code_rate[c] is None:
                 unknown.add(c)
                 after.append(p)                      # ยังไม่แจ้งเรท : ใช้ราคาเดิม (ขอบล่าง)
+                state.append("ยังไม่แจ้งเรท")
             else:
-                after.append(p + (code_rate.get(c) or 0.0))
-        out["now"], out["after"] = round(now, 2), round(min(after), 2)
+                after.append(p + code_rate[c])
+                state.append("")
+        i = int(np.argmin(after))
+        out["now"], out["after"] = round(now, 2), round(after[i], 2)
+        if state[i]:                                 # ราคาต่ำสุดหลังปรับมาจากเจ้าที่ไม่รู้การปรับ : บอกให้รู้ว่าตัวเลขนี้อาจต่ำเกินจริง
+            out["after_by"] = f"ต่ำสุดหลังปรับมาจาก {list(prices)[i].replace('|', ' ')} ซึ่ง{state[i]}"
         notes = []
         if unknown:
             notes.append(f"ไม่รวมเรทของ {', '.join(sorted(unknown))} ที่ยังไม่แจ้ง")
@@ -386,6 +395,8 @@ def tonight_view(name: str, c: dict) -> list:
     if c["now"] is not None and c["after"] is not None:
         lines.append(f"≈ ราคาต่ำสุดตลาดหลังปรับ {c['now']:.2f} → {c['after']:.2f} ({c['after'] - c['now']:+.2f}) [ประมาณจากเรทที่ประกาศ"
                      + (f" · {c['after_note']}" if c["after_note"] else "") + "]")
+        if c.get("after_by"):
+            lines.append(c["after_by"])
     return lines
 
 
